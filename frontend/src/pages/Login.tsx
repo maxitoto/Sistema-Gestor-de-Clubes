@@ -1,12 +1,24 @@
 import { useState } from 'react';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { supabase } from '#services/supabaseClient';
+import { useAuth } from '#hooks/useAuth';
 import { Box, Button, TextField, Typography, Paper, Alert } from '@mui/material';
 
 export const Login = () => {
+  // Traemos la sesión y la función para navegar
+  const { session } = useAuth();
+  const navigate = useNavigate();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // PROTECCIÓN DECLARATIVA: 
+  // Si el componente detecta que ya hay una sesión activa, lo saca del login inmediatamente.
+  if (session) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,22 +30,23 @@ export const Login = () => {
       password,
     });
 
-    if (error) setError(error.message);
-    setLoading(false);
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    } else {
+      // NAVEGACIÓN IMPERATIVA:
+      // El login fue un éxito, lo mandamos al dashboard y reemplazamos el historial
+      // para que si toca el botón "Atrás" en el navegador, no vuelva al login.
+      navigate('/dashboard', { replace: true });
+    }
   };
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', bgcolor: 'grey.100' }}>
       <Paper elevation={3} sx={{ p: 4, width: '100%', maxWidth: 400 }}>
-        <Typography 
-            variant="h5" 
-            component="h1" 
-            gutterBottom 
-            align="center" 
-            sx={{ fontWeight: 'bold' }}
-            >
-            Club Los Andes
-            </Typography>
+        <Typography variant="h5" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold' }}>
+          Club Los Andes
+        </Typography>
         <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 3 }}>
           Acceso al sistema de gestión
         </Typography>
