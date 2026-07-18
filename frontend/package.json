@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/sync-ts.js && vite",
-    "build": "node scripts/sync-ts.js && tsc -b && vite build",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "types:sync": "npx supabase gen types typescript --local > src/types/model.ts"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
