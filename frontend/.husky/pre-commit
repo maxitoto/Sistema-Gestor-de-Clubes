@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+
+cd frontend
+pnpm exec tsc -b
+pnpm exec lint-staged
