@@ -45,7 +45,7 @@ export const Login = () => {
     <Box sx={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', bgcolor: 'grey.100' }}>
       <Paper elevation={3} sx={{ p: 4, width: '100%', maxWidth: 400 }}>
         <Typography variant="h5" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold' }}>
-          Club Los Andes
+          Sistema de Gestión de Clubes
         </Typography>
         <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 3 }}>
           Acceso al sistema de gestión
