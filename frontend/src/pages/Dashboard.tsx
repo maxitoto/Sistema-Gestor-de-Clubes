@@ -23,7 +23,7 @@ export default function Dashboard () {
         {isLoading && <CircularProgress />}
         {isError && <Alert severity="error">{error.message}</Alert>}
 
-        {!isLoading && !isError && (
+        {!isLoading && !isError && socios && (
           <ul>
             {socios.map((socio) => (
               <li key={socio.id}>
@@ -32,6 +32,7 @@ export default function Dashboard () {
             ))}
           </ul>
         )}
+        {!socios || socios.length === 0 && <p>No hay socios registrados.</p>}
       </Paper>
     </Box>
   );
