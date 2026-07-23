@@ -1,4 +1,3 @@
-```markdown
 # Backend & Infraestructura - Supabase
 
 Este directorio contiene toda la infraestructura de backend del sistema, estructurada alrededor de PostgreSQL, Row Level Security (RLS) y Edge Functions potenciadas por Hono y Deno.
@@ -34,4 +33,3 @@ El backend sigue un contrato estricto de respuesta que permite al frontend escal
 - `supabase db reset`: Borra la DB local, reaplica migraciones y ejecuta el `seed.sql`.
 - `supabase functions serve [nombre-funcion]`: Sirve localmente una Edge Function para desarrollo. Omitir el nombre sirve todas las funciones.
 - `supabase gen types typescript --local > ../frontend/src/types/model.ts`: Sincroniza la estructura actual de Postgres en un archivo de tipos de TypeScript para el frontend.
-```

@@ -1,4 +1,3 @@
-```markdown
 # Sistema de Gestión de Club (Enterprise-Grade)
 
 Este monorepo contiene el código fuente completo del Sistema de Gestión de Club. La arquitectura está dividida en dos aplicaciones principales diseñadas para trabajar en conjunto bajo estrictos contratos de API y tipado estricto (TypeScript).
@@ -33,4 +32,3 @@ Para ejecutar este proyecto en tu entorno local, necesitas tener instalado:
     pnpm dev
 
     ```
-```

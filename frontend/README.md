@@ -1,4 +1,3 @@
-```markdown
 # Frontend - Sistema de Gestión de Club
 
 Aplicación cliente de alto rendimiento orientada a la gestión administrativa del club. Construida con un enfoque en la escalabilidad, manejo explícito de errores y minimización de código repetitivo.
@@ -30,5 +29,3 @@ Los componentes (ej. `Dashboard.tsx`) consumen la API exclusivamente a través d
 - `pnpm build`: Transpila y empaqueta la aplicación para producción.
 - `pnpm preview`: Previsualiza la build de producción localmente.
 - `pnpm lint`: Ejecuta ESLint para mantener el estándar del código base.
-
-```
