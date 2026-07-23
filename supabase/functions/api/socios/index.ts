@@ -93,7 +93,4 @@ app.delete('/:id', async (c) => {
   return c.body(null, 204);
 });
 
-// ==========================================
-// INICIALIZACIÓN
-// ==========================================
-Deno.serve(app.fetch);
+export default app;

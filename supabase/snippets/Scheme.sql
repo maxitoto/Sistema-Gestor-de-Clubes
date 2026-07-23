@@ -30,8 +30,7 @@ certificado_vencimiento DATE,
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 -- Asegurar que solo exista una configuración de club
-ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id =
-'00000000-0000-0000-0000-000000000000'::uuid);
+--ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
 CREATE TABLE usuarios (
 -- El ID debe coincidir con auth.users.id de Supabase
 id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -244,3 +243,45 @@ $$ language 'plpgsql';
 CREATE TRIGGER update_socios_modtime BEFORE UPDATE ON socios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_cuotas_modtime BEFORE UPDATE ON cuotas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+
+--POLITICAS!!
+-- 1. Permisos base (Siguen siendo necesarios para que PostgreSQL te deje llegar al RLS)
+GRANT ALL ON TABLE public.club TO authenticated;
+GRANT ALL ON TABLE public.club TO service_role;
+
+-- 2. Aseguramos que RLS esté activado
+ALTER TABLE public.club ENABLE ROW LEVEL SECURITY;
+
+-- 3. Limpiamos cualquier política parche que hayamos creado antes
+DROP POLICY IF EXISTS "Permitir lectura de club" ON public.club;
+DROP POLICY IF EXISTS "Permitir modificar club" ON public.club;
+DROP POLICY IF EXISTS "Acceso total a la configuracion del club" ON public.club;
+
+-- ========================================================
+-- 4. LAS POLÍTICAS CORRECTAS (Verificación estricta de rol)
+-- ========================================================
+
+-- A. Solo los Administradores pueden LEER la configuración
+CREATE POLICY "Admins pueden leer club" 
+ON public.club 
+FOR SELECT 
+TO authenticated 
+USING (
+  (SELECT rol FROM public.usuarios WHERE id = auth.uid()) = 'admin'
+);
+
+-- B. Solo los Administradores pueden CREAR, MODIFICAR o BORRAR
+CREATE POLICY "Admins pueden modificar club" 
+ON public.club 
+FOR ALL 
+TO authenticated 
+USING (
+  (SELECT rol FROM public.usuarios WHERE id = auth.uid()) = 'admin'
+)
+WITH CHECK (
+  (SELECT rol FROM public.usuarios WHERE id = auth.uid()) = 'admin'
+);
+
+-- 5. Forzamos la actualización de la caché de permisos
+NOTIFY pgrst, 'reload schema';

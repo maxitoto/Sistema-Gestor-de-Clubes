@@ -34,4 +34,4 @@ app.post('/', async (c) => {
   return c.json({ success: true, info }, 200);
 });
 
-Deno.serve(app.fetch);
+export default app;
