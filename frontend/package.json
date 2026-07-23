@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "types:sync": "npx supabase gen types typescript --local > src/types/model.ts",
-    "prepare": "husky install"
+    "prepare": "cd .. && husky install frontend/.husky"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
