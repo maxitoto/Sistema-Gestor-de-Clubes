@@ -10,7 +10,7 @@ export default function Dashboard () {
   });
 
   return (
-    <Box sx={{ p: 4, bgcolor: 'grey.50', minHeight: '100vh' }}>
+    <Box sx={{ p: 4, minHeight: '100vh' }}>
       <Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 'bold' }}>
         Dashboard del Club
       </Typography>

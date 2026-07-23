@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { ProtectedRoute } from './ProtectedRoute';
 import { MainLayout } from '#components/layout/MainLayout';
+import { AuthLayout } from '#components/layout/AuthLayout';
 
 import { Login } from '#pages/Login';
 import Dashboard from '#pages/Dashboard';
@@ -8,8 +9,13 @@ import Socios from '#pages/Socios';
 
 export const routerConfig = createBrowserRouter([
   {
-    path: '/login',
-    element: <Login />,
+    element: <AuthLayout />,
+    children: [
+      {
+        path: '/login',
+        element: <Login />,
+      },
+    ]
   },
   {
     element: <ProtectedRoute />,

@@ -42,7 +42,7 @@ export const Login = () => {
   };
 
   return (
-    <Box sx={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', bgcolor: 'grey.100' }}>
+    <Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <Paper elevation={3} sx={{ p: 4, width: '100%', maxWidth: 400 }}>
         <Typography variant="h5" component="h1" gutterBottom align="center" sx={{ fontWeight: 'bold' }}>
           Sistema de Gestión de Clubes

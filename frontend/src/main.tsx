@@ -1,8 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ThemeProvider, CssBaseline } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { lightTheme } from '#styles/theme'
+import { ThemeModeProvider } from '#providers/ThemeModeProvider'
 import App from './App.tsx'
 
 export const queryClient = new QueryClient({
@@ -18,10 +17,9 @@ export const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider theme={lightTheme}>
-        <CssBaseline/>
+      <ThemeModeProvider>
         <App/>
-      </ThemeProvider>
+      </ThemeModeProvider>
     </QueryClientProvider>
   </StrictMode>,
-)
+);
