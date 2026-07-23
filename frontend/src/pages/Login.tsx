@@ -4,7 +4,7 @@ import { supabase } from '#services/supabaseClient';
 import { useAuth } from '#hooks/useAuth';
 import { Box, Button, TextField, Typography, Paper, Alert } from '@mui/material';
 
-export const Login = () => {
+export default function Login () {
   // Traemos la sesión y la función para navegar
   const { session } = useAuth();
   const navigate = useNavigate();

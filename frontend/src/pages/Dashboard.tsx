@@ -1,13 +1,9 @@
 import { Box, Typography, Paper, CircularProgress, Alert } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '#services/apis';
+import { useGetAll } from '#hooks/useCrud';
 
 export default function Dashboard () {
 
-  const { data: socios, isLoading, isError, error } = useQuery({
-    queryKey: ['socios'], // Identificador único para la caché
-    queryFn: api.socios.getAll,
-  });
+  const { data: socios, isLoading, isError, error } = useGetAll('socios');
 
   return (
     <Box sx={{ p: 4, minHeight: '100vh' }}>

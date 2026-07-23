@@ -2,8 +2,12 @@ import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '#hooks/useAuth';
 import { Box, CircularProgress } from '@mui/material';
 
-export const ProtectedRoute = () => {
-  const { session, isLoading } = useAuth();
+interface Props {
+  requiereAdmin?: boolean;
+}
+
+export const ProtectedRoute = ({ requiereAdmin = false }: Props) => {
+  const { session, perfil, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -13,8 +17,14 @@ export const ProtectedRoute = () => {
     );
   }
 
+  // 1. ¿Está logueado?
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // 2. ¿Tiene permiso de admin si la ruta lo requiere?
+  if (requiereAdmin && perfil?.rol !== 'admin') {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <Outlet />;
