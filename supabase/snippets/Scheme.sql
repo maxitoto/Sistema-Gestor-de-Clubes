@@ -167,6 +167,15 @@ updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 -- Índice GIN para búsquedas avanzadas (texto libre) en la descripción del gasto
 CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion gin_trgm_ops);
 
+-- Índices de rendimiento y búsqueda
+CREATE INDEX idx_socios_dni ON socios(dni);
+CREATE INDEX idx_socios_numero ON socios(numero_socio);
+CREATE INDEX idx_cuotas_periodo ON cuotas(periodo_mes, periodo_anio);
+CREATE INDEX idx_pagos_cuota ON pagos(cuota_id);
+CREATE INDEX idx_comprobantes_pago ON comprobantes(pago_id);
+CREATE INDEX idx_gastos_fecha ON gastos(fecha);
+CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
+
 --=================================================================================
 -- 7. MÓDULO DE SISTEMA (LOGS Y COMUNICACIONES)
 --=================================================================================
