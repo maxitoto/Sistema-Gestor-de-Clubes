@@ -22,6 +22,7 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 nombre VARCHAR(255) NOT NULL,
 cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
+email_contacto VARCHAR(255) NOT NULL,
 logo_url TEXT,
 punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
@@ -100,6 +101,9 @@ fecha_baja DATE,
 estado estado_inscripcion NOT NULL DEFAULT 'activa',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+-- Índice único parcial: Solo puede haber una inscripción 'activa' por socio y categoría.
+CREATE UNIQUE INDEX idx_inscripcion_activa_unica ON inscripciones(socio_id, categoria_id) 
+WHERE estado = 'activa';
 --=================================================================================
 -- 5. MÓDULO FINANCIERO (FACTURACIÓN Y PAGOS)
 --=================================================================================
@@ -222,7 +226,8 @@ p.monto AS monto_positivo,
 p.medio_pago AS metodo,
 p.referencia_pago AS referencia,
 'Cobro Cuota' AS concepto,
-p.estado::text AS estado
+p.estado::text AS estado,
+p.usuario_id AS usuario_id
 FROM pagos p
 WHERE p.estado = 'completado'
 UNION ALL
@@ -234,7 +239,8 @@ g.fecha::timestamp with time zone AS fecha,
 g.metodo_pago AS metodo,
 g.referencia_banco AS referencia,
 g.concepto AS concepto,
-g.estado::text AS estado
+g.estado::text AS estado,
+g.usuario_id AS usuario_id
 FROM gastos g
 WHERE g.estado = 'activo';
 --=================================================================================
