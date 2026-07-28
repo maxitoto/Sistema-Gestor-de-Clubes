@@ -221,6 +221,18 @@ destinatarios_count INTEGER NOT NULL DEFAULT 0,
 estado estado_email NOT NULL DEFAULT 'procesando',
 fecha_envio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+CREATE TABLE email_destinatarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_log_id UUID NOT NULL REFERENCES email_logs(id) ON DELETE CASCADE,
+  socio_id UUID REFERENCES socios(id) ON DELETE SET NULL, -- -- NULL si se mandó a un maiL suelto
+  email VARCHAR(255) NOT NULL,
+  estado estado_email NOT NULL DEFAULT 'procesando',
+  event_id VARCHAR(150) UNIQUE, -- id evento Resend (CU-07.4)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE INDEX idx_email_dest_log ON email_destinatarios(email_log_id);
+CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- para cruzar el webhook por direccion (CU-07.4 paso 5)
+
 CREATE TABLE cuota_job_logs (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 periodo_mes INTEGER NOT NULL CHECK (periodo_mes BETWEEN 1 AND 12),
