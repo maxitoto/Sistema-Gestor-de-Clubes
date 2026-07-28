@@ -5,11 +5,11 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 --=================================================================================
 CREATE TYPE rol_usuario AS ENUM ('admin', 'responsable');
 CREATE TYPE estado_basico AS ENUM ('activo', 'inactivo');
-CREATE TYPE estado_cuota AS ENUM ('pendiente', 'pagada', 'anulada');
+CREATE TYPE estado_cuota AS ENUM ('pendiente', 'pagada');
 CREATE TYPE medio_pago AS ENUM ('efectivo', 'transferencia');
 CREATE TYPE estado_pago AS ENUM ('completado', 'anulado');
 CREATE TYPE tipo_comprobante AS ENUM ('factura', 'nota_credito');
-CREATE TYPE estado_fiscal AS ENUM ('valido', 'pendiente_cae', 'anulacion_pendiente','fallido');
+CREATE TYPE estado_fiscal AS ENUM ('valido', 'pendiente_cae', 'anulacion_pendiente','anulado','fallido');
 CREATE TYPE estado_gasto AS ENUM ('activo', 'anulado');
 CREATE TYPE estado_inscripcion AS ENUM ('activa', 'inactiva');
 CREATE TYPE estado_job AS ENUM ('procesando', 'exitoso', 'fallido');
@@ -78,7 +78,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 nombre VARCHAR(100) NOT NULL UNIQUE,
 descripcion TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE TABLE categorias (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -88,8 +89,8 @@ arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual >= 0),
 edad_min INTEGER CHECK (edad_min >= 0),
 edad_max INTEGER CHECK (edad_max >= edad_min),
 estado estado_basico NOT NULL DEFAULT 'activo',
-
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 UNIQUE(deporte_id, nombre) -- No pueden haber dos "Sub-17" en Fútbol
 );
 CREATE TABLE inscripciones (
@@ -99,7 +100,8 @@ categoria_id UUID NOT NULL REFERENCES categorias(id) ON DELETE RESTRICT,
 fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
 fecha_baja DATE,
 estado estado_inscripcion NOT NULL DEFAULT 'activa',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 -- Índice único parcial: Solo puede haber una inscripción 'activa' por socio y categoría.
 CREATE UNIQUE INDEX idx_inscripcion_activa_unica ON inscripciones(socio_id, categoria_id) 
@@ -128,20 +130,30 @@ medio_pago medio_pago NOT NULL,
 referencia_pago VARCHAR(255),
 fecha_pago TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 estado estado_pago NOT NULL DEFAULT 'completado',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+CREATE UNIQUE INDEX uq_pago_vigente_por_cuota
+ON pagos(cuota_id) WHERE estado = 'completado'; -- indice para como maximo un pago completado
 
 CREATE TABLE comprobantes (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE RESTRICT,
+comprobante_origen_id UUID REFERENCES comprobantes(id) ON DELETE SET NULL, -- Relaciona Nota de Crédito con Factura Original, null si es tipo factura
 tipo tipo_comprobante NOT NULL,
+punto_venta INTEGER NOT NULL DEFAULT 1,
 numero_comprobante VARCHAR(50),
 cae VARCHAR(50),
 cae_vencimiento DATE,
 estado_fiscal estado_fiscal NOT NULL DEFAULT 'pendiente_cae',
 pdf_url TEXT,
 motivo_anulacion TEXT,
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT unique_comprobante_pv_tipo_num UNIQUE (punto_venta, tipo, numero_comprobante), -- Impide que existan dos Facturas con el mismo número en el mismo Punto de Venta
+CONSTRAINT chk_nc_origen CHECK (
+  (tipo = 'factura'      AND comprobante_origen_id IS NULL) OR
+  (tipo = 'nota_credito' AND comprobante_origen_id IS NOT NULL)
+)
 );
 --=================================================================================
 -- 6. MÓDULO DE GASTOS
@@ -149,8 +161,10 @@ created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 CREATE TABLE categorias_gasto (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 nombre VARCHAR(100) NOT NULL UNIQUE,
+descripcion TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE TABLE gastos (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -174,8 +188,12 @@ CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion gin_tr
 -- Índices de rendimiento y búsqueda
 CREATE INDEX idx_socios_dni ON socios(dni);
 CREATE INDEX idx_socios_numero ON socios(numero_socio);
+CREATE INDEX idx_socios_apellido ON socios(apellido);
+CREATE INDEX idx_categorias_deporte ON categorias(deporte_id);
 CREATE INDEX idx_cuotas_periodo ON cuotas(periodo_mes, periodo_anio);
+CREATE INDEX idx_cuotas_estado ON cuotas(estado);
 CREATE INDEX idx_pagos_cuota ON pagos(cuota_id);
+CREATE INDEX idx_pagos_fecha ON pagos(fecha_pago);
 CREATE INDEX idx_comprobantes_pago ON comprobantes(pago_id);
 CREATE INDEX idx_gastos_fecha ON gastos(fecha);
 CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
@@ -210,9 +228,10 @@ estado estado_job NOT NULL DEFAULT 'procesando',
 cuotas_generadas INTEGER DEFAULT 0,
 cuotas_omitidas INTEGER DEFAULT 0,
 fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-fecha_fin TIMESTAMP WITH TIME ZONE,
-UNIQUE(periodo_mes, periodo_anio) -- Idempotencia: previene ejecuciones dobles en el mismo mes
+fecha_fin TIMESTAMP WITH TIME ZONE
 );
+CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
+WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
 --=================================================================================
 -- 8. VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
