@@ -66,7 +66,11 @@ contacto_emergencia_telefono VARCHAR(50),
 fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
 fecha_baja DATE,
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT chk_estado_fecha_baja CHECK (
+  (estado = 'activo'   AND fecha_baja IS NULL) OR
+  (estado = 'inactivo' AND fecha_baja IS NOT NULL)
+)
 );
 -- Validación: Si es menor de 18 años al crearse, contacto de emergencia es obligatorio
 -- (Esta lógica se reforzará también en el frontend/backend)
@@ -148,14 +152,22 @@ cae_vencimiento DATE,
 estado_fiscal estado_fiscal NOT NULL DEFAULT 'pendiente_cae',
 pdf_url TEXT,
 motivo_anulacion TEXT,
+intentos_reintento SMALLINT NOT NULL DEFAULT 0,
+proximo_reintento_en TIMESTAMP WITH TIME ZONE,
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 CONSTRAINT unique_comprobante_pv_tipo_num UNIQUE (punto_venta, tipo, numero_comprobante), -- Impide que existan dos Facturas con el mismo número en el mismo Punto de Venta
 CONSTRAINT chk_nc_origen CHECK (
   (tipo = 'factura'      AND comprobante_origen_id IS NULL) OR
   (tipo = 'nota_credito' AND comprobante_origen_id IS NOT NULL)
-)
+),
+CONSTRAINT chk_intentos_reintento CHECK (intentos_reintento BETWEEN 0 AND 6)
 );
+
+-- Cola del job CU-05.6: solo filas que esperan reintento
+CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
+  ON comprobantes (proximo_reintento_en)
+  WHERE estado_fiscal IN ('pendiente_cae', 'anulacion_pendiente');
 --=================================================================================
 -- 6. MÓDULO DE GASTOS
 --=================================================================================
