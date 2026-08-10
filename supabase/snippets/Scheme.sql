@@ -18,7 +18,7 @@ CREATE TYPE estado_email AS ENUM ('enviado', 'fallido', 'procesando');
 -- 2. MÓDULO INSTITUCIONAL Y USUARIOS
 --=================================================================================
 CREATE TABLE club (
-id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+id UUID PRIMARY KEY DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
 nombre VARCHAR(255) NOT NULL,
 cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
@@ -31,7 +31,8 @@ certificado_vencimiento DATE,
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 -- Asegurar que solo exista una configuración de club
---ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
+ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
+
 CREATE TABLE usuarios (
 -- El ID debe coincidir con auth.users.id de Supabase
 id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
