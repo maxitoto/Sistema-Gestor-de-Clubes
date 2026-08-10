@@ -275,7 +275,7 @@ p.referencia_pago AS referencia,
 p.estado::text AS estado,
 p.usuario_id AS usuario_id
 FROM pagos p
-WHERE p.estado = 'completado'
+WHERE p.estado IN ('completado', 'anulado') -- el cobro sigue sigue visible con estado anulado tambien
 UNION ALL
 SELECT
 'egreso' AS tipo_movimiento,
@@ -288,7 +288,32 @@ g.concepto AS concepto,
 g.estado::text AS estado,
 g.usuario_id AS usuario_id
 FROM gastos g
-WHERE g.estado = 'activo';
+UNION ALL
+SELECT
+'egreso' AS tipo_movimiento, -- la devolucion de dinero es un egreso
+p.id AS movimiento_id, -- mismo id que el original: quedan relacionados
+p.updated_at AS fecha, -- fecha de anulacion, no del cobro original
+(p.monto * -1) AS monto_positivo, -- monto negativo para restarlo del total
+p.medio_pago AS metodo,
+p.referencia_pago AS referencia,
+'Anulacion de cobro' AS concepto, 
+p.estado::text AS estado, -- 'anulado'
+p.usuario_id AS usuario_id
+FROM pagos p
+WHERE p.estado = 'anulado' -- solo los pagos anulados generan reverso
+UNION ALL
+SELECT
+'ingreso' AS tipo_movimiento, -- anular un gasto devuelve dinero al saldo -> ingreso
+g.id AS movimiento_id,
+g.updated_at AS fecha, -- fecha de anulacion
+g.monto AS monto_positivo, -- positivo: vuelve a sumarse
+g.metodo_pago AS metodo,
+g.referencia_banco AS referencia,
+'Anulacion de gasto' AS concepto,
+g.estado::text AS estado,
+g.usuario_id AS usuario_id
+FROM gastos g
+WHERE g.estado = 'anulado';
 --=================================================================================
 -- 9. TRIGGERS ÚTILES (OPCIONAL)
 --=================================================================================
