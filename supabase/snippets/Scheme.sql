@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Habilitar extensión para búsquedas de texto avanzadas (Trigramas)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 --=================================================================================
