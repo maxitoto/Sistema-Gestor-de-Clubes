@@ -72,6 +72,10 @@ updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 CONSTRAINT chk_estado_fecha_baja CHECK (
   (estado = 'activo'   AND fecha_baja IS NULL) OR
   (estado = 'inactivo' AND fecha_baja IS NOT NULL)
+),
+CONSTRAINT chk_contacto_emergencia_menor CHECK (
+  age(fecha_nacimiento) >= interval '18 years' OR
+  (contacto_emergencia_nombre IS NOT NULL AND contacto_emergencia_telefono IS NOT NULL)
 )
 );
 -- Validación: Si es menor de 18 años al crearse, contacto de emergencia es obligatorio
@@ -266,56 +270,105 @@ CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
 --=================================================================================
 -- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
 CREATE OR REPLACE VIEW flujo_caja AS
+-- 1. Cobros (ingreso original)
 SELECT
 'ingreso' AS tipo_movimiento,
 p.id AS movimiento_id,
 p.fecha_pago AS fecha,
-p.monto AS monto_positivo,
+p.monto AS monto,
 p.medio_pago AS metodo,
 p.referencia_pago AS referencia,
 'Cobro Cuota' AS concepto,
 p.estado::text AS estado,
-p.usuario_id AS usuario_id
+p.usuario_id AS usuario_id,
+false AS es_reverso
 FROM pagos p
 WHERE p.estado IN ('completado', 'anulado') -- el cobro sigue sigue visible con estado anulado tambien
 UNION ALL
+-- 2. Gastos (egreso original).
 SELECT
 'egreso' AS tipo_movimiento,
 g.id AS movimiento_id,
 g.fecha::timestamp with time zone AS fecha,
-(g.monto * -1) AS monto_positivo, -- Monto negativo para restarlo del total
+g.monto AS monto, 
 g.metodo_pago AS metodo,
 g.referencia_banco AS referencia,
 g.concepto AS concepto,
 g.estado::text AS estado,
-g.usuario_id AS usuario_id
+g.usuario_id AS usuario_id,
+false AS es_reverso
 FROM gastos g
 UNION ALL
+-- 3. Reverso de cobro anulado (devolución)
 SELECT
 'egreso' AS tipo_movimiento, -- la devolucion de dinero es un egreso
 p.id AS movimiento_id, -- mismo id que el original: quedan relacionados
 p.updated_at AS fecha, -- fecha de anulacion, no del cobro original
-(p.monto * -1) AS monto_positivo, -- monto negativo para restarlo del total
+p.monto AS monto, 
 p.medio_pago AS metodo,
 p.referencia_pago AS referencia,
 'Anulacion de cobro' AS concepto, 
 p.estado::text AS estado, -- 'anulado'
-p.usuario_id AS usuario_id
+p.usuario_id AS usuario_id,
+true AS es_reverso
 FROM pagos p
 WHERE p.estado = 'anulado' -- solo los pagos anulados generan reverso
 UNION ALL
+-- 4. Reverso de gasto anulado
 SELECT
 'ingreso' AS tipo_movimiento, -- anular un gasto devuelve dinero al saldo -> ingreso
 g.id AS movimiento_id,
 g.updated_at AS fecha, -- fecha de anulacion
-g.monto AS monto_positivo, -- positivo: vuelve a sumarse
+g.monto AS monto,
 g.metodo_pago AS metodo,
 g.referencia_banco AS referencia,
 'Anulacion de gasto' AS concepto,
 g.estado::text AS estado,
-g.usuario_id AS usuario_id
+g.usuario_id AS usuario_id,
+true AS es_reverso
 FROM gastos g
 WHERE g.estado = 'anulado';
+
+CREATE OR REPLACE FUNCTION es_socio_moroso(p_socio_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE
+AS $$
+  SELECT COALESCE(
+    (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
+    false
+  )
+  FROM cuotas
+  WHERE socio_id = p_socio_id AND estado = 'pendiente';
+$$;
+CREATE INDEX idx_cuotas_pendientes_socio
+ON cuotas (socio_id)
+WHERE estado = 'pendiente';
+
+CREATE OR REPLACE FUNCTION cobrar_cuota(
+  p_cuota_id uuid, p_usuario_id uuid,
+  p_medio_pago medio_pago, p_referencia varchar DEFAULT NULL
+) RETURNS uuid  -- id del comprobante generado
+LANGUAGE plpgsql AS $$   -- SECURITY INVOKER (default): respeta RLS
+DECLARE
+  v_cuota cuotas%ROWTYPE; v_pago_id uuid; v_comprobante_id uuid;
+BEGIN
+   -- Bloqueo pesimista: serializa cobros simultáneos (ND-2)
+  SELECT * INTO v_cuota FROM cuotas WHERE id = p_cuota_id FOR UPDATE;  -- ND-2
+  IF NOT FOUND THEN RAISE EXCEPTION 'Cuota inexistente'; END IF;
+  IF v_cuota.estado <> 'pendiente' THEN RAISE EXCEPTION 'Cuota ya pagada';  -- error de negocio limpio para el segundo cobro
+  END IF;
+
+  INSERT INTO pagos (cuota_id, usuario_id, monto, medio_pago, referencia_pago)
+  VALUES (p_cuota_id, p_usuario_id, v_cuota.monto, p_medio_pago, p_referencia)
+  RETURNING id INTO v_pago_id;
+
+  INSERT INTO comprobantes (pago_id, tipo, punto_venta, estado_fiscal)
+  VALUES (v_pago_id, 'factura', (SELECT punto_venta FROM club), 'pendiente_cae')
+  RETURNING id INTO v_comprobante_id;
+
+  UPDATE cuotas SET estado = 'pagada' WHERE id = p_cuota_id;
+  RETURN v_comprobante_id;  -- la Edge Function sigue con ARCA fuera del lock
+END; $$;
 --=================================================================================
 -- 9. TRIGGERS ÚTILES (OPCIONAL)
 --=================================================================================
