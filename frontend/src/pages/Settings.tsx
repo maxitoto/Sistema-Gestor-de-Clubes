@@ -8,6 +8,7 @@ interface ClubConfig {
     nombre: string;
     cuit: string;
     domicilio_fiscal: string;
+    email_contacto: string;
     punto_venta: number;
     logo_url: string | null;
     certificado_arca: string | null;
@@ -39,6 +40,7 @@ function SettingsForm({ initialData }: { initialData: ClubConfig | null }) {
         nombre: initialData?.nombre || '',
         cuit: initialData?.cuit || '',
         domicilio_fiscal: initialData?.domicilio_fiscal || '',
+        email_contacto: initialData?.email_contacto || '',
         punto_venta: initialData?.punto_venta || 1,
         logo_url: initialData?.logo_url || ''
     });
@@ -105,6 +107,17 @@ function SettingsForm({ initialData }: { initialData: ClubConfig | null }) {
                     label="Domicilio Fiscal"
                     name="domicilio_fiscal"
                     value={formData.domicilio_fiscal}
+                    onChange={handleChange}
+                    fullWidth
+                    required
+                    disabled={isPending}
+                />
+
+                <TextField
+                    label="Email de Contacto"
+                    name="email_contacto"
+                    type="email"
+                    value={formData.email_contacto}
                     onChange={handleChange}
                     fullWidth
                     required
