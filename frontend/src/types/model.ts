@@ -44,6 +44,7 @@ export type Database = {
           estado: Database["public"]["Enums"]["estado_basico"]
           id: string
           nombre: string
+          updated_at: string | null
         }
         Insert: {
           arancel_mensual: number
@@ -54,6 +55,7 @@ export type Database = {
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre: string
+          updated_at?: string | null
         }
         Update: {
           arancel_mensual?: number
@@ -64,6 +66,7 @@ export type Database = {
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre?: string
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -78,21 +81,27 @@ export type Database = {
       categorias_gasto: {
         Row: {
           created_at: string | null
+          descripcion: string | null
           estado: Database["public"]["Enums"]["estado_basico"]
           id: string
           nombre: string
+          updated_at: string | null
         }
         Insert: {
           created_at?: string | null
+          descripcion?: string | null
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre: string
+          updated_at?: string | null
         }
         Update: {
           created_at?: string | null
+          descripcion?: string | null
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -103,6 +112,7 @@ export type Database = {
           certificado_vencimiento: string | null
           cuit: string
           domicilio_fiscal: string
+          email_contacto: string
           id: string
           logo_url: string | null
           nombre: string
@@ -115,6 +125,7 @@ export type Database = {
           certificado_vencimiento?: string | null
           cuit: string
           domicilio_fiscal: string
+          email_contacto: string
           id?: string
           logo_url?: string | null
           nombre: string
@@ -127,6 +138,7 @@ export type Database = {
           certificado_vencimiento?: string | null
           cuit?: string
           domicilio_fiscal?: string
+          email_contacto?: string
           id?: string
           logo_url?: string | null
           nombre?: string
@@ -139,40 +151,62 @@ export type Database = {
         Row: {
           cae: string | null
           cae_vencimiento: string | null
+          comprobante_origen_id: string | null
           created_at: string | null
           estado_fiscal: Database["public"]["Enums"]["estado_fiscal"]
           id: string
+          intentos_reintento: number
           motivo_anulacion: string | null
           numero_comprobante: string | null
           pago_id: string
           pdf_url: string | null
+          proximo_reintento_en: string | null
+          punto_venta: number
           tipo: Database["public"]["Enums"]["tipo_comprobante"]
+          updated_at: string | null
         }
         Insert: {
           cae?: string | null
           cae_vencimiento?: string | null
+          comprobante_origen_id?: string | null
           created_at?: string | null
           estado_fiscal?: Database["public"]["Enums"]["estado_fiscal"]
           id?: string
+          intentos_reintento?: number
           motivo_anulacion?: string | null
           numero_comprobante?: string | null
           pago_id: string
           pdf_url?: string | null
+          proximo_reintento_en?: string | null
+          punto_venta?: number
           tipo: Database["public"]["Enums"]["tipo_comprobante"]
+          updated_at?: string | null
         }
         Update: {
           cae?: string | null
           cae_vencimiento?: string | null
+          comprobante_origen_id?: string | null
           created_at?: string | null
           estado_fiscal?: Database["public"]["Enums"]["estado_fiscal"]
           id?: string
+          intentos_reintento?: number
           motivo_anulacion?: string | null
           numero_comprobante?: string | null
           pago_id?: string
           pdf_url?: string | null
+          proximo_reintento_en?: string | null
+          punto_venta?: number
           tipo?: Database["public"]["Enums"]["tipo_comprobante"]
+          updated_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "comprobantes_comprobante_origen_id_fkey"
+            columns: ["comprobante_origen_id"]
+            isOneToOne: false
+            referencedRelation: "comprobantes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "comprobantes_pago_id_fkey"
             columns: ["pago_id"]
@@ -273,6 +307,7 @@ export type Database = {
           estado: Database["public"]["Enums"]["estado_basico"]
           id: string
           nombre: string
+          updated_at: string | null
         }
         Insert: {
           created_at?: string | null
@@ -280,6 +315,7 @@ export type Database = {
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre: string
+          updated_at?: string | null
         }
         Update: {
           created_at?: string | null
@@ -287,8 +323,54 @@ export type Database = {
           estado?: Database["public"]["Enums"]["estado_basico"]
           id?: string
           nombre?: string
+          updated_at?: string | null
         }
         Relationships: []
+      }
+      email_destinatarios: {
+        Row: {
+          created_at: string | null
+          email: string
+          email_log_id: string
+          estado: Database["public"]["Enums"]["estado_email"]
+          event_id: string | null
+          id: string
+          socio_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          email_log_id: string
+          estado?: Database["public"]["Enums"]["estado_email"]
+          event_id?: string | null
+          id?: string
+          socio_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          email_log_id?: string
+          estado?: Database["public"]["Enums"]["estado_email"]
+          event_id?: string | null
+          id?: string
+          socio_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_destinatarios_email_log_id_fkey"
+            columns: ["email_log_id"]
+            isOneToOne: false
+            referencedRelation: "email_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "email_destinatarios_socio_id_fkey"
+            columns: ["socio_id"]
+            isOneToOne: false
+            referencedRelation: "socios"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       email_logs: {
         Row: {
@@ -413,6 +495,7 @@ export type Database = {
           fecha_baja: string | null
           id: string
           socio_id: string
+          updated_at: string | null
         }
         Insert: {
           categoria_id: string
@@ -422,6 +505,7 @@ export type Database = {
           fecha_baja?: string | null
           id?: string
           socio_id: string
+          updated_at?: string | null
         }
         Update: {
           categoria_id?: string
@@ -431,6 +515,7 @@ export type Database = {
           fecha_baja?: string | null
           id?: string
           socio_id?: string
+          updated_at?: string | null
         }
         Relationships: [
           {
@@ -459,6 +544,7 @@ export type Database = {
           medio_pago: Database["public"]["Enums"]["medio_pago"]
           monto: number
           referencia_pago: string | null
+          updated_at: string | null
           usuario_id: string
         }
         Insert: {
@@ -470,6 +556,7 @@ export type Database = {
           medio_pago: Database["public"]["Enums"]["medio_pago"]
           monto: number
           referencia_pago?: string | null
+          updated_at?: string | null
           usuario_id: string
         }
         Update: {
@@ -481,6 +568,7 @@ export type Database = {
           medio_pago?: Database["public"]["Enums"]["medio_pago"]
           monto?: number
           referencia_pago?: string | null
+          updated_at?: string | null
           usuario_id?: string
         }
         Relationships: [
@@ -634,29 +722,44 @@ export type Database = {
       flujo_caja: {
         Row: {
           concepto: string | null
+          es_reverso: boolean | null
           estado: string | null
           fecha: string | null
           metodo: Database["public"]["Enums"]["medio_pago"] | null
-          monto_positivo: number | null
+          monto: number | null
           movimiento_id: string | null
           referencia: string | null
           tipo_movimiento: string | null
+          usuario_id: string | null
         }
         Relationships: []
       }
     }
     Functions: {
+      cobrar_cuota: {
+        Args: {
+          p_cuota_id: string
+          p_medio_pago: Database["public"]["Enums"]["medio_pago"]
+          p_referencia?: string
+          p_usuario_id: string
+        }
+        Returns: string
+      }
+      es_admin: { Args: never; Returns: boolean }
+      es_responsable: { Args: never; Returns: boolean }
+      es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       estado_basico: "activo" | "inactivo"
-      estado_cuota: "pendiente" | "pagada" | "anulada"
+      estado_cuota: "pendiente" | "pagada"
       estado_email: "enviado" | "fallido" | "procesando"
       estado_fiscal:
         | "valido"
         | "pendiente_cae"
         | "anulacion_pendiente"
+        | "anulado"
         | "fallido"
       estado_gasto: "activo" | "anulado"
       estado_inscripcion: "activa" | "inactiva"
@@ -796,12 +899,13 @@ export const Constants = {
   public: {
     Enums: {
       estado_basico: ["activo", "inactivo"],
-      estado_cuota: ["pendiente", "pagada", "anulada"],
+      estado_cuota: ["pendiente", "pagada"],
       estado_email: ["enviado", "fallido", "procesando"],
       estado_fiscal: [
         "valido",
         "pendiente_cae",
         "anulacion_pendiente",
+        "anulado",
         "fallido",
       ],
       estado_gasto: ["activo", "anulado"],

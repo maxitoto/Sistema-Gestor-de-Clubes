@@ -78,8 +78,6 @@ CONSTRAINT chk_contacto_emergencia_menor CHECK (
   (contacto_emergencia_nombre IS NOT NULL AND contacto_emergencia_telefono IS NOT NULL)
 )
 );
--- Validación: Si es menor de 18 años al crearse, contacto de emergencia es obligatorio
--- (Esta lógica se reforzará también en el frontend/backend)
 --=================================================================================
 -- 4. MÓDULO DEPORTIVO
 --=================================================================================
@@ -170,10 +168,13 @@ CONSTRAINT chk_nc_origen CHECK (
 CONSTRAINT chk_intentos_reintento CHECK (intentos_reintento BETWEEN 0 AND 6)
 );
 
+<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
+========
 -- Cola del job CU-05.6: solo filas que esperan reintento
 CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
   ON comprobantes (proximo_reintento_en)
   WHERE estado_fiscal IN ('pendiente_cae', 'anulacion_pendiente');
+>>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
 --=================================================================================
 -- 6. MÓDULO DE GASTOS
 --=================================================================================
@@ -233,8 +234,11 @@ CREATE TABLE email_destinatarios (
   event_id VARCHAR(150) UNIQUE, -- id evento Resend (CU-07.4)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
+========
 CREATE INDEX idx_email_dest_log ON email_destinatarios(email_log_id);
 CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- para cruzar el webhook por direccion (CU-07.4 paso 5)
+>>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
 
 CREATE TABLE cuota_job_logs (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -245,6 +249,9 @@ cuotas_generadas INTEGER DEFAULT 0,
 cuotas_omitidas INTEGER DEFAULT 0,
 fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 fecha_fin TIMESTAMP WITH TIME ZONE
+<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
+);
+========
 );
 CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
 WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
@@ -394,3 +401,4 @@ CREATE TRIGGER update_categorias_gasto_modtime BEFORE UPDATE ON categorias_gasto
 CREATE TRIGGER update_gastos_modtime BEFORE UPDATE ON gastos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_plantillas_correo_modtime BEFORE UPDATE ON plantillas_correo FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+>>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
