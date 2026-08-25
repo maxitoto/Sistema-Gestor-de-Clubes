@@ -162,7 +162,7 @@ site_url = "http://127.0.0.1:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
 additional_redirect_urls = ["https://127.0.0.1:3000"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
-jwt_expiry = 3600
+jwt_expiry = 7200
 # JWT issuer URL. If not set, defaults to auth.external_url.
 # jwt_issuer = ""
 # Path to JWT signing key. DO NOT commit your signing keys file to git.
@@ -234,8 +234,8 @@ otp_length = 6
 otp_expiry = 3600
 
 # Use a production-ready SMTP server
-# [auth.email.smtp]
-# enabled = true
+[auth.email.smtp]
+enabled = false
 # host = "smtp.sendgrid.net"
 # port = 587
 # user = "apikey"
