@@ -15,7 +15,8 @@ const aliases = [
   { alias: '#types', path: 'src/types' },
   { alias: '#utils', path: 'src/utils' },
   { alias: '#assets', path: 'src/assets' },
-  { alias: "#providers", path: "src/providers" }
+  { alias: "#providers", path: "src/providers" },
+  { alias: "#apis", path: "src/services/apis" },
 ];   
 
 type Aliases = {

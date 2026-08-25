@@ -1,3 +1,4 @@
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Habilitar extensión para búsquedas de texto avanzadas (Trigramas)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 --=================================================================================
@@ -5,11 +6,11 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 --=================================================================================
 CREATE TYPE rol_usuario AS ENUM ('admin', 'responsable');
 CREATE TYPE estado_basico AS ENUM ('activo', 'inactivo');
-CREATE TYPE estado_cuota AS ENUM ('pendiente', 'pagada', 'anulada');
+CREATE TYPE estado_cuota AS ENUM ('pendiente', 'pagada');
 CREATE TYPE medio_pago AS ENUM ('efectivo', 'transferencia');
 CREATE TYPE estado_pago AS ENUM ('completado', 'anulado');
 CREATE TYPE tipo_comprobante AS ENUM ('factura', 'nota_credito');
-CREATE TYPE estado_fiscal AS ENUM ('valido', 'pendiente_cae', 'anulacion_pendiente','fallido');
+CREATE TYPE estado_fiscal AS ENUM ('valido', 'pendiente_cae', 'anulacion_pendiente','anulado','fallido');
 CREATE TYPE estado_gasto AS ENUM ('activo', 'anulado');
 CREATE TYPE estado_inscripcion AS ENUM ('activa', 'inactiva');
 CREATE TYPE estado_job AS ENUM ('procesando', 'exitoso', 'fallido');
@@ -18,10 +19,11 @@ CREATE TYPE estado_email AS ENUM ('enviado', 'fallido', 'procesando');
 -- 2. MÓDULO INSTITUCIONAL Y USUARIOS
 --=================================================================================
 CREATE TABLE club (
-id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+id UUID PRIMARY KEY DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
 nombre VARCHAR(255) NOT NULL,
 cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
+email_contacto VARCHAR(255) NOT NULL,
 logo_url TEXT,
 punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
@@ -30,8 +32,8 @@ certificado_vencimiento DATE,
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 -- Asegurar que solo exista una configuración de club
-ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id =
-'00000000-0000-0000-0000-000000000000'::uuid);
+ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
+
 CREATE TABLE usuarios (
 -- El ID debe coincidir con auth.users.id de Supabase
 id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -66,10 +68,16 @@ contacto_emergencia_telefono VARCHAR(50),
 fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
 fecha_baja DATE,
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT chk_estado_fecha_baja CHECK (
+  (estado = 'activo'   AND fecha_baja IS NULL) OR
+  (estado = 'inactivo' AND fecha_baja IS NOT NULL)
+),
+CONSTRAINT chk_contacto_emergencia_menor CHECK (
+  age(fecha_nacimiento) >= interval '18 years' OR
+  (contacto_emergencia_nombre IS NOT NULL AND contacto_emergencia_telefono IS NOT NULL)
+)
 );
--- Validación: Si es menor de 18 años al crearse, contacto de emergencia es obligatorio
--- (Esta lógica se reforzará también en el frontend/backend)
 --=================================================================================
 -- 4. MÓDULO DEPORTIVO
 --=================================================================================
@@ -78,7 +86,8 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 nombre VARCHAR(100) NOT NULL UNIQUE,
 descripcion TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE TABLE categorias (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -88,8 +97,8 @@ arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual >= 0),
 edad_min INTEGER CHECK (edad_min >= 0),
 edad_max INTEGER CHECK (edad_max >= edad_min),
 estado estado_basico NOT NULL DEFAULT 'activo',
-
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 UNIQUE(deporte_id, nombre) -- No pueden haber dos "Sub-17" en Fútbol
 );
 CREATE TABLE inscripciones (
@@ -99,7 +108,8 @@ categoria_id UUID NOT NULL REFERENCES categorias(id) ON DELETE RESTRICT,
 fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
 fecha_baja DATE,
 estado estado_inscripcion NOT NULL DEFAULT 'activa',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 --=================================================================================
 -- 5. MÓDULO FINANCIERO (FACTURACIÓN Y PAGOS)
@@ -125,29 +135,44 @@ medio_pago medio_pago NOT NULL,
 referencia_pago VARCHAR(255),
 fecha_pago TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 estado estado_pago NOT NULL DEFAULT 'completado',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 CREATE TABLE comprobantes (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE RESTRICT,
+comprobante_origen_id UUID REFERENCES comprobantes(id) ON DELETE SET NULL, -- Relaciona Nota de Crédito con Factura Original, null si es tipo factura
 tipo tipo_comprobante NOT NULL,
+punto_venta INTEGER NOT NULL DEFAULT 1,
 numero_comprobante VARCHAR(50),
 cae VARCHAR(50),
 cae_vencimiento DATE,
 estado_fiscal estado_fiscal NOT NULL DEFAULT 'pendiente_cae',
 pdf_url TEXT,
 motivo_anulacion TEXT,
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+intentos_reintento SMALLINT NOT NULL DEFAULT 0,
+proximo_reintento_en TIMESTAMP WITH TIME ZONE,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT unique_comprobante_pv_tipo_num UNIQUE (punto_venta, tipo, numero_comprobante), -- Impide que existan dos Facturas con el mismo número en el mismo Punto de Venta
+CONSTRAINT chk_nc_origen CHECK (
+  (tipo = 'factura'      AND comprobante_origen_id IS NULL) OR
+  (tipo = 'nota_credito' AND comprobante_origen_id IS NOT NULL)
+),
+CONSTRAINT chk_intentos_reintento CHECK (intentos_reintento BETWEEN 0 AND 6)
 );
+
 --=================================================================================
 -- 6. MÓDULO DE GASTOS
 --=================================================================================
 CREATE TABLE categorias_gasto (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 nombre VARCHAR(100) NOT NULL UNIQUE,
+descripcion TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE TABLE gastos (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -165,8 +190,6 @@ motivo_anulacion TEXT,
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
--- Índice GIN para búsquedas avanzadas (texto libre) en la descripción del gasto
-CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion gin_trgm_ops);
 
 --=================================================================================
 -- 7. MÓDULO DE SISTEMA (LOGS Y COMUNICACIONES)
@@ -190,6 +213,16 @@ destinatarios_count INTEGER NOT NULL DEFAULT 0,
 estado estado_email NOT NULL DEFAULT 'procesando',
 fecha_envio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+CREATE TABLE email_destinatarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_log_id UUID NOT NULL REFERENCES email_logs(id) ON DELETE CASCADE,
+  socio_id UUID REFERENCES socios(id) ON DELETE SET NULL, -- -- NULL si se mandó a un maiL suelto
+  email VARCHAR(255) NOT NULL,
+  estado estado_email NOT NULL DEFAULT 'procesando',
+  event_id VARCHAR(150) UNIQUE, -- id evento Resend (CU-07.4)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE cuota_job_logs (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 periodo_mes INTEGER NOT NULL CHECK (periodo_mes BETWEEN 1 AND 12),
@@ -198,49 +231,5 @@ estado estado_job NOT NULL DEFAULT 'procesando',
 cuotas_generadas INTEGER DEFAULT 0,
 cuotas_omitidas INTEGER DEFAULT 0,
 fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-fecha_fin TIMESTAMP WITH TIME ZONE,
-UNIQUE(periodo_mes, periodo_anio) -- Idempotencia: previene ejecuciones dobles en el mismo mes
+fecha_fin TIMESTAMP WITH TIME ZONE
 );
---=================================================================================
--- 8. VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
---=================================================================================
--- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
-CREATE OR REPLACE VIEW flujo_caja AS
-SELECT
-'ingreso' AS tipo_movimiento,
-p.id AS movimiento_id,
-p.fecha_pago AS fecha,
-p.monto AS monto_positivo,
-p.medio_pago AS metodo,
-p.referencia_pago AS referencia,
-'Cobro Cuota' AS concepto,
-p.estado::text AS estado
-FROM pagos p
-WHERE p.estado = 'completado'
-UNION ALL
-SELECT
-'egreso' AS tipo_movimiento,
-g.id AS movimiento_id,
-g.fecha::timestamp with time zone AS fecha,
-(g.monto * -1) AS monto_positivo, -- Monto negativo para restarlo del total
-g.metodo_pago AS metodo,
-g.referencia_banco AS referencia,
-g.concepto AS concepto,
-g.estado::text AS estado
-FROM gastos g
-WHERE g.estado = 'activo';
---=================================================================================
--- 9. TRIGGERS ÚTILES (OPCIONAL)
---=================================================================================
--- Trigger para mantener actualizado automáticamente el campo updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-NEW.updated_at = NOW();
-RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_socios_modtime BEFORE UPDATE ON socios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_cuotas_modtime BEFORE UPDATE ON cuotas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

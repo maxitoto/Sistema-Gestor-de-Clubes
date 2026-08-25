@@ -1,0 +1,13 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.39.3",
+    "@supabase/functions-js": "jsr:@supabase/functions-js@^2",
+    "@supabase/server": "npm:@supabase/server@^1",
+    "@shared/": "./_shared/",
+    "@utils/": "./_shared/utils/",
+    "@types/": "./_shared/types/",
+    "@infrastructure/": "./_shared/infrastructure/",
+    "@domine/": "./_shared/domine/",
+    "nodemailer": "npm:nodemailer@6.9.13"
+  }
+}
