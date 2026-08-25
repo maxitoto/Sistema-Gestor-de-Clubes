@@ -3,7 +3,7 @@
 --=================================================================================
 CREATE OR REPLACE FUNCTION es_socio_moroso(p_socio_id uuid)
 RETURNS boolean
-LANGUAGE sql STABLE
+LANGUAGE sql STABLE SET search_path = public
 AS $$
   SELECT COALESCE(
     (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
@@ -17,7 +17,7 @@ CREATE OR REPLACE FUNCTION cobrar_cuota(
   p_cuota_id uuid, p_usuario_id uuid,
   p_medio_pago medio_pago, p_referencia varchar DEFAULT NULL
 ) RETURNS uuid  -- id del comprobante generado
-LANGUAGE plpgsql AS $$   -- SECURITY INVOKER (default): respeta RLS
+LANGUAGE plpgsql SET search_path = public AS $$   -- SECURITY INVOKER (default): respeta RLS
 DECLARE
   v_cuota cuotas%ROWTYPE; v_pago_id uuid; v_comprobante_id uuid;
 BEGIN

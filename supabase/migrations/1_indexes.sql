@@ -20,7 +20,7 @@ CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
 WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
 
 -- Índice GIN para búsquedas avanzadas (texto libre) en la descripción del gasto
-CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion gin_trgm_ops);
+CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion extensions.gin_trgm_ops);
 
 -- Índices de rendimiento y búsqueda generales
 CREATE INDEX idx_socios_dni ON socios(dni);
