@@ -7,7 +7,7 @@ BEGIN
 NEW.updated_at = NOW();
 RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$ language plpgsql SET search_path = public;
 
 CREATE TRIGGER update_club_modtime BEFORE UPDATE ON club FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

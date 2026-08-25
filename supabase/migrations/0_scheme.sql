@@ -1,6 +1,6 @@
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
 -- Habilitar extensión para búsquedas de texto avanzadas (Trigramas)
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA extensions;
 --=================================================================================
 -- 1. TIPOS DE DATOS (ENUMS)
 --=================================================================================
