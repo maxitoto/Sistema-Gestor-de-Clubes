@@ -111,9 +111,6 @@ estado estado_inscripcion NOT NULL DEFAULT 'activa',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
--- Índice único parcial: Solo puede haber una inscripción 'activa' por socio y categoría.
-CREATE UNIQUE INDEX idx_inscripcion_activa_unica ON inscripciones(socio_id, categoria_id) 
-WHERE estado = 'activa';
 --=================================================================================
 -- 5. MÓDULO FINANCIERO (FACTURACIÓN Y PAGOS)
 --=================================================================================
@@ -141,8 +138,6 @@ estado estado_pago NOT NULL DEFAULT 'completado',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-CREATE UNIQUE INDEX uq_pago_vigente_por_cuota
-ON pagos(cuota_id) WHERE estado = 'completado'; -- indice para como maximo un pago completado
 
 CREATE TABLE comprobantes (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -168,13 +163,6 @@ CONSTRAINT chk_nc_origen CHECK (
 CONSTRAINT chk_intentos_reintento CHECK (intentos_reintento BETWEEN 0 AND 6)
 );
 
-<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
-========
--- Cola del job CU-05.6: solo filas que esperan reintento
-CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
-  ON comprobantes (proximo_reintento_en)
-  WHERE estado_fiscal IN ('pendiente_cae', 'anulacion_pendiente');
->>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
 --=================================================================================
 -- 6. MÓDULO DE GASTOS
 --=================================================================================
@@ -234,11 +222,6 @@ CREATE TABLE email_destinatarios (
   event_id VARCHAR(150) UNIQUE, -- id evento Resend (CU-07.4)
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
-<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
-========
-CREATE INDEX idx_email_dest_log ON email_destinatarios(email_log_id);
-CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- para cruzar el webhook por direccion (CU-07.4 paso 5)
->>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
 
 CREATE TABLE cuota_job_logs (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -249,156 +232,4 @@ cuotas_generadas INTEGER DEFAULT 0,
 cuotas_omitidas INTEGER DEFAULT 0,
 fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 fecha_fin TIMESTAMP WITH TIME ZONE
-<<<<<<<< HEAD:supabase/migrations/0_scheme.sql
 );
-========
-);
-CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
-WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
-
--- Índice GIN para búsquedas avanzadas (texto libre) en la descripción del gasto
-CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion gin_trgm_ops);
-
--- Índices de rendimiento y búsqueda
-CREATE INDEX idx_socios_dni ON socios(dni);
-CREATE INDEX idx_socios_numero ON socios(numero_socio);
-CREATE INDEX idx_socios_apellido ON socios(apellido);
-CREATE INDEX idx_categorias_deporte ON categorias(deporte_id);
-CREATE INDEX idx_cuotas_periodo ON cuotas(periodo_mes, periodo_anio);
-CREATE INDEX idx_cuotas_estado ON cuotas(estado);
-CREATE INDEX idx_pagos_cuota ON pagos(cuota_id);
-CREATE INDEX idx_pagos_fecha ON pagos(fecha_pago);
-CREATE INDEX idx_comprobantes_pago ON comprobantes(pago_id);
-CREATE INDEX idx_gastos_fecha ON gastos(fecha);
-CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
-
---=================================================================================
--- 8. VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
---=================================================================================
--- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
-CREATE OR REPLACE VIEW flujo_caja AS
--- 1. Cobros (ingreso original)
-SELECT
-'ingreso' AS tipo_movimiento,
-p.id AS movimiento_id,
-p.fecha_pago AS fecha,
-p.monto AS monto,
-p.medio_pago AS metodo,
-p.referencia_pago AS referencia,
-'Cobro Cuota' AS concepto,
-p.estado::text AS estado,
-p.usuario_id AS usuario_id,
-false AS es_reverso
-FROM pagos p
-WHERE p.estado IN ('completado', 'anulado') -- el cobro sigue sigue visible con estado anulado tambien
-UNION ALL
--- 2. Gastos (egreso original).
-SELECT
-'egreso' AS tipo_movimiento,
-g.id AS movimiento_id,
-g.fecha::timestamp with time zone AS fecha,
-g.monto AS monto, 
-g.metodo_pago AS metodo,
-g.referencia_banco AS referencia,
-g.concepto AS concepto,
-g.estado::text AS estado,
-g.usuario_id AS usuario_id,
-false AS es_reverso
-FROM gastos g
-UNION ALL
--- 3. Reverso de cobro anulado (devolución)
-SELECT
-'egreso' AS tipo_movimiento, -- la devolucion de dinero es un egreso
-p.id AS movimiento_id, -- mismo id que el original: quedan relacionados
-p.updated_at AS fecha, -- fecha de anulacion, no del cobro original
-p.monto AS monto, 
-p.medio_pago AS metodo,
-p.referencia_pago AS referencia,
-'Anulacion de cobro' AS concepto, 
-p.estado::text AS estado, -- 'anulado'
-p.usuario_id AS usuario_id,
-true AS es_reverso
-FROM pagos p
-WHERE p.estado = 'anulado' -- solo los pagos anulados generan reverso
-UNION ALL
--- 4. Reverso de gasto anulado
-SELECT
-'ingreso' AS tipo_movimiento, -- anular un gasto devuelve dinero al saldo -> ingreso
-g.id AS movimiento_id,
-g.updated_at AS fecha, -- fecha de anulacion
-g.monto AS monto,
-g.metodo_pago AS metodo,
-g.referencia_banco AS referencia,
-'Anulacion de gasto' AS concepto,
-g.estado::text AS estado,
-g.usuario_id AS usuario_id,
-true AS es_reverso
-FROM gastos g
-WHERE g.estado = 'anulado';
-
-CREATE OR REPLACE FUNCTION es_socio_moroso(p_socio_id uuid)
-RETURNS boolean
-LANGUAGE sql STABLE
-AS $$
-  SELECT COALESCE(
-    (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
-    false
-  )
-  FROM cuotas
-  WHERE socio_id = p_socio_id AND estado = 'pendiente';
-$$;
-CREATE INDEX idx_cuotas_pendientes_socio
-ON cuotas (socio_id)
-WHERE estado = 'pendiente';
-
-CREATE OR REPLACE FUNCTION cobrar_cuota(
-  p_cuota_id uuid, p_usuario_id uuid,
-  p_medio_pago medio_pago, p_referencia varchar DEFAULT NULL
-) RETURNS uuid  -- id del comprobante generado
-LANGUAGE plpgsql AS $$   -- SECURITY INVOKER (default): respeta RLS
-DECLARE
-  v_cuota cuotas%ROWTYPE; v_pago_id uuid; v_comprobante_id uuid;
-BEGIN
-   -- Bloqueo pesimista: serializa cobros simultáneos (ND-2)
-  SELECT * INTO v_cuota FROM cuotas WHERE id = p_cuota_id FOR UPDATE;  -- ND-2
-  IF NOT FOUND THEN RAISE EXCEPTION 'Cuota inexistente'; END IF;
-  IF v_cuota.estado <> 'pendiente' THEN RAISE EXCEPTION 'Cuota ya pagada';  -- error de negocio limpio para el segundo cobro
-  END IF;
-
-  INSERT INTO pagos (cuota_id, usuario_id, monto, medio_pago, referencia_pago)
-  VALUES (p_cuota_id, p_usuario_id, v_cuota.monto, p_medio_pago, p_referencia)
-  RETURNING id INTO v_pago_id;
-
-  INSERT INTO comprobantes (pago_id, tipo, punto_venta, estado_fiscal)
-  VALUES (v_pago_id, 'factura', (SELECT punto_venta FROM club), 'pendiente_cae')
-  RETURNING id INTO v_comprobante_id;
-
-  UPDATE cuotas SET estado = 'pagada' WHERE id = p_cuota_id;
-  RETURN v_comprobante_id;  -- la Edge Function sigue con ARCA fuera del lock
-END; $$;
---=================================================================================
--- 9. TRIGGERS ÚTILES (OPCIONAL)
---=================================================================================
--- Trigger para mantener actualizado automáticamente el campo updated_at
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-NEW.updated_at = NOW();
-RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-CREATE TRIGGER update_club_modtime BEFORE UPDATE ON club FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_socios_modtime BEFORE UPDATE ON socios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_deportes_modtime BEFORE UPDATE ON deportes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_categorias_modtime BEFORE UPDATE ON categorias FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_inscripciones_modtime BEFORE UPDATE ON inscripciones FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_cuotas_modtime BEFORE UPDATE ON cuotas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_pagos_modtime BEFORE UPDATE ON pagos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_comprobantes_modtime BEFORE UPDATE ON comprobantes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_categorias_gasto_modtime BEFORE UPDATE ON categorias_gasto FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_gastos_modtime BEFORE UPDATE ON gastos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_plantillas_correo_modtime BEFORE UPDATE ON plantillas_correo FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
->>>>>>>> main:supabase/migrations/20260824014331_01_scheme.sql
