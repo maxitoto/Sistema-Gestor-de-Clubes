@@ -49,17 +49,6 @@ $$;
 GRANT EXECUTE ON FUNCTION private.get_rol() TO authenticated, service_role;
 REVOKE EXECUTE ON FUNCTION private.get_rol() FROM PUBLIC;
 
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE p.proname = 'handle_new_user' AND n.nspname = 'public'
-  ) THEN
-    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC';
-  END IF;
-END $$;
-
 -- ---------------------------------------------------------------------------------
 -- 2. Permisos base a roles de API)
 -- ---------------------------------------------------------------------------------

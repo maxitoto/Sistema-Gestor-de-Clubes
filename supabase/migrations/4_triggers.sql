@@ -42,6 +42,8 @@ BEGIN
 END;
 $$;
 
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC;
+
 -- Trigger que se dispara automáticamente cada vez que un usuario se registra o es creado en Supabase Auth
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
