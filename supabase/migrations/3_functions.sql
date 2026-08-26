@@ -38,3 +38,11 @@ BEGIN
   UPDATE cuotas SET estado = 'pagada' WHERE id = p_cuota_id;
   RETURN v_comprobante_id;  -- la Edge Function sigue con ARCA fuera del lock
 END; $$;
+
+-- Le quita permisos a public: los usuarios anónimos (anon / visitantes sin login) quedan bloqueados y no pueden ejecutar estas funciones por la API
+REVOKE EXECUTE ON FUNCTION public.es_socio_moroso(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.cobrar_cuota(uuid, uuid, medio_pago, varchar) FROM PUBLIC;
+
+-- Le da permiso de ejecución a solo dos roles: el responsable y el backend interno (taras programadas y edge functions)
+GRANT EXECUTE ON FUNCTION public.es_socio_moroso(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.cobrar_cuota(uuid, uuid, medio_pago, varchar) TO authenticated, service_role;
