@@ -3,3 +3,5 @@
 .deno
 .env.local
 .env.production
+
+script.sh
