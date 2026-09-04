@@ -5,18 +5,12 @@ import { resolve } from "path"
 //agregar alias aquí
 const aliases = [
   { alias: '#', path: 'src' },
-  { alias: '#components', path: 'src/components' },
-  { alias: '#contexts', path: 'src/contexts' },
-  { alias: '#hooks', path: 'src/hooks' },
+  { alias: '#app', path: 'src/app' },
+  { alias: '#features', path: 'src/features' },
   { alias: '#pages', path: 'src/pages' },
-  { alias: '#router', path: 'src/router' },
-  { alias: '#services', path: 'src/services' },
-  { alias: '#styles', path: 'src/styles' },
-  { alias: '#types', path: 'src/types' },
-  { alias: '#utils', path: 'src/utils' },
-  { alias: '#assets', path: 'src/assets' },
-  { alias: "#providers", path: "src/providers" },
-  { alias: "#apis", path: "src/services/apis" },
+  { alias: '#widgets', path: 'src/widgets' },
+  { alias: '#entities', path: 'src/entities' },
+  { alias: '#shared', path: 'src/shared' }
 ];   
 
 type Aliases = {
