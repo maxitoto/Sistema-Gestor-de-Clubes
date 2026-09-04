@@ -61,7 +61,7 @@ max_client_conn = 100
 enabled = true
 # Specifies an ordered list of schema files, directories, or glob patterns that describe your database.
 # Supports paths relative to supabase directory: "./schemas/*.sql", "./database".
-schema_paths = [  "./migrations/0_scheme.sql","./migrations/1_indexes.sql","./migrations/2_views.sql","./migrations/3_functions.sql","./migrations/4_triggers.sql","./migrations/5_politics.sql"]
+schema_paths = ["./schemas/*.sql"]
 
 [db.seed]
 # If enabled, seeds the database after migrations during a db reset.
@@ -413,10 +413,10 @@ enabled = true
 # JSON string passed through to pg-delta SQL formatting.
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
-[functions.procesar-correos]
+[functions.comunicaciones]
+enabled = true
+verify_jwt = false # Lo validaremos manualmente dentro del código para mayor control
+
+[functions.arca]
 enabled = true
 verify_jwt = false
-# Corregimos la ruta para apuntar a tu archivo central
-import_map = "./functions/deno.json"
-# entrypoint se mantiene igual porque el index sí está adentro
-entrypoint = "./functions/procesar-correos/index.ts"
