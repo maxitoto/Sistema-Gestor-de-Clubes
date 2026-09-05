@@ -1,6 +1,6 @@
 // src/pages/dashboard/ui/DashboardPage.tsx
 import { Box, Typography } from "@mui/material";
-import { DashboardPanel } from "#/widgets/dashboard-panel";
+import { DashboardPanel } from "#widgets/dashboard-panel";
 
 export default function DashboardPage() {
   return (

@@ -114,5 +114,57 @@ find src/ -type f | sort | while IFS= read -r f; do echo "===== $f ====="; cat "
   - pnpm run dev
 
 ---
+---
+*frontend*
+| Capa / Carpeta | Responsabilidad según FSD | Qué contiene en tu proyecto |
+| --- | --- | --- |
+| **`app/`** | **Inicialización global del sistema.** Configura providers, estilos globales y el enrutador raíz. No contiene lógica de negocio ni componentes de UI reutilizables.
 
-# falta agrega la definicion de arquitectura para front y para back, y el uso de cada fichero en estrucutra interna. Igual esta en la documentación de cada arqui
+ | `App.tsx`, `AppRouterProvider.tsx`, `AuthProvider.tsx`, `ThemeModeProvider.tsx`, y los protectores de ruta `RequireAuth.tsx`, `RequireRole.tsx`.
+
+ |
+| **`pages/`** | **Vistas completas de la aplicación (páginas del router).** Su única función es componer *widgets*, *features* y *entities* para armar una pantalla. No implementa llamadas directas a APIs ni maneja estado de negocio pesado.
+
+ | `DashboardPage.tsx`, `LoginPage.tsx`, `SettingsPage.tsx`, `SociosPage.tsx`.
+
+ |
+| **`widgets/`** | **Bloques autónomos y complejos de la interfaz.** Orquestan la interacción visual entre entidades y features. Son unidades funcionales completas que se insertan en las páginas.
+
+ | `dashboard-panel/` (combina la nómina de socios con el buscador, paginador y botón de correo) y `layout/` (`MainLayout`, `AuthLayout`).
+
+ |
+| **`features/`** | **Acciones e interacciones con valor de negocio para el usuario.** Contienen las mutaciones, formularios y casos de uso interactivos. No pueden importarse entre sí en el mismo nivel.
+
+ | `auth/login-by-email/` (inicio de sesión), `club/update-config/` (mutación de configuración), `comunicaciones/send-email/` (envío manual).
+
+ |
+| **`entities/`** | **Modelos y conceptos del dominio del negocio.** Representan los datos que maneja la institución. Exponen consultas de lectura (`api`), estado y hooks (`model`), y fichas o avatares (`ui`). No pueden importar features ni widgets.
+
+ | `club/` (datos y configuración institucional), `session/` (usuario autenticado y perfil), `socio/` (datos de los miembros).
+
+ |
+| **`shared/`** | **Infraestructura técnica y utilidades reutilizables.** Código completamente agnóstico al negocio del club. Reutilizable en cualquier otro proyecto.
+
+ | `api/` (cliente Supabase), `config/styles/` (temas MUI), `lib/` (`useDebounce`), `types/` (esquema de base de datos generado).
+
+---
+---
+*supabase*
+
+| Directorio | Capa Hexagonal / Clean | Responsabilidad oficial |
+| --- | --- | --- |
+| **`functions/comunicaciones/`**, **`functions/arca/`** | **Driving Adapters (Controladores HTTP)** | Puntos de entrada HTTP de Deno desplegados. Validan encabezados, manejan CORS, parsean JSON e instancian y ejecutan los casos de uso correspondientes. No contienen sentencias SQL ni reglas de negocio.
+
+ |
+| **`_shared/core/`** | **Infraestructura Transversal Compartida** | Adaptadores técnicos comunes a todos los dominios. Clientes HTTP (`cors.ts`), clases de error (`errors.ts`), transporte SMTP (`mailer.ts`) y creador de clientes autenticados (`supabase.ts`).
+
+ |
+| **`_shared/modules/<modulo>/domain/`** | **Dominio (Entities & Value Objects)** | El núcleo del sistema. Funciones puras e inmutables (ej. `email_domain.ts` con `extraerEmails` y formato HTML). **Cero dependencias externas**: no importa Supabase, Deno, HTTP ni frameworks.
+
+ |
+| **`_shared/modules/<modulo>/application/`** | **Casos de Uso (Application Services)** | El director de orquesta de cada operación (ej. `EnviarAvisoUseCase.ts`). Implementa el flujo del caso de uso: consulta al repositorio, ejecuta las reglas del dominio y despacha acciones a través de puertos de salida.
+
+ |
+| **`_shared/modules/<modulo>/infrastructure/`** | **Driven Adapters (Persistencia e Integraciones)** | Implementación técnica de acceso a datos (ej. `SocioRepository.ts`). Es el único lugar donde se escribe código dependiente de Supabase (`supabase.from(...)`) o APIs externas.
+
+ |

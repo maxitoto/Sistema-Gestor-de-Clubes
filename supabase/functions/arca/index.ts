@@ -19,7 +19,7 @@ Deno.serve(async (req) => {
 
     // hola mundo
 
-    return json({ message: "hola mundo" });
+    return jsonResponse({ message: "hola mundo" });
 
     return errorResponse("Ruta no encontrada", 404);
   } catch (error) {
