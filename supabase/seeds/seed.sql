@@ -77,3 +77,39 @@ INSERT INTO public.categorias_gasto (id, nombre, descripcion) VALUES
 ('f2222222-2222-2222-2222-222222222222', 'Servicios', 'Luz, Agua, Gas, Internet'),
 ('f3333333-3333-3333-3333-333333333333', 'Sueldos', 'Pago a profesores y personal')
 ON CONFLICT (nombre) DO NOTHING;
+
+-- CREAR USUARIO ADMIN DE PRUEBA
+DO $$
+DECLARE
+    v_user_id UUID := '4f2dbe40-2841-44bd-b730-0479364b1049'::uuid;
+BEGIN
+    -- 1. Crear en Supabase Auth con contraseña segura (cumple reglas de 8 caracteres, mayúsculas y números)
+    IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'admin@clublosandes.com') THEN
+    INSERT INTO auth.users (
+        instance_id, id, aud, role, email, encrypted_password,
+        email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+        created_at, updated_at,
+        confirmation_token, recovery_token, email_change_token_new,
+        email_change, email_change_token_current, phone_change,
+        phone_change_token, reauthentication_token
+    ) VALUES (
+        '00000000-0000-0000-0000-000000000000',
+        v_user_id,
+        'authenticated',
+        'authenticated',
+        'admin@clublosandes.com',
+        crypt('Pass1234', gen_salt('bf')),
+        NOW(),
+        '{"provider":"email","providers":["email"]}',
+        '{"nombre":"Administrador","apellido":"Principal"}',
+        NOW(),
+        NOW(),
+        '', '', '', '', '', '', '', ''
+    );
+
+    -- 2. Vincular en public.usuarios con rol 'admin'
+    INSERT INTO public.usuarios (id, nombre, apellido, email, rol, estado)
+    VALUES (v_user_id, 'Administrador', 'Principal', 'admin@clublosandes.com', 'admin', 'activo')
+    ON CONFLICT (id) DO UPDATE SET rol = 'admin';
+    END IF;
+END $$;

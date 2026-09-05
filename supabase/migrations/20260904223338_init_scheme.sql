@@ -1,0 +1,623 @@
+-- ESQUEMAS
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
+-- Habilitar extensión para búsquedas de texto avanzadas (Trigramas)
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA extensions;
+--=================================================================================
+-- 1. TIPOS DE DATOS (ENUMS)
+--=================================================================================
+CREATE TYPE rol_usuario AS ENUM ('admin', 'responsable');
+CREATE TYPE estado_basico AS ENUM ('activo', 'inactivo');
+CREATE TYPE estado_cuota AS ENUM ('pendiente', 'pagada');
+CREATE TYPE medio_pago AS ENUM ('efectivo', 'transferencia');
+CREATE TYPE estado_pago AS ENUM ('completado', 'anulado');
+CREATE TYPE tipo_comprobante AS ENUM ('factura', 'nota_credito');
+CREATE TYPE estado_fiscal AS ENUM ('valido', 'pendiente_cae', 'anulacion_pendiente','anulado','fallido');
+CREATE TYPE estado_gasto AS ENUM ('activo', 'anulado');
+CREATE TYPE estado_inscripcion AS ENUM ('activa', 'inactiva');
+CREATE TYPE estado_job AS ENUM ('procesando', 'exitoso', 'fallido');
+CREATE TYPE estado_email AS ENUM ('enviado', 'fallido', 'procesando');
+--=================================================================================
+-- 2. MÓDULO INSTITUCIONAL Y USUARIOS
+--=================================================================================
+CREATE TABLE club (
+id UUID PRIMARY KEY DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
+nombre VARCHAR(255) NOT NULL,
+cuit VARCHAR(20) NOT NULL UNIQUE,
+domicilio_fiscal TEXT NOT NULL,
+email_contacto VARCHAR(255) NOT NULL,
+logo_url TEXT,
+punto_venta INTEGER NOT NULL,
+certificado_arca TEXT, -- Encriptado en aplicación
+certificado_key TEXT, -- Encriptado en aplicación
+certificado_vencimiento DATE,
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+-- Asegurar que solo exista una configuración de club
+ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
+
+CREATE TABLE usuarios (
+-- El ID debe coincidir con auth.users.id de Supabase
+id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+nombre VARCHAR(100) NOT NULL,
+apellido VARCHAR(100) NOT NULL,
+email VARCHAR(255) NOT NULL UNIQUE,
+rol rol_usuario NOT NULL DEFAULT 'responsable',
+estado estado_basico NOT NULL DEFAULT 'activo',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+--=================================================================================
+-- 3. MÓDULO DE SOCIOS
+--=================================================================================
+CREATE TABLE socios (
+
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+numero_socio SERIAL UNIQUE,
+dni VARCHAR(20) NOT NULL UNIQUE,
+nombre VARCHAR(100) NOT NULL,
+apellido VARCHAR(100) NOT NULL,
+fecha_nacimiento DATE NOT NULL,
+email VARCHAR(255),
+telefono VARCHAR(50),
+direccion TEXT,
+foto_url TEXT,
+estado estado_basico NOT NULL DEFAULT 'activo',
+acepta_comunicaciones BOOLEAN NOT NULL DEFAULT TRUE,
+email_invalido BOOLEAN NOT NULL DEFAULT FALSE,
+contacto_emergencia_nombre VARCHAR(150),
+contacto_emergencia_telefono VARCHAR(50),
+fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
+fecha_baja DATE,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT chk_estado_fecha_baja CHECK (
+  (estado = 'activo'   AND fecha_baja IS NULL) OR
+  (estado = 'inactivo' AND fecha_baja IS NOT NULL)
+),
+CONSTRAINT chk_contacto_emergencia_menor CHECK (
+  age(fecha_nacimiento) >= interval '18 years' OR
+  (contacto_emergencia_nombre IS NOT NULL AND contacto_emergencia_telefono IS NOT NULL)
+)
+);
+--=================================================================================
+-- 4. MÓDULO DEPORTIVO
+--=================================================================================
+CREATE TABLE deportes (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+nombre VARCHAR(100) NOT NULL UNIQUE,
+descripcion TEXT,
+estado estado_basico NOT NULL DEFAULT 'activo',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE TABLE categorias (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+deporte_id UUID NOT NULL REFERENCES deportes(id) ON DELETE RESTRICT,
+nombre VARCHAR(100) NOT NULL,
+arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual >= 0),
+edad_min INTEGER CHECK (edad_min >= 0),
+edad_max INTEGER CHECK (edad_max >= edad_min),
+estado estado_basico NOT NULL DEFAULT 'activo',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+UNIQUE(deporte_id, nombre) -- No pueden haber dos "Sub-17" en Fútbol
+);
+CREATE TABLE inscripciones (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+socio_id UUID NOT NULL REFERENCES socios(id) ON DELETE RESTRICT,
+categoria_id UUID NOT NULL REFERENCES categorias(id) ON DELETE RESTRICT,
+fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
+fecha_baja DATE,
+estado estado_inscripcion NOT NULL DEFAULT 'activa',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+--=================================================================================
+-- 5. MÓDULO FINANCIERO (FACTURACIÓN Y PAGOS)
+--=================================================================================
+CREATE TABLE cuotas (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+socio_id UUID NOT NULL REFERENCES socios(id) ON DELETE RESTRICT,
+categoria_id UUID NOT NULL REFERENCES categorias(id) ON DELETE RESTRICT,
+periodo_mes INTEGER NOT NULL CHECK (periodo_mes BETWEEN 1 AND 12),
+periodo_anio INTEGER NOT NULL CHECK (periodo_anio > 2000),
+monto DECIMAL(10,2) NOT NULL CHECK (monto >= 0),
+estado estado_cuota NOT NULL DEFAULT 'pendiente',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+UNIQUE(socio_id, categoria_id, periodo_mes, periodo_anio) -- Evita cuotas duplicadas
+);
+CREATE TABLE pagos (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+cuota_id UUID NOT NULL REFERENCES cuotas(id) ON DELETE RESTRICT,
+usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT, -- Quién cobró
+monto DECIMAL(10,2) NOT NULL CHECK (monto > 0),
+medio_pago medio_pago NOT NULL,
+referencia_pago VARCHAR(255),
+fecha_pago TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+estado estado_pago NOT NULL DEFAULT 'completado',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE comprobantes (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE RESTRICT,
+comprobante_origen_id UUID REFERENCES comprobantes(id) ON DELETE SET NULL, -- Relaciona Nota de Crédito con Factura Original, null si es tipo factura
+tipo tipo_comprobante NOT NULL,
+punto_venta INTEGER NOT NULL DEFAULT 1,
+numero_comprobante VARCHAR(50),
+cae VARCHAR(50),
+cae_vencimiento DATE,
+estado_fiscal estado_fiscal NOT NULL DEFAULT 'pendiente_cae',
+pdf_url TEXT,
+motivo_anulacion TEXT,
+intentos_reintento SMALLINT NOT NULL DEFAULT 0,
+proximo_reintento_en TIMESTAMP WITH TIME ZONE,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT unique_comprobante_pv_tipo_num UNIQUE (punto_venta, tipo, numero_comprobante), -- Impide que existan dos Facturas con el mismo número en el mismo Punto de Venta
+CONSTRAINT chk_nc_origen CHECK (
+  (tipo = 'factura'      AND comprobante_origen_id IS NULL) OR
+  (tipo = 'nota_credito' AND comprobante_origen_id IS NOT NULL)
+),
+CONSTRAINT chk_intentos_reintento CHECK (intentos_reintento BETWEEN 0 AND 6)
+);
+
+--=================================================================================
+-- 6. MÓDULO DE GASTOS
+--=================================================================================
+CREATE TABLE categorias_gasto (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+nombre VARCHAR(100) NOT NULL UNIQUE,
+descripcion TEXT,
+estado estado_basico NOT NULL DEFAULT 'activo',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE TABLE gastos (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+categoria_id UUID NOT NULL REFERENCES categorias_gasto(id) ON DELETE RESTRICT,
+usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+fecha DATE NOT NULL DEFAULT CURRENT_DATE,
+concepto VARCHAR(255) NOT NULL,
+monto DECIMAL(10,2) NOT NULL CHECK (monto > 0),
+metodo_pago medio_pago NOT NULL,
+referencia_banco VARCHAR(255),
+descripcion TEXT,
+evidencia_url TEXT,
+estado estado_gasto NOT NULL DEFAULT 'activo',
+motivo_anulacion TEXT,
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+--=================================================================================
+-- 7. MÓDULO DE SISTEMA (LOGS Y COMUNICACIONES)
+--=================================================================================
+CREATE TABLE plantillas_correo (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+nombre_interno VARCHAR(150) NOT NULL UNIQUE,
+asunto VARCHAR(255) NOT NULL,
+cuerpo TEXT NOT NULL,
+estado estado_basico NOT NULL DEFAULT 'activo',
+created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+CREATE TABLE email_logs (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+plantilla_id UUID REFERENCES plantillas_correo(id) ON DELETE SET NULL,
+usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+asunto VARCHAR(255) NOT NULL,
+cuerpo TEXT NOT NULL,
+destinatarios_count INTEGER NOT NULL DEFAULT 0,
+estado estado_email NOT NULL DEFAULT 'procesando',
+fecha_envio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE TABLE email_destinatarios (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email_log_id UUID NOT NULL REFERENCES email_logs(id) ON DELETE CASCADE,
+  socio_id UUID REFERENCES socios(id) ON DELETE SET NULL, -- -- NULL si se mandó a un maiL suelto
+  email VARCHAR(255) NOT NULL,
+  estado estado_email NOT NULL DEFAULT 'procesando',
+  event_id VARCHAR(150) UNIQUE, -- id evento Resend (CU-07.4)
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE cuota_job_logs (
+id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+periodo_mes INTEGER NOT NULL CHECK (periodo_mes BETWEEN 1 AND 12),
+periodo_anio INTEGER NOT NULL CHECK (periodo_anio > 2000),
+estado estado_job NOT NULL DEFAULT 'procesando',
+cuotas_generadas INTEGER DEFAULT 0,
+cuotas_omitidas INTEGER DEFAULT 0,
+fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+fecha_fin TIMESTAMP WITH TIME ZONE
+);
+
+
+-- INDICES
+
+--=================================================================================
+-- ÍNDICES DE RENDIMIENTO Y BÚSQUEDA
+--=================================================================================
+-- Índice único parcial: Solo puede haber una inscripción 'activa' por socio y categoría.
+CREATE UNIQUE INDEX idx_inscripcion_activa_unica ON inscripciones(socio_id, categoria_id) 
+WHERE estado = 'activa';
+
+CREATE UNIQUE INDEX uq_pago_vigente_por_cuota
+ON pagos(cuota_id) WHERE estado = 'completado'; -- indice para como maximo un pago completado
+
+-- Cola del job CU-05.6: solo filas que esperan reintento
+CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
+  ON comprobantes (proximo_reintento_en)
+  WHERE estado_fiscal IN ('pendiente_cae', 'anulacion_pendiente');
+  
+CREATE INDEX idx_email_dest_log ON email_destinatarios(email_log_id);
+CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- para cruzar el webhook por direccion (CU-07.4 paso 5)
+
+CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
+WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
+
+-- Índice GIN para búsquedas avanzadas (texto libre) en la descripción del gasto
+CREATE INDEX idx_gastos_descripcion_trgm ON gastos USING GIN (descripcion extensions.gin_trgm_ops);
+
+-- Índices de rendimiento y búsqueda generales
+CREATE INDEX idx_socios_dni ON socios(dni);
+CREATE INDEX idx_socios_numero ON socios(numero_socio);
+CREATE INDEX idx_socios_apellido ON socios(apellido);
+CREATE INDEX idx_categorias_deporte ON categorias(deporte_id);
+CREATE INDEX idx_cuotas_periodo ON cuotas(periodo_mes, periodo_anio);
+CREATE INDEX idx_cuotas_estado ON cuotas(estado);
+CREATE INDEX idx_pagos_cuota ON pagos(cuota_id);
+CREATE INDEX idx_pagos_fecha ON pagos(fecha_pago);
+CREATE INDEX idx_comprobantes_pago ON comprobantes(pago_id);
+CREATE INDEX idx_gastos_fecha ON gastos(fecha);
+CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
+
+CREATE INDEX idx_cuotas_pendientes_socio
+ON cuotas (socio_id)
+WHERE estado = 'pendiente';
+
+
+-- VIEWS
+
+--=================================================================================
+-- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
+--=================================================================================
+-- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
+CREATE OR REPLACE VIEW flujo_caja WITH (security_invoker = true) AS
+-- 1. Cobros (ingreso original)
+SELECT
+'ingreso' AS tipo_movimiento,
+p.id AS movimiento_id,
+p.fecha_pago AS fecha,
+p.monto AS monto,
+p.medio_pago AS metodo,
+p.referencia_pago AS referencia,
+'Cobro Cuota' AS concepto,
+p.estado::text AS estado,
+p.usuario_id AS usuario_id,
+false AS es_reverso
+FROM pagos p
+WHERE p.estado IN ('completado', 'anulado') -- el cobro sigue sigue visible con estado anulado tambien
+UNION ALL
+-- 2. Gastos (egreso original).
+SELECT
+'egreso' AS tipo_movimiento,
+g.id AS movimiento_id,
+g.fecha::timestamp with time zone AS fecha,
+g.monto AS monto, 
+g.metodo_pago AS metodo,
+g.referencia_banco AS referencia,
+g.concepto AS concepto,
+g.estado::text AS estado,
+g.usuario_id AS usuario_id,
+false AS es_reverso
+FROM gastos g
+UNION ALL
+-- 3. Reverso de cobro anulado (devolución)
+SELECT
+'egreso' AS tipo_movimiento, -- la devolucion de dinero es un egreso
+p.id AS movimiento_id, -- mismo id que el original: quedan relacionados
+p.updated_at AS fecha, -- fecha de anulacion, no del cobro original
+p.monto AS monto, 
+p.medio_pago AS metodo,
+p.referencia_pago AS referencia,
+'Anulacion de cobro' AS concepto, 
+p.estado::text AS estado, -- 'anulado'
+p.usuario_id AS usuario_id,
+true AS es_reverso
+FROM pagos p
+WHERE p.estado = 'anulado' -- solo los pagos anulados generan reverso
+UNION ALL
+-- 4. Reverso de gasto anulado
+SELECT
+'ingreso' AS tipo_movimiento, -- anular un gasto devuelve dinero al saldo -> ingreso
+g.id AS movimiento_id,
+g.updated_at AS fecha, -- fecha de anulacion
+g.monto AS monto,
+g.metodo_pago AS metodo,
+g.referencia_banco AS referencia,
+'Anulacion de gasto' AS concepto,
+g.estado::text AS estado,
+g.usuario_id AS usuario_id,
+true AS es_reverso
+FROM gastos g
+WHERE g.estado = 'anulado';
+
+
+--  FUNCTIONS
+
+--=================================================================================
+-- FUNCIONES DE NEGOCIO
+--=================================================================================
+CREATE OR REPLACE FUNCTION es_socio_moroso(p_socio_id uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
+    false
+  )
+  FROM cuotas
+  WHERE socio_id = p_socio_id AND estado = 'pendiente';
+$$;
+
+CREATE OR REPLACE FUNCTION cobrar_cuota(
+  p_cuota_id uuid, p_usuario_id uuid,
+  p_medio_pago medio_pago, p_referencia varchar DEFAULT NULL
+) RETURNS uuid  -- id del comprobante generado
+LANGUAGE plpgsql SET search_path = public AS $$   -- SECURITY INVOKER (default): respeta RLS
+DECLARE
+  v_cuota cuotas%ROWTYPE; v_pago_id uuid; v_comprobante_id uuid;
+BEGIN
+   -- Bloqueo pesimista: serializa cobros simultáneos (ND-2)
+  SELECT * INTO v_cuota FROM cuotas WHERE id = p_cuota_id FOR UPDATE;  -- ND-2
+  IF NOT FOUND THEN RAISE EXCEPTION 'Cuota inexistente'; END IF;
+  IF v_cuota.estado <> 'pendiente' THEN RAISE EXCEPTION 'Cuota ya pagada';  -- error de negocio limpio para el segundo cobro
+  END IF;
+
+  INSERT INTO pagos (cuota_id, usuario_id, monto, medio_pago, referencia_pago)
+  VALUES (p_cuota_id, p_usuario_id, v_cuota.monto, p_medio_pago, p_referencia)
+  RETURNING id INTO v_pago_id;
+
+  INSERT INTO comprobantes (pago_id, tipo, punto_venta, estado_fiscal)
+  VALUES (v_pago_id, 'factura', (SELECT punto_venta FROM club), 'pendiente_cae')
+  RETURNING id INTO v_comprobante_id;
+
+  UPDATE cuotas SET estado = 'pagada' WHERE id = p_cuota_id;
+  RETURN v_comprobante_id;  -- la Edge Function sigue con ARCA fuera del lock
+END; $$;
+
+-- Le quita permisos a public: los usuarios anónimos (anon / visitantes sin login) quedan bloqueados y no pueden ejecutar estas funciones por la API
+REVOKE EXECUTE ON FUNCTION public.es_socio_moroso(uuid) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.cobrar_cuota(uuid, uuid, medio_pago, varchar) FROM PUBLIC;
+
+-- Le da permiso de ejecución a solo dos roles: el responsable y el backend interno (taras programadas y edge functions)
+GRANT EXECUTE ON FUNCTION public.es_socio_moroso(uuid) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.cobrar_cuota(uuid, uuid, medio_pago, varchar) TO authenticated, service_role;
+
+
+-- TRIGGERS
+
+--=================================================================================
+-- TRIGGERS PARA UPDATED_AT
+--=================================================================================
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+NEW.updated_at = NOW();
+RETURN NEW;
+END;
+$$ language plpgsql SET search_path = public;
+
+CREATE TRIGGER update_club_modtime BEFORE UPDATE ON club FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_usuarios_modtime BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_socios_modtime BEFORE UPDATE ON socios FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_deportes_modtime BEFORE UPDATE ON deportes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_categorias_modtime BEFORE UPDATE ON categorias FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_inscripciones_modtime BEFORE UPDATE ON inscripciones FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_cuotas_modtime BEFORE UPDATE ON cuotas FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_pagos_modtime BEFORE UPDATE ON pagos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_comprobantes_modtime BEFORE UPDATE ON comprobantes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_categorias_gasto_modtime BEFORE UPDATE ON categorias_gasto FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_gastos_modtime BEFORE UPDATE ON gastos FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_plantillas_correo_modtime BEFORE UPDATE ON plantillas_correo FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+--=================================================================================
+-- TRIGGER PARA SINCRONIZAR USUARIOS DE AUTH A LA TABLA PÚBLICA
+--=================================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.usuarios (id, email, nombre, apellido)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    COALESCE(NEW.raw_user_meta_data->>'nombre', 'Sin Nombre'),
+    COALESCE(NEW.raw_user_meta_data->>'apellido', 'Sin Apellido')
+  );
+  RETURN NEW;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon, authenticated, PUBLIC;
+
+-- Trigger que se dispara automáticamente cada vez que un usuario se registra o es creado en Supabase Auth
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+
+-- POLITICAS
+
+-- Schema no expuesto a PostgREST: alberga helpers internos de RLS
+CREATE SCHEMA IF NOT EXISTS private;
+GRANT USAGE ON SCHEMA private TO authenticated, service_role;
+-- ---------------------------------------------------------------------------------
+-- 0. Limpieza de políticas anteriores + patrones nuevos
+-- ---------------------------------------------------------------------------------
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['club','usuarios','socios','deportes','categorias',
+                           'inscripciones','cuotas','pagos','comprobantes',
+                           'categorias_gasto','gastos','plantillas_correo',
+                           'email_logs','email_destinatarios','cuota_job_logs'] LOOP
+    -- nombres del politics viejo (con comillas y sin ellas)
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Acceso total a operativos para autenticados', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Admins pueden leer club', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Admins pueden modificar club', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Cualquiera autenticado puede ver el club', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Admins pueden actualizar club', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Usuarios pueden ver otros usuarios', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Admins pueden gestionar usuarios', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', 'Usuarios pueden actualizar su propio perfil', t);
+    -- patrones nuevos (idempotencia de re-ejecución)
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_select', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_insert', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_insert_admin', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_update', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_update_admin', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_delete', t);
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t||'_delete_admin', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------------
+-- 1. Helper único de rol
+-- Para optimizar rendimiento y no hacer subconsultas constantemente
+-- ---------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.es_admin() CASCADE;
+DROP FUNCTION IF EXISTS public.es_responsable() CASCADE;
+DROP FUNCTION IF EXISTS public.get_rol() CASCADE;
+
+CREATE OR REPLACE FUNCTION private.get_rol()
+RETURNS public.rol_usuario
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT rol FROM public.usuarios
+  WHERE id = auth.uid() AND estado = 'activo';
+$$;
+GRANT EXECUTE ON FUNCTION private.get_rol() TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION private.get_rol() FROM PUBLIC;
+
+-- ---------------------------------------------------------------------------------
+-- 2. Permisos base a roles de API)
+-- ---------------------------------------------------------------------------------
+GRANT USAGE ON SCHEMA public TO authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
+
+-- ---------------------------------------------------------------------------------
+-- 3. RLS habilitada en las 15 tablas
+-- ---------------------------------------------------------------------------------
+ALTER TABLE public.club                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.usuarios            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.socios              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deportes            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.categorias          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inscripciones       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cuotas              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pagos               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comprobantes        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.categorias_gasto    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gastos              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plantillas_correo   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_logs          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.email_destinatarios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cuota_job_logs      ENABLE ROW LEVEL SECURITY;
+
+-- ---------------------------------------------------------------------------------
+-- 4. club
+-- ---------------------------------------------------------------------------------
+-- Permite que cualquier empleado registrado y activo
+CREATE POLICY club_select ON public.club
+FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL);
+
+-- Solo admin puede dar de alta la configuración institucional
+CREATE POLICY club_insert_admin ON public.club
+FOR INSERT TO authenticated WITH CHECK (private.get_rol() = 'admin');
+
+-- Solo admin puede modificar los datos institucionales y fiscales
+CREATE POLICY club_update_admin ON public.club
+FOR UPDATE TO authenticated USING (private.get_rol() = 'admin') WITH CHECK (private.get_rol() = 'admin');
+
+-- Permite al administrador eliminar el registro del club
+CREATE POLICY club_delete_admin ON public.club
+FOR DELETE TO authenticated USING (private.get_rol() = 'admin');
+
+-- ---------------------------------------------------------------------------------
+-- 5. usuarios
+-- ---------------------------------------------------------------------------------
+-- admin puede ver la lista completa de todos los usuarios, un usuario solo puede ver su perfil
+CREATE POLICY usuarios_select ON public.usuarios
+FOR SELECT TO authenticated
+USING (id = (SELECT auth.uid()) OR private.get_rol() = 'admin');
+
+-- Solo admin  puede dar de alta nuevos empleados
+CREATE POLICY usuarios_insert_admin ON public.usuarios
+FOR INSERT TO authenticated WITH CHECK (private.get_rol() = 'admin');
+
+-- Permite al administrador editar los datos de otros empleados
+CREATE POLICY usuarios_update_admin ON public.usuarios
+FOR UPDATE TO authenticated
+USING (private.get_rol() = 'admin' AND id <> (SELECT auth.uid()))
+WITH CHECK (private.get_rol() = 'admin' AND id <> (SELECT auth.uid()));
+
+-- Permite al administrador eliminar usuarios
+CREATE POLICY usuarios_delete_admin ON public.usuarios
+FOR DELETE TO authenticated
+USING (private.get_rol() = 'admin' AND id <> (SELECT auth.uid()));
+
+-- ---------------------------------------------------------------------------------
+-- 6. Operativas: lectura/insert/update para authenticated; DELETE físico solo admin
+-- ---------------------------------------------------------------------------------
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['socios','inscripciones','cuotas','pagos','comprobantes','gastos','plantillas_correo'] LOOP
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL)', t||'_select', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (private.get_rol() IS NOT NULL)', t||'_insert', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (private.get_rol() IS NOT NULL) WITH CHECK (private.get_rol() IS NOT NULL)', t||'_update', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (private.get_rol() = ''admin'')', t||'_delete_admin', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------------
+-- 7. Estructura deportiva y categorías de gasto: escritura solo admin
+-- ---------------------------------------------------------------------------------
+DO $$
+DECLARE t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['deportes','categorias','categorias_gasto'] LOOP
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL)', t||'_select', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (private.get_rol() = ''admin'')', t||'_insert_admin', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (private.get_rol() = ''admin'') WITH CHECK (private.get_rol() = ''admin'')', t||'_update_admin', t);
+    EXECUTE format('CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (private.get_rol() = ''admin'')', t||'_delete_admin', t);
+  END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------------
+-- 8. Inmutables (CU-07.1): authenticated SOLO lee; escribe service_role (jobs/webhook)
+-- ---------------------------------------------------------------------------------
+CREATE POLICY email_logs_select ON public.email_logs
+FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL);
+CREATE POLICY email_destinatarios_select ON public.email_destinatarios
+FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL);
+
+-- ---------------------------------------------------------------------------------
+-- 9. cuota_job_logs: lectura solo admin; escribe service_role (job CU-05.4)
+-- ---------------------------------------------------------------------------------
+CREATE POLICY cuota_job_logs_select_admin ON public.cuota_job_logs
+FOR SELECT TO authenticated USING (private.get_rol() = 'admin');
+
+-- 10. Recarga la caché de PostgREST
+NOTIFY pgrst, 'reload schema';

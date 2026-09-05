@@ -2,7 +2,7 @@
 -- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
 -- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
-CREATE OR REPLACE VIEW flujo_caja AS
+CREATE OR REPLACE VIEW flujo_caja WITH (security_invoker = true) AS
 -- 1. Cobros (ingreso original)
 SELECT
 'ingreso' AS tipo_movimiento,
