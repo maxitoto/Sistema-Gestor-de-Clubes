@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { dispararAvisoManual } from '../api/email.api';
 
 export function useAvisoManual() {
-  return useMutation({
-    mutationFn: dispararAvisoManual,
-  });
+	return useMutation({
+		mutationFn: dispararAvisoManual,
+	});
 }

@@ -1,3 +1,4 @@
 // shared/config/styles/index.ts
-export { lightTheme, darkTheme } from "./theme";
-export { ThemeModeContext } from "./ThemeModoContext";
+
+export { ThemeModeContext } from './ThemeModeContext';
+export { darkTheme, lightTheme } from './theme';

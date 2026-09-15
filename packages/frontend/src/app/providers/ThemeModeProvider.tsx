@@ -1,39 +1,37 @@
 // src/app/providers/ThemeModeProvider.tsx
-import { useState, useMemo, useEffect, type ReactNode } from "react";
-import { ThemeProvider, CssBaseline } from "@mui/material";
-import { ThemeModeContext, lightTheme, darkTheme } from "#shared/config/styles/";
+
+import { CssBaseline, ThemeProvider } from '@mui/material';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { darkTheme, lightTheme, ThemeModeContext } from '#shared/config/styles';
 
 export const ThemeModeProvider = ({ children }: { children: ReactNode }) => {
-  const [mode, setMode] = useState<"light" | "dark">(() => {
-    const savedMode = localStorage.getItem("themeMode");
-    return savedMode === "light" || savedMode === "dark" ? savedMode : "light";
-  });
+	const [mode, setMode] = useState<'light' | 'dark'>(() => {
+		const savedMode = localStorage.getItem('themeMode');
+		return savedMode === 'light' || savedMode === 'dark' ? savedMode : 'light';
+	});
 
-  useEffect(() => {
-    localStorage.setItem("themeMode", mode);
-  }, [mode]);
+	useEffect(() => {
+		localStorage.setItem('themeMode', mode);
+	}, [mode]);
 
-  const colorMode = useMemo(
-    () => ({
-      toggleColorMode: () => {
-        setMode((prevMode) => (prevMode === "light" ? "dark" : "light"));
-      },
-      mode,
-    }),
-    [mode],
-  );
+	const colorMode = useMemo(
+		() => ({
+			toggleColorMode: () => {
+				setMode((prevMode) => (prevMode === 'light' ? 'dark' : 'light'));
+			},
+			mode,
+		}),
+		[mode],
+	);
 
-  const theme = useMemo(
-    () => (mode === "light" ? lightTheme : darkTheme),
-    [mode],
-  );
+	const theme = useMemo(() => (mode === 'light' ? lightTheme : darkTheme), [mode]);
 
-  return (
-    <ThemeModeContext.Provider value={colorMode}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        {children}
-      </ThemeProvider>
-    </ThemeModeContext.Provider>
-  );
+	return (
+		<ThemeModeContext.Provider value={colorMode}>
+			<ThemeProvider theme={theme}>
+				<CssBaseline />
+				{children}
+			</ThemeProvider>
+		</ThemeModeContext.Provider>
+	);
 };
