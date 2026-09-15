@@ -5,10 +5,12 @@ export type SocioDestinatario = {
 };
 
 // Función pura: toma un array de socios y extrae solo los emails válidos
-export const extraerEmails = (socios: readonly SocioDestinatario[]): string[] => {
+export const extraerEmails = (
+  socios: readonly SocioDestinatario[],
+): string[] => {
   return socios
-    .map(socio => socio.email)
-    .filter(email => email !== null && email.includes("@"));
+    .map((socio) => socio.email)
+    .filter((email) => email !== null && email.includes("@"));
 };
 
 // Función pura: genera el HTML final aplicando una plantilla básica

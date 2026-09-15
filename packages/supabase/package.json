@@ -10,13 +10,17 @@
     "stop": "bunx supabase stop",
     "db:reset": "bunx supabase db reset",
     "db:push": "bunx supabase db push",
-    "db:pull": "bunx supabase db pull"
+    "db:pull": "bunx supabase db pull",
+    "newEdge": "bunx supabase functions new",
+    "lint:arch": "bunx --bun depcruise functions",
+    "lint:functions": "bunx deno lint functions/",
+    "lint:functionsfix": "bunx deno fmt functions/",
+    "lint": "bun run lint:functionsfix && bun run lint:arch"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
-    "deno-bin": "2.2.7"
-  },
-  "peerDependencies": {
-    "typescript": "7"
+    "deno-bin": "2.2.7",
+    "dependency-cruiser": "18.3.1",
+    "typescript": "6"
   }
 }

@@ -1,9 +1,5 @@
 import { createEdgeClient } from "@core/supabase.ts";
-import {
-  corsHeaders,
-  jsonResponse,
-  errorResponse,
-} from "@core/cors.ts";
+import { corsHeaders, errorResponse, jsonResponse } from "@core/cors.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -26,9 +22,7 @@ Deno.serve(async (req) => {
     console.error("Error en comunicaciones:", error);
 
     return errorResponse(
-      error instanceof Error
-        ? error.message
-        : "Error interno del servidor",
+      error instanceof Error ? error.message : "Error interno del servidor",
       500,
     );
   }

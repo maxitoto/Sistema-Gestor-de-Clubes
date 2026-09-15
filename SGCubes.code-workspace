@@ -24,10 +24,10 @@
     "files.exclude": {
       "packages": true
     },
-    
     "files.associations": {
       "*.toml": "toml"
     },
-    "deno.path": "./node_modules/.bin/deno"
+    "deno.path": "./node_modules/.bin/deno",
+    "js/ts.tsdk.path": "⚛️ FRONTEND/node_modules/typescript/lib"
   }
 }

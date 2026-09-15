@@ -8,15 +8,26 @@ if [ "$1" != "frontend" ] && [ "$1" != "supabase" ]; then
 fi
 
 # === CONFIGURACIÓN ===
-DIR=".././packages/$1"
-OUTPUT="./estructure/$1.txt"
-SKIP=""                         # patrones a saltar
-FULL_PATTERNS="config.toml"     # archivos que siempre se muestran completos
-TRUNCATE_AFTER=150              # umbral para truncar (en líneas)
-SHOW_LINES=20                   # líneas a mostrar al truncar
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DIR="$(cd "$SCRIPT_DIR/../packages/$1" 2>/dev/null && pwd)"
+OUTPUT="$SCRIPT_DIR/$1.txt"
+SKIP=""
+FULL_PATTERNS="config.toml"
+TRUNCATE_AFTER=150
+SHOW_LINES=20
+
+# === VALIDAR QUE EL DIRECTORIO EXISTA ===
+if [ -z "$DIR" ] || [ ! -d "$DIR" ]; then
+  echo "❌ Error: No se encontró el directorio."
+  echo "   Ruta buscada: $SCRIPT_DIR/../packages/$1"
+  echo "   Script ejecutado desde: $SCRIPT_DIR"
+  exit 1
+fi
+
+echo "Analizando: $DIR"
 
 # === SCRIPT ===
-echo "Analizando el directorio: $DIR..."
+FILE_COUNT=0
 
 find "$DIR" -type f \
   -not -name "$(basename "$OUTPUT")" \
@@ -29,6 +40,7 @@ find "$DIR" -type f \
   -not -name "*.ico" \
   | sort | while IFS= read -r f; do
 
+  FILE_COUNT=$((FILE_COUNT + 1))
   echo "===== $f ====="
 
   if [ -n "$SKIP" ] && echo "$f" | grep -qiE "$SKIP"; then
@@ -51,4 +63,13 @@ find "$DIR" -type f \
   echo
 done > "$OUTPUT"
 
-echo "✅ Estructura guardada en $OUTPUT"
+# === VERIFICAR QUE NO ESTÉ VACÍO ===
+if [ ! -s "$OUTPUT" ]; then
+  echo "❌ El archivo de salida quedó vacío."
+  echo "   Ruta de salida: $OUTPUT"
+  echo "   Directorio analizado: $DIR"
+  echo "   Posible causa: no hay archivos que coincidan con los filtros."
+  exit 1
+fi
+
+echo "✅ Estructura guardada en $OUTPUT"   

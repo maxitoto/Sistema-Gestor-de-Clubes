@@ -1,4 +1,7 @@
-import { extraerEmails, formatearCuerpoCorreo } from "../domain/email_domain.ts";
+import {
+  extraerEmails,
+  formatearCuerpoCorreo,
+} from "../domain/email_domain.ts";
 import { SocioRepository } from "../infrastructure/SocioRepository.ts";
 import { sendEmail } from "@core/mailer.ts";
 
@@ -13,7 +16,9 @@ export class EnviarAvisoUseCase {
     // 1. Obtener datos (Infraestructura)
     const socios = await this.socioRepo.obtenerSociosActivos(sociosIds);
     if (socios.length === 0) {
-      throw new Error("Ninguno de los socios seleccionados es válido para recibir correos.");
+      throw new Error(
+        "Ninguno de los socios seleccionados es válido para recibir correos.",
+      );
     }
 
     // 2. Aplicar reglas de negocio (Dominio)
@@ -21,7 +26,7 @@ export class EnviarAvisoUseCase {
     if (listaEmails.length === 0) {
       throw new Error("No hay correos electrónicos válidos en la selección.");
     }
-    
+
     const htmlFinal = formatearCuerpoCorreo(cuerpo);
 
     // 3. Ejecutar acción secundaria (Infraestructura externa)
