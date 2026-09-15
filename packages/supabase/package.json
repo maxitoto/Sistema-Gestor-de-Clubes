@@ -1,0 +1,22 @@
+{
+  "name": "Backend-Gestor-De-Clubes",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bunx supabase start && bunx supabase functions serve",
+    "start:functions": "bunx supabase functions serve",
+    "start:containers": "bunx supabase start",
+    "stop": "bunx supabase stop",
+    "db:reset": "bunx supabase db reset",
+    "db:push": "bunx supabase db push",
+    "db:pull": "bunx supabase db pull"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "deno-bin": "2.2.7"
+  },
+  "peerDependencies": {
+    "typescript": "7"
+  }
+}

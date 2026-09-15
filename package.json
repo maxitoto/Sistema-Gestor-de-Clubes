@@ -1,0 +1,8 @@
+{
+  "name": "Sistema-Gestor-De-Clubes",
+  "private": true,
+  "workspaces": [
+    "packages/frontend",
+    "packages/supabase"
+  ]
+}

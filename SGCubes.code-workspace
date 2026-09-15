@@ -1,0 +1,33 @@
+{
+  "folders": [
+    {
+      "name": "⚙️ ROOT (Config & Docs)",
+      "path": "."
+    },
+    {
+      "name": "⚛️ FRONTEND",
+      "path": "packages/frontend"
+    },
+    {
+      "name": "🗄️ SUPABASE",
+      "path": "packages/supabase"
+    }
+  ],
+  "extensions": {
+    "recommendations": [
+      "biomejs.biome",
+      "denoland.vscode-deno",
+      "tamasfe.even-better-toml",
+    ]
+  },
+  "settings": {
+    "files.exclude": {
+      "packages": true
+    },
+    
+    "files.associations": {
+      "*.toml": "toml"
+    },
+    "deno.path": "./node_modules/.bin/deno"
+  }
+}

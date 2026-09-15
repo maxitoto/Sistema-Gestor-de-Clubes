@@ -22,4 +22,4 @@ yarn-debug.log*
 yarn-error.log*
 
 # IA
-estructura.txt
+*.txt

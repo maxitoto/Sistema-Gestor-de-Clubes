@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": false,
+    "checkJs": false,
+    "types": ["bun", "react", "react-dom"],
+
+    // Bundler mode
+    "moduleResolution": "bundler",  
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "exactOptionalPropertyTypes": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "forceConsistentCasingInFileNames": true,
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    "paths": {
+      "#/*": ["./src/*"],
+      "#app/*": ["./src/app/*"],
+      "#features/*": ["./src/features/*"],
+      "#pages/*": ["./src/pages/*"],
+      "#widgets/*": ["./src/widgets/*"],
+      "#entities/*": ["./src/entities/*"],
+      "#shared/*": ["./src/shared/*"]
+    },
+
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}
