@@ -1,0 +1,8 @@
+{
+  "imports": {
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.116.0",
+    "@core/": "./_shared/core/",
+    "@modules/": "./_shared/modules/",
+    "nodemailer": "https://esm.sh/nodemailer@10.0.10"
+  }
+}

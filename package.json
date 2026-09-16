@@ -1,0 +1,18 @@
+{
+  "name": "Sistema-Gestor-De-Clubes",
+  "private": true,
+  "workspaces": [
+    "packages/frontend",
+    "packages/supabase"
+  ],
+  "scripts": {
+    "lint:front": "bun --filter Frontend-Gestor-De-Clubes lint",
+    "lint:back": "bun --filter Backend-Gestor-De-Clubes lint",
+    "lint:arch": "bun --filter '*' lint:arch",
+    "lint": "bun --filter '*' lint",
+    
+    "dev:front": "bun --filter Frontend-Gestor-De-Clubes dev",
+    "dev:back": "bun --filter Backend-Gestor-De-Clubes start",
+    "dev": "bun --filter '*' dev" 
+  }
+}
