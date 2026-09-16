@@ -168,3 +168,21 @@ find src/ -type f | sort | while IFS= read -r f; do echo "===== $f ====="; cat "
 | **`_shared/modules/<modulo>/infrastructure/`** | **Driven Adapters (Persistencia e Integraciones)** | Implementación técnica de acceso a datos (ej. `SocioRepository.ts`). Es el único lugar donde se escribe código dependiente de Supabase (`supabase.from(...)`) o APIs externas.
 
  |
+
+layers: {
+  app: {can_use:{shared, entities, features, widgets, pages}, can_be_used_by:{*}},
+  pages: {can_use:{shared, entities, features, widgets}, can_be_used_by:{app}},
+  widgets: {can_use:{shared, entities, features }, can_be_used_by:{app, pages}},
+  features: {can_use:{shared, entities }, can_be_used_by:{app, pages, widgets}},
+  entities: {can_use:{shared}, can_be_used_by:{app, pages, widgets, features}},
+  shared: {can_use:{*}, can_be_used_by:{app, pages, widgets, features, entities}}
+}
+
+| Layer        | Can use                                    | Can be used by                          |
+| ------------ | ------------------------------------------ | --------------------------------------- |
+| **app**      | shared, entities, features, widgets, pages | *                                       |
+| **pages**    | shared, entities, features, widgets        | app                                     |
+| **widgets**  | shared, entities, features                 | pages, app                              |
+| **features** | shared, entities                           | widgets, pages, app                     |
+| **entities** | shared                                     | features, widgets, pages, app           |
+| **shared**   | *                                          | entities, features, widgets, pages, app |
