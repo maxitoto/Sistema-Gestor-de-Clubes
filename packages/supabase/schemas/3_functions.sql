@@ -21,6 +21,12 @@ LANGUAGE plpgsql SET search_path = public AS $$   -- SECURITY INVOKER (default):
 DECLARE
   v_cuota cuotas%ROWTYPE; v_pago_id uuid; v_comprobante_id uuid;
 BEGIN
+
+  -- Hardening: el cobrador debe ser el usuario de la sesión
+  IF p_usuario_id <> auth.uid() THEN
+    RAISE EXCEPTION 'No puede registrar cobros en nombre de otro usuario';
+  END IF;
+
    -- Bloqueo pesimista: serializa cobros simultáneos (ND-2)
   SELECT * INTO v_cuota FROM cuotas WHERE id = p_cuota_id FOR UPDATE;  -- ND-2
   IF NOT FOUND THEN RAISE EXCEPTION 'Cuota inexistente'; END IF;
