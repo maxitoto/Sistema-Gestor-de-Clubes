@@ -62,4 +62,38 @@ true AS es_reverso
 FROM gastos g
 WHERE g.estado = 'anulado';
 
+--=================================================================================
+-- VISTAS DE LECTURA PARA FILTROS POR ESTADO DERIVADO (ND-17, CU-01.4, CU-05.1)
+--=================================================================================
+-- Padrón con estado de pago: la morosidad sale de la ÚNICA regla (es_socio_moroso, ND-12)
+CREATE OR REPLACE VIEW v_socios_estado_pago WITH (security_invoker = true) AS
+SELECT
+  s.*,
+  m.es_moroso,
+  CASE WHEN m.es_moroso THEN 'moroso' ELSE 'al_dia' END AS estado_pago
+FROM socios s
+CROSS JOIN LATERAL (SELECT es_socio_moroso(s.id) AS es_moroso) m;
 
+-- Historial de cobros con la etiqueta de pantalla del filtro (equivalencia CU-05.1)
+CREATE OR REPLACE VIEW v_pagos_etiqueta_fiscal WITH (security_invoker = true) AS
+SELECT
+  p.id, p.cuota_id, p.usuario_id, p.monto, p.medio_pago, p.referencia_pago,
+  p.fecha_pago, p.estado AS estado_pago,
+  c.id AS comprobante_id, c.tipo AS tipo_comprobante, c.numero_comprobante,
+  c.estado_fiscal, c.intentos_reintento, c.proximo_reintento_en,
+  s.id AS socio_id, s.dni AS socio_dni, s.nombre AS socio_nombre,
+  s.apellido AS socio_apellido, s.estado AS socio_estado,
+  CASE
+    WHEN p.estado = 'anulado' THEN 'anulado'                                  -- "Anulado"
+    WHEN c.estado_fiscal = 'valido' THEN 'activo'                             -- "Activo"
+    WHEN c.estado_fiscal IN ('pendiente_cae','anulacion_pendiente')
+         THEN 'pendiente_cae'                                                -- "Pendiente de CAE"
+    ELSE 'fallido'                                                            -- "Fallido"
+  END AS etiqueta_recibo
+FROM pagos p
+JOIN comprobantes c ON c.pago_id = p.id AND c.tipo = 'factura'  -- 1 factura por pago
+JOIN cuotas q        ON q.id = p.cuota_id
+JOIN socios s        ON s.id = q.socio_id;
+
+GRANT SELECT ON public.v_socios_estado_pago    TO authenticated, service_role;
+GRANT SELECT ON public.v_pagos_etiqueta_fiscal TO authenticated, service_role;

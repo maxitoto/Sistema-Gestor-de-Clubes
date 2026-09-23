@@ -118,16 +118,47 @@ CREATE POLICY usuarios_delete_admin ON public.usuarios
 FOR DELETE TO authenticated
 USING (private.get_rol() = 'admin' AND id <> (SELECT auth.uid()));
 
--- ---------------------------------------------------------------------------------
 -- 6. Operativas: lectura/insert/update para authenticated; DELETE físico solo admin
--- ---------------------------------------------------------------------------------
 DO $$
-DECLARE t TEXT;
-BEGIN
-  FOREACH t IN ARRAY ARRAY['socios','inscripciones','cuotas','pagos','comprobantes','gastos','plantillas_correo'] LOOP
+  DECLARE t TEXT;
+  BEGIN
+    FOREACH t IN ARRAY ARRAY['socios','inscripciones','cuotas','plantillas_correo'] LOOP
+      EXECUTE format('CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL)', t||'_select', t);
+      EXECUTE format('CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (private.get_rol() IS NOT NULL)', t||'_insert', t);
+      EXECUTE format('CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (private.get_rol() IS NOT NULL) WITH CHECK (private.get_rol() IS NOT NULL)', t||'_update', t);
+      EXECUTE format('CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (private.get_rol() = ''admin'')', t||'_delete_admin', t);
+  END LOOP;
+END $$;
+
+-- 6.bis. Pagos y gastos: el Responsable solo modifica/anula el día en curso (CU-05.3 / CU-06.4)
+CREATE POLICY pagos_update ON public.pagos
+FOR UPDATE TO authenticated
+USING (private.get_rol() = 'admin'
+       OR (private.get_rol() = 'responsable'
+           AND (fecha_pago AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date))
+WITH CHECK (private.get_rol() = 'admin'
+       OR (private.get_rol() = 'responsable'
+           AND (fecha_pago AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date));
+
+CREATE POLICY gastos_update ON public.gastos
+FOR UPDATE TO authenticated
+USING (private.get_rol() = 'admin'
+       OR (private.get_rol() = 'responsable'
+           AND fecha = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date))
+WITH CHECK (private.get_rol() = 'admin'
+       OR (private.get_rol() = 'responsable'
+           AND fecha = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date));
+
+-- 6.ter. Pagos, gastos y comprobantes: select/insert/delete,
+-- y comprobantes SIN política de UPDATE para authenticated (solo service_role los toca: integridad fiscal)
+DO $$
+  DECLARE t TEXT;
+  BEGIN
+    FOREACH t IN ARRAY ARRAY['pagos','gastos','comprobantes'] LOOP
     EXECUTE format('CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.get_rol() IS NOT NULL)', t||'_select', t);
     EXECUTE format('CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (private.get_rol() IS NOT NULL)', t||'_insert', t);
-    EXECUTE format('CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (private.get_rol() IS NOT NULL) WITH CHECK (private.get_rol() IS NOT NULL)', t||'_update', t);
     EXECUTE format('CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (private.get_rol() = ''admin'')', t||'_delete_admin', t);
   END LOOP;
 END $$;
