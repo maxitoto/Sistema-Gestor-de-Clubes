@@ -29,7 +29,8 @@ punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
 certificado_key TEXT, -- Encriptado en aplicación
 certificado_vencimiento DATE,
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT chk_punto_venta CHECK (punto_venta BETWEEN 1 AND 99999)
 );
 -- Asegurar que solo exista una configuración de club
 ALTER TABLE club ADD CONSTRAINT unica_configuracion_club CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid);
@@ -109,7 +110,11 @@ fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
 fecha_baja DATE,
 estado estado_inscripcion NOT NULL DEFAULT 'activa',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+CONSTRAINT chk_inscripcion_estado_fecha CHECK (
+    (estado = 'activa'   AND fecha_baja IS NULL) OR
+    (estado = 'inactiva' AND fecha_baja IS NOT NULL)
+)
 );
 --=================================================================================
 -- 5. MÓDULO FINANCIERO (FACTURACIÓN Y PAGOS)
