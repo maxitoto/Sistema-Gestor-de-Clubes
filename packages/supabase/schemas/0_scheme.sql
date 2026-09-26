@@ -54,6 +54,9 @@ CREATE TABLE socios (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 numero_socio SERIAL UNIQUE,
 dni VARCHAR(20) NOT NULL UNIQUE,
+dni_anterior VARCHAR(20),                          -- auditoría: valor previo a la última corrección
+dni_corregido_at TIMESTAMP WITH TIME ZONE,         -- auditoría: cuándo se corrigió
+dni_corregido_por UUID REFERENCES usuarios(id) ON DELETE SET NULL, -- auditoría: quién corrigió
 nombre VARCHAR(100) NOT NULL,
 apellido VARCHAR(100) NOT NULL,
 fecha_nacimiento DATE NOT NULL,
@@ -94,7 +97,7 @@ CREATE TABLE categorias (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 deporte_id UUID NOT NULL REFERENCES deportes(id) ON DELETE RESTRICT,
 nombre VARCHAR(100) NOT NULL,
-arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual >= 0),
+arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual > 0),
 edad_min INTEGER CHECK (edad_min >= 0),
 edad_max INTEGER CHECK (edad_max >= edad_min),
 estado estado_basico NOT NULL DEFAULT 'activo',

@@ -27,10 +27,22 @@ CREATE TRIGGER update_plantillas_correo_modtime BEFORE UPDATE ON plantillas_corr
 --=================================================================================
 CREATE OR REPLACE FUNCTION trg_socios_campos_inmutables()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_rol text := COALESCE(current_setting('request.role', true), 'postgres');
 BEGIN
-  IF NEW.dni IS DISTINCT FROM OLD.dni
-     OR NEW.numero_socio IS DISTINCT FROM OLD.numero_socio THEN
-    RAISE EXCEPTION 'Campos inmutables: el DNI y el numero de socio no pueden modificarse (CU-01.2)';
+  -- Matrícula: inmutable absoluta (identificador externo en recibos)
+  IF NEW.numero_socio IS DISTINCT FROM OLD.numero_socio THEN
+    RAISE EXCEPTION 'Campo inmutable: el numero de socio no puede modificarse (CU-01.2)';
+  END IF;
+  -- DNI: inmutable para operativos; solo Admin (o service_role / psql de runbook) lo corrige
+  IF NEW.dni IS DISTINCT FROM OLD.dni THEN
+    IF v_rol NOT IN ('service_role', 'postgres')
+       AND private.get_rol() IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'El DNI solo puede corregirlo un Administrador (CU-01.2)';
+    END IF;
+    NEW.dni_anterior      := OLD.dni;
+    NEW.dni_corregido_at  := NOW();
+    NEW.dni_corregido_por := auth.uid();
   END IF;
   RETURN NEW;
 END;
@@ -96,6 +108,38 @@ CREATE TRIGGER usuarios_email_sync_guard
 BEFORE UPDATE ON usuarios FOR EACH ROW EXECUTE FUNCTION trg_usuarios_email_solo_flujo_admin();
 
 --=================================================================================
+-- VENTANA DE CORRECCIÓN DE GASTOS (CU-06.4)
+-- Fuera del día de REGISTRO, los campos operativos no se editan:
+-- la corrección es por anulación + nuevo registro (trazabilidad del Libro Mayor).
+-- La anulación (estado/motivo) queda fuera: la rigen CU-06.4 y la RLS de rol/fecha.
+--=================================================================================
+CREATE OR REPLACE FUNCTION trg_gastos_edicion_mismo_dia()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_rol text := COALESCE(current_setting('request.role', true), 'postgres');
+  v_hoy date := (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+  v_dia_registro date := (OLD.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+BEGIN
+  IF (NEW.fecha IS DISTINCT FROM OLD.fecha
+      OR NEW.categoria_id IS DISTINCT FROM OLD.categoria_id
+      OR NEW.concepto IS DISTINCT FROM OLD.concepto
+      OR NEW.monto IS DISTINCT FROM OLD.monto
+      OR NEW.metodo_pago IS DISTINCT FROM OLD.metodo_pago
+      OR NEW.referencia_banco IS DISTINCT FROM OLD.referencia_banco
+      OR NEW.descripcion IS DISTINCT FROM OLD.descripcion
+      OR NEW.evidencia_url IS DISTINCT FROM OLD.evidencia_url)
+     AND v_dia_registro <> v_hoy
+     AND v_rol NOT IN ('service_role', 'postgres') THEN
+    RAISE EXCEPTION 'Los gastos de dias anteriores se corrigen por anulacion y nuevo registro (CU-06.4)';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SET search_path = public;
+
+CREATE TRIGGER gastos_edicion_ventana
+BEFORE UPDATE ON gastos FOR EACH ROW EXECUTE FUNCTION trg_gastos_edicion_mismo_dia();
+
+--=================================================================================
 -- TRIGGER PARA SINCRONIZAR USUARIOS DE AUTH A LA TABLA PÚBLICA
 --=================================================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -115,7 +159,8 @@ BEGIN
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon, authenticated, PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM anon, authenticated, service_role;
 
 -- Trigger que se dispara automáticamente cada vez que un usuario se registra o es creado en Supabase Auth
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;

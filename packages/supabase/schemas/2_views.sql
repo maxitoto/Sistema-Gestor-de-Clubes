@@ -70,9 +70,17 @@ CREATE OR REPLACE VIEW v_socios_estado_pago WITH (security_invoker = true) AS
 SELECT
   s.*,
   m.es_moroso,
-  CASE WHEN m.es_moroso THEN 'moroso' ELSE 'al_dia' END AS estado_pago
+  CASE WHEN m.es_moroso THEN 'moroso' ELSE 'al_dia' END AS estado_pago,
+  d.pendientes_count,
+  d.deuda_pendiente
 FROM socios s
-CROSS JOIN LATERAL (SELECT es_socio_moroso(s.id) AS es_moroso) m;
+CROSS JOIN LATERAL (SELECT es_socio_moroso(s.id) AS es_moroso) m
+CROSS JOIN LATERAL (
+  SELECT count(*)::integer AS pendientes_count,
+         COALESCE(sum(monto), 0) AS deuda_pendiente
+  FROM cuotas
+  WHERE socio_id = s.id AND estado = 'pendiente'
+) d;
 
 -- Historial de cobros con la etiqueta de pantalla del filtro (equivalencia CU-05.1)
 CREATE OR REPLACE VIEW v_pagos_etiqueta_fiscal WITH (security_invoker = true) AS
@@ -94,6 +102,25 @@ FROM pagos p
 JOIN comprobantes c ON c.pago_id = p.id AND c.tipo = 'factura'  -- 1 factura por pago
 JOIN cuotas q        ON q.id = p.cuota_id
 JOIN socios s        ON s.id = q.socio_id;
+
+--=================================================================================
+-- MOROSIDAD POR DEPORTE (CU-09.1): importe de cuotas EN MORA por deporte
+-- Misma regla temporal única: 1 cuota pendiente y >30 días emitida); aditiva por deporte
+--=================================================================================
+CREATE OR REPLACE VIEW v_morosidad_por_deporte WITH (security_invoker = true) AS
+SELECT
+  d.id AS deporte_id,
+  d.nombre AS deporte,
+  count(*)::integer AS cuotas_morosas,
+  COALESCE(SUM(q.monto), 0) AS deuda_morosa
+FROM deportes d
+JOIN categorias c ON c.deporte_id = d.id
+JOIN cuotas q   ON q.categoria_id = c.id
+WHERE q.estado = 'pendiente'
+  AND q.created_at < NOW() - interval '30 days'
+GROUP BY d.id, d.nombre;
+
+GRANT SELECT ON public.v_morosidad_por_deporte TO authenticated, service_role;
 
 GRANT SELECT ON public.v_socios_estado_pago    TO authenticated, service_role;
 GRANT SELECT ON public.v_pagos_etiqueta_fiscal TO authenticated, service_role;

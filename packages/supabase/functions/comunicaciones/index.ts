@@ -7,17 +7,26 @@ import { EnviarAvisoUseCase } from "@modules/comunicaciones/application/EnviarAv
 
 // Le indicas el prefijo una sola vez; el resto de tus endpoints son relativos
 const app = new Hono().basePath("/comunicaciones");
-
 app.use("*", cors());
 
 app.post("/enviar-aviso", async (c) => {
-  const { asunto, cuerpo, sociosIds } = await c.req.json();
-  const supabase = createEdgeClient(c.req.raw);
+  const {
+    asunto,
+    cuerpo,
+    sociosIds,
+    incluirDesuscriptos = false,
+  } = await c.req.json();
 
+  const supabase = createEdgeClient(c.req.raw);
   const repo = new SocioRepository(supabase);
   const useCase = new EnviarAvisoUseCase(repo);
-  const result = await useCase.execute(asunto, cuerpo, sociosIds);
 
+  const result = await useCase.execute(
+    asunto,
+    cuerpo,
+    sociosIds,
+    Boolean(incluirDesuscriptos),
+  );
   return c.json(result);
 });
 

@@ -5,12 +5,12 @@ CREATE OR REPLACE FUNCTION es_socio_moroso(p_socio_id uuid)
 RETURNS boolean
 LANGUAGE sql STABLE SET search_path = public
 AS $$
-  SELECT COALESCE(
-    (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
-    false
-  )
-  FROM cuotas
-  WHERE socio_id = p_socio_id AND estado = 'pendiente';
+SELECT EXISTS (
+  SELECT 1 FROM cuotas
+  WHERE socio_id = p_socio_id
+    AND estado = 'pendiente'
+    AND created_at < now() - interval '30 days'
+);
 $$;
 
 CREATE OR REPLACE FUNCTION cobrar_cuota(
@@ -95,29 +95,135 @@ WHERE c.deporte_id = p_deporte_id
 $$;
 
 --=================================================================================
--- FUENTE ÚNICA DE PROPORCIONALIDAD (ND-13, regla 100/50/25)
--- Monto de la primera cuota del período; NULL = no generar cuota ese período
+-- TRAMO DE PROPORCIONALIDAD (ND-13): fuente única del porcentaje, reutilizada
+-- por cuota_proporcional y por la previsualización de inscripción (modal)
 --=================================================================================
-CREATE OR REPLACE FUNCTION cuota_proporcional(
-    p_fecha_alta date,
-    p_periodo_mes integer,
-    p_periodo_anio integer,
-    p_arancel numeric
-)
-RETURNS numeric
+CREATE OR REPLACE FUNCTION tramo_proporcional(p_fecha date, p_mes integer, p_anio integer)
+RETURNS integer
 LANGUAGE sql IMMUTABLE SET search_path = public
 AS $$
 SELECT CASE
-  WHEN p_fecha_alta < make_date(p_periodo_anio, p_periodo_mes, 1)
-       THEN round(p_arancel, 2)                                        -- alta anterior al período: 100%
-  WHEN p_fecha_alta > (make_date(p_periodo_anio, p_periodo_mes, 1)
-                       + interval '1 month' - interval '1 day')::date
-       THEN NULL                                                       -- alta posterior al período: sin cuota
-  WHEN extract(day FROM p_fecha_alta) <= 10 THEN round(p_arancel, 2)           -- tramo 1–10: 100%
-  WHEN extract(day FROM p_fecha_alta) <= 20 THEN round(p_arancel * 0.50, 2)    -- tramo 11–20: 50%
-  ELSE round(p_arancel * 0.25, 2)                                              -- tramo 21+: 25%
+  WHEN p_fecha < make_date(p_anio, p_mes, 1) THEN 100
+  WHEN p_fecha > (make_date(p_anio, p_mes, 1) + interval '1 month' - interval '1 day')::date THEN 0
+  WHEN extract(day FROM p_fecha) <= 10 THEN 100
+  WHEN extract(day FROM p_fecha) <= 20 THEN 50
+  ELSE 25
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION cuota_proporcional(
+  p_fecha_alta date, p_periodo_mes integer, p_periodo_anio integer, p_arancel numeric
+) RETURNS numeric
+LANGUAGE sql IMMUTABLE SET search_path = public
+AS $$
+SELECT CASE WHEN tramo_proporcional(p_fecha_alta, p_periodo_mes, p_periodo_anio) = 0
+            THEN NULL                                   -- alta posterior al período: sin cuota
+            ELSE round(p_arancel * tramo_proporcional(p_fecha_alta, p_periodo_mes, p_periodo_anio) / 100.0, 2)
+       END;
+$$;
+
+--=================================================================================
+-- RANGO ETARIO EN LA INSCRIPCIÓN (CU-04.1): advertencia NO bloqueante
+-- Se evalúa a la fecha de alta; rango NULL = intervalo abierto (sin advertencia)
+--=================================================================================
+CREATE OR REPLACE FUNCTION categoria_edad_fuera_de_rango(
+  p_fecha_alta date, p_fecha_nacimiento date, p_edad_min integer, p_edad_max integer
+) RETURNS boolean
+LANGUAGE sql IMMUTABLE SET search_path = public
+AS $$
+SELECT p_edad_min IS NOT NULL AND p_edad_max IS NOT NULL
+   AND ( date_part('year', age(p_fecha_alta, p_fecha_nacimiento)) < p_edad_min
+      OR date_part('year', age(p_fecha_alta, p_fecha_nacimiento)) > p_edad_max );
+$$;
+
+--=================================================================================
+-- PREVISUALIZACIÓN DE INSCRIPCIÓN (CU-04.1 paso 3-5):
+-- monto y tramo server-side (ND-13) + advertencia de edad en una sola ida
+--=================================================================================
+CREATE OR REPLACE FUNCTION previsualizar_inscripcion(p_socio_id uuid, p_categoria_id uuid)
+RETURNS TABLE (monto_proporcional numeric, tramo_pct integer, advertencia_edad boolean,
+               edad_socio_anios integer, rango_min integer, rango_max integer)
+LANGUAGE sql STABLE SET search_path = public
+AS $$
+SELECT
+  cuota_proporcional(CURRENT_DATE, extract(month FROM CURRENT_DATE)::int,
+                     extract(year FROM CURRENT_DATE)::int, c.arancel_mensual),
+  tramo_proporcional(CURRENT_DATE, extract(month FROM CURRENT_DATE)::int,
+                     extract(year FROM CURRENT_DATE)::int),
+  categoria_edad_fuera_de_rango(CURRENT_DATE, s.fecha_nacimiento, c.edad_min, c.edad_max),
+  date_part('year', age(CURRENT_DATE, s.fecha_nacimiento))::int,
+  c.edad_min, c.edad_max
+FROM socios s CROSS JOIN categorias c
+WHERE s.id = p_socio_id AND c.id = p_categoria_id;
+$$;
+
+--=================================================================================
+-- BAJAS UNIFICADAS DE DEPORTES Y CATEGORÍAS (CU-03.3 / CU-03.6, D-24)
+-- Baja SIEMPRE lógica; el historial se conserva; guarda de dos niveles en el motor
+--=================================================================================
+CREATE OR REPLACE FUNCTION baja_deporte(p_deporte_id uuid)
+RETURNS void
+LANGUAGE plpgsql SET search_path = public
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM categorias WHERE deporte_id = p_deporte_id AND estado = 'activo') THEN
+    RAISE EXCEPTION 'No se puede dar de baja el deporte porque posee categorias activas. De de baja primero esas categorias (CU-03.3)';
+  END IF;
+  UPDATE deportes SET estado = 'inactivo' WHERE id = p_deporte_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION baja_categoria(p_categoria_id uuid)
+RETURNS void
+LANGUAGE plpgsql SET search_path = public
+AS $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM inscripciones WHERE categoria_id = p_categoria_id AND estado = 'activa') THEN
+    RAISE EXCEPTION 'No se puede dar de baja la categoria porque existen socios inscriptos activos en la misma. Desvinculelos primero (CU-03.6)';
+  END IF;
+  UPDATE categorias SET estado = 'inactivo' WHERE id = p_categoria_id;
+END;
+$$;
+
+--=================================================================================
+-- REAPERTURA DE REGULARIZACIÓN FISCAL (CU-05.7)
+-- Solo transición fallido -> pendiente_cae; no toca pago, caja ni deuda.
+-- SECURITY DEFINER acotado: comprobantes no tiene política UPDATE para
+-- authenticated; la guarda de rol va dentro, estilo cobrar_cuota().
+--=================================================================================
+CREATE OR REPLACE FUNCTION reabrir_regularizacion_fiscal(p_comprobante_id uuid)
+RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  IF private.get_rol() IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Solo el Administrador puede reabrir la regularizacion fiscal (CU-05.7)';
+  END IF;
+  UPDATE comprobantes
+     SET estado_fiscal = 'pendiente_cae',
+         intentos_reintento = 0,
+         proximo_reintento_en = NOW() + interval '10 min'
+   WHERE id = p_comprobante_id AND estado_fiscal = 'fallido';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'El comprobante no existe o no esta en estado fallido';
+  END IF;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) TO authenticated, service_role;
+
+REVOKE EXECUTE ON FUNCTION public.baja_deporte(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.baja_deporte(uuid) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.baja_categoria(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.baja_categoria(uuid) TO authenticated, service_role;
+
+REVOKE EXECUTE ON FUNCTION public.tramo_proporcional(date, integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.tramo_proporcional(date, integer, integer) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.categoria_edad_fuera_de_rango(date, date, integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.categoria_edad_fuera_de_rango(date, date, integer, integer) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.previsualizar_inscripcion(uuid, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.previsualizar_inscripcion(uuid, uuid) TO authenticated, service_role;
 
 REVOKE EXECUTE ON FUNCTION public.cuota_proporcional(date, integer, integer, numeric) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.cuota_proporcional(date, integer, integer, numeric) TO authenticated, service_role;
