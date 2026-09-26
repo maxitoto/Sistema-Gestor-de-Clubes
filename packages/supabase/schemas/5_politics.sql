@@ -146,10 +146,12 @@ CREATE POLICY gastos_update ON public.gastos
 FOR UPDATE TO authenticated
 USING (private.get_rol() = 'admin'
        OR (private.get_rol() = 'responsable'
-           AND fecha = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date))
+           AND (created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date))
 WITH CHECK (private.get_rol() = 'admin'
        OR (private.get_rol() = 'responsable'
-           AND fecha = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date));
+           AND (created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date
+               = (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date));
 
 -- 6.ter. Pagos, gastos y comprobantes: select/insert/delete,
 -- y comprobantes SIN política de UPDATE para authenticated (solo service_role los toca: integridad fiscal)
