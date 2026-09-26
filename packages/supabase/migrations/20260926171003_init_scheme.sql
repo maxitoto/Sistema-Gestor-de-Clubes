@@ -28,7 +28,7 @@ CREATE TABLE "public"."categorias" (
   "edad_max"        integer,
   "created_at"      timestamp with time zone DEFAULT now(),
   "updated_at"      timestamp with time zone DEFAULT now(),
-  CONSTRAINT "categorias_arancel_mensual_check" CHECK ((arancel_mensual >= (0)::numeric)),
+  CONSTRAINT "categorias_arancel_mensual_check" CHECK ((arancel_mensual > (0)::numeric)),
   CONSTRAINT "categorias_check" CHECK ((edad_max >= edad_min)),
   CONSTRAINT "categorias_deporte_id_nombre_key" UNIQUE (deporte_id, nombre),
   CONSTRAINT "categorias_edad_min_check" CHECK ((edad_min >= 0)),
@@ -224,6 +224,9 @@ CREATE TABLE "public"."socios" (
   "id"                           uuid                     NOT NULL DEFAULT gen_random_uuid(),
   "numero_socio"                 integer                  NOT NULL DEFAULT nextval('public.socios_numero_socio_seq'::regclass),
   "dni"                          character varying(20)    NOT NULL,
+  "dni_anterior"                 character varying(20),
+  "dni_corregido_at"             timestamp with time zone,
+  "dni_corregido_por"            uuid,
   "nombre"                       character varying(100)   NOT NULL,
   "apellido"                     character varying(100)   NOT NULL,
   "fecha_nacimiento"             date                     NOT NULL,
@@ -390,6 +393,52 @@ CREATE OR REPLACE FUNCTION private.get_rol()
   WHERE id = auth.uid() AND estado = 'activo';
 $function$;
 
+CREATE OR REPLACE FUNCTION public.baja_categoria (
+  p_categoria_id uuid
+)
+  RETURNS void
+  LANGUAGE plpgsql
+  SET search_path TO 'public'
+  AS $function$
+BEGIN
+  IF EXISTS (SELECT 1 FROM inscripciones WHERE categoria_id = p_categoria_id AND estado = 'activa') THEN
+    RAISE EXCEPTION 'No se puede dar de baja la categoria porque existen socios inscriptos activos en la misma. Desvinculelos primero (CU-03.6)';
+  END IF;
+  UPDATE categorias SET estado = 'inactivo' WHERE id = p_categoria_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.baja_deporte (
+  p_deporte_id uuid
+)
+  RETURNS void
+  LANGUAGE plpgsql
+  SET search_path TO 'public'
+  AS $function$
+BEGIN
+  IF EXISTS (SELECT 1 FROM categorias WHERE deporte_id = p_deporte_id AND estado = 'activo') THEN
+    RAISE EXCEPTION 'No se puede dar de baja el deporte porque posee categorias activas. De de baja primero esas categorias (CU-03.3)';
+  END IF;
+  UPDATE deportes SET estado = 'inactivo' WHERE id = p_deporte_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.categoria_edad_fuera_de_rango (
+  p_fecha_alta       date,
+  p_fecha_nacimiento date,
+  p_edad_min         integer,
+  p_edad_max         integer
+)
+  RETURNS boolean
+  LANGUAGE sql
+  IMMUTABLE
+  SET search_path TO 'public'
+  AS $function$
+SELECT p_edad_min IS NOT NULL AND p_edad_max IS NOT NULL
+   AND ( date_part('year', age(p_fecha_alta, p_fecha_nacimiento)) < p_edad_min
+      OR date_part('year', age(p_fecha_alta, p_fecha_nacimiento)) > p_edad_max );
+$function$;
+
 CREATE OR REPLACE FUNCTION public.categorias_rango_superpuesto (
   p_deporte_id        uuid,
   p_edad_min          integer,
@@ -493,16 +542,10 @@ CREATE OR REPLACE FUNCTION public.cuota_proporcional (
   IMMUTABLE
   SET search_path TO 'public'
   AS $function$
-SELECT CASE
-  WHEN p_fecha_alta < make_date(p_periodo_anio, p_periodo_mes, 1)
-       THEN round(p_arancel, 2)                                        -- alta anterior al período: 100%
-  WHEN p_fecha_alta > (make_date(p_periodo_anio, p_periodo_mes, 1)
-                       + interval '1 month' - interval '1 day')::date
-       THEN NULL                                                       -- alta posterior al período: sin cuota
-  WHEN extract(day FROM p_fecha_alta) <= 10 THEN round(p_arancel, 2)           -- tramo 1–10: 100%
-  WHEN extract(day FROM p_fecha_alta) <= 20 THEN round(p_arancel * 0.50, 2)    -- tramo 11–20: 50%
-  ELSE round(p_arancel * 0.25, 2)                                              -- tramo 21+: 25%
-END;
+SELECT CASE WHEN tramo_proporcional(p_fecha_alta, p_periodo_mes, p_periodo_anio) = 0
+            THEN NULL                                   -- alta posterior al período: sin cuota
+            ELSE round(p_arancel * tramo_proporcional(p_fecha_alta, p_periodo_mes, p_periodo_anio) / 100.0, 2)
+       END;
 $function$;
 
 CREATE OR REPLACE FUNCTION public.es_socio_moroso (
@@ -513,12 +556,12 @@ CREATE OR REPLACE FUNCTION public.es_socio_moroso (
   STABLE
   SET search_path TO 'public'
   AS $function$
-  SELECT COALESCE(
-    (count(*) >= 2) OR (min(created_at) < now() - interval '30 days'),
-    false
-  )
-  FROM cuotas
-  WHERE socio_id = p_socio_id AND estado = 'pendiente';
+SELECT EXISTS (
+  SELECT 1 FROM cuotas
+  WHERE socio_id = p_socio_id
+    AND estado = 'pendiente'
+    AND created_at < now() - interval '30 days'
+);
 $function$;
 
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -539,6 +582,78 @@ BEGIN
 END;
 $function$;
 
+REVOKE ALL ON FUNCTION "public"."handle_new_user"() FROM PUBLIC, "anon", "authenticated", "service_role";
+
+CREATE OR REPLACE FUNCTION public.previsualizar_inscripcion (
+  p_socio_id     uuid,
+  p_categoria_id uuid
+)
+  RETURNS TABLE (
+    monto_proporcional numeric,
+    tramo_pct          integer,
+    advertencia_edad   boolean,
+    edad_socio_anios   integer,
+    rango_min          integer,
+    rango_max          integer
+  )
+  LANGUAGE sql
+  STABLE
+  SET search_path TO 'public'
+  AS $function$
+SELECT
+  cuota_proporcional(CURRENT_DATE, extract(month FROM CURRENT_DATE)::int,
+                     extract(year FROM CURRENT_DATE)::int, c.arancel_mensual),
+  tramo_proporcional(CURRENT_DATE, extract(month FROM CURRENT_DATE)::int,
+                     extract(year FROM CURRENT_DATE)::int),
+  categoria_edad_fuera_de_rango(CURRENT_DATE, s.fecha_nacimiento, c.edad_min, c.edad_max),
+  date_part('year', age(CURRENT_DATE, s.fecha_nacimiento))::int,
+  c.edad_min, c.edad_max
+FROM socios s CROSS JOIN categorias c
+WHERE s.id = p_socio_id AND c.id = p_categoria_id;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.reabrir_regularizacion_fiscal (
+  p_comprobante_id uuid
+)
+  RETURNS void
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path TO 'public'
+  AS $function$
+BEGIN
+  IF private.get_rol() IS DISTINCT FROM 'admin' THEN
+    RAISE EXCEPTION 'Solo el Administrador puede reabrir la regularizacion fiscal (CU-05.7)';
+  END IF;
+  UPDATE comprobantes
+     SET estado_fiscal = 'pendiente_cae',
+         intentos_reintento = 0,
+         proximo_reintento_en = NOW() + interval '10 min'
+   WHERE id = p_comprobante_id AND estado_fiscal = 'fallido';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'El comprobante no existe o no esta en estado fallido';
+  END IF;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.tramo_proporcional (
+  p_fecha date,
+  p_mes   integer,
+  p_anio  integer
+)
+  RETURNS integer
+  LANGUAGE sql
+  IMMUTABLE
+  SET search_path TO 'public'
+  AS $function$
+SELECT CASE
+  WHEN p_fecha < make_date(p_anio, p_mes, 1) THEN 100
+  WHEN p_fecha > (make_date(p_anio, p_mes, 1) + interval '1 month' - interval '1 day')::date THEN 0
+  WHEN extract(day FROM p_fecha) <= 10 THEN 100
+  WHEN extract(day FROM p_fecha) <= 20 THEN 50
+  ELSE 25
+END;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.trg_cuotas_campos_inmutables()
   RETURNS TRIGGER
   LANGUAGE plpgsql
@@ -551,6 +666,32 @@ BEGIN
      OR NEW.periodo_anio IS DISTINCT FROM OLD.periodo_anio
      OR NEW.monto IS DISTINCT FROM OLD.monto THEN
     RAISE EXCEPTION 'Campos inmutables de la cuota: solo puede cambiar su estado (snapshot de arancel, CU-03.5)';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.trg_gastos_edicion_mismo_dia()
+  RETURNS TRIGGER
+  LANGUAGE plpgsql
+  SET search_path TO 'public'
+  AS $function$
+DECLARE
+  v_rol text := COALESCE(current_setting('request.role', true), 'postgres');
+  v_hoy date := (NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+  v_dia_registro date := (OLD.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+BEGIN
+  IF (NEW.fecha IS DISTINCT FROM OLD.fecha
+      OR NEW.categoria_id IS DISTINCT FROM OLD.categoria_id
+      OR NEW.concepto IS DISTINCT FROM OLD.concepto
+      OR NEW.monto IS DISTINCT FROM OLD.monto
+      OR NEW.metodo_pago IS DISTINCT FROM OLD.metodo_pago
+      OR NEW.referencia_banco IS DISTINCT FROM OLD.referencia_banco
+      OR NEW.descripcion IS DISTINCT FROM OLD.descripcion
+      OR NEW.evidencia_url IS DISTINCT FROM OLD.evidencia_url)
+     AND v_dia_registro <> v_hoy
+     AND v_rol NOT IN ('service_role', 'postgres') THEN
+    RAISE EXCEPTION 'Los gastos de dias anteriores se corrigen por anulacion y nuevo registro (CU-06.4)';
   END IF;
   RETURN NEW;
 END;
@@ -579,10 +720,22 @@ CREATE OR REPLACE FUNCTION public.trg_socios_campos_inmutables()
   LANGUAGE plpgsql
   SET search_path TO 'public'
   AS $function$
+DECLARE
+  v_rol text := COALESCE(current_setting('request.role', true), 'postgres');
 BEGIN
-  IF NEW.dni IS DISTINCT FROM OLD.dni
-     OR NEW.numero_socio IS DISTINCT FROM OLD.numero_socio THEN
-    RAISE EXCEPTION 'Campos inmutables: el DNI y el numero de socio no pueden modificarse (CU-01.2)';
+  -- Matrícula: inmutable absoluta (identificador externo en recibos)
+  IF NEW.numero_socio IS DISTINCT FROM OLD.numero_socio THEN
+    RAISE EXCEPTION 'Campo inmutable: el numero de socio no puede modificarse (CU-01.2)';
+  END IF;
+  -- DNI: inmutable para operativos; solo Admin (o service_role / psql de runbook) lo corrige
+  IF NEW.dni IS DISTINCT FROM OLD.dni THEN
+    IF v_rol NOT IN ('service_role', 'postgres')
+       AND private.get_rol() IS DISTINCT FROM 'admin' THEN
+      RAISE EXCEPTION 'El DNI solo puede corregirlo un Administrador (CU-01.2)';
+    END IF;
+    NEW.dni_anterior      := OLD.dni;
+    NEW.dni_corregido_at  := NOW();
+    NEW.dni_corregido_por := auth.uid();
   END IF;
   RETURN NEW;
 END;
@@ -679,6 +832,9 @@ ALTER TABLE "public"."gastos"
 ALTER TABLE "public"."pagos"
   ADD CONSTRAINT "pagos_usuario_id_fkey" FOREIGN KEY (usuario_id) REFERENCES public.usuarios(id) ON DELETE RESTRICT;
 
+ALTER TABLE "public"."socios"
+  ADD CONSTRAINT "socios_dni_corregido_por_fkey" FOREIGN KEY (dni_corregido_por) REFERENCES public.usuarios(id) ON DELETE SET NULL;
+
 CREATE VIEW "public"."flujo_caja" WITH (security_invoker=true) AS  SELECT 'ingreso'::text AS tipo_movimiento,
     p.id AS movimiento_id,
     p.fecha_pago AS fecha,
@@ -730,6 +886,16 @@ UNION ALL
    FROM public.gastos g
   WHERE (g.estado = 'anulado'::public.estado_gasto);
 
+CREATE VIEW "public"."v_morosidad_por_deporte" WITH (security_invoker=true) AS  SELECT d.id AS deporte_id,
+    d.nombre AS deporte,
+    (count(*))::integer AS cuotas_morosas,
+    COALESCE(sum(q.monto), (0)::numeric) AS deuda_morosa
+   FROM ((public.deportes d
+     JOIN public.categorias c ON ((c.deporte_id = d.id)))
+     JOIN public.cuotas q ON ((q.categoria_id = c.id)))
+  WHERE ((q.estado = 'pendiente'::public.estado_cuota) AND (q.created_at < (now() - '30 days'::interval)))
+  GROUP BY d.id, d.nombre;
+
 CREATE VIEW "public"."v_pagos_etiqueta_fiscal" WITH (security_invoker=true) AS  SELECT p.id,
     p.cuota_id,
     p.usuario_id,
@@ -763,6 +929,9 @@ CREATE VIEW "public"."v_pagos_etiqueta_fiscal" WITH (security_invoker=true) AS  
 CREATE VIEW "public"."v_socios_estado_pago" WITH (security_invoker=true) AS  SELECT s.id,
     s.numero_socio,
     s.dni,
+    s.dni_anterior,
+    s.dni_corregido_at,
+    s.dni_corregido_por,
     s.nombre,
     s.apellido,
     s.fecha_nacimiento,
@@ -783,9 +952,15 @@ CREATE VIEW "public"."v_socios_estado_pago" WITH (security_invoker=true) AS  SEL
         CASE
             WHEN m.es_moroso THEN 'moroso'::text
             ELSE 'al_dia'::text
-        END AS estado_pago
-   FROM (public.socios s
-     CROSS JOIN LATERAL ( SELECT public.es_socio_moroso(s.id) AS es_moroso) m);
+        END AS estado_pago,
+    d.pendientes_count,
+    d.deuda_pendiente
+   FROM ((public.socios s
+     CROSS JOIN LATERAL ( SELECT public.es_socio_moroso(s.id) AS es_moroso) m)
+     CROSS JOIN LATERAL ( SELECT (count(*))::integer AS pendientes_count,
+            COALESCE(sum(cuotas.monto), (0)::numeric) AS deuda_pendiente
+           FROM public.cuotas
+          WHERE ((cuotas.socio_id = s.id) AND (cuotas.estado = 'pendiente'::public.estado_cuota))) d);
 
 CREATE INDEX idx_categorias_deporte ON public.categorias USING btree (deporte_id);
 
@@ -869,6 +1044,11 @@ CREATE TRIGGER update_deportes_modtime
   BEFORE UPDATE ON public.deportes
   FOR EACH ROW
   EXECUTE FUNCTION public.update_updated_at_column();
+
+CREATE TRIGGER gastos_edicion_ventana
+  BEFORE UPDATE ON public.gastos
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_gastos_edicion_mismo_dia();
 
 CREATE TRIGGER update_gastos_modtime
   BEFORE UPDATE ON public.gastos
@@ -1069,12 +1249,12 @@ CREATE POLICY "gastos_update" ON "public"."gastos"
   FOR UPDATE
   TO "authenticated"
   USING
-    (((private.get_rol() = 'admin'::public.rol_usuario) OR ((private.get_rol() = 'responsable'::public.rol_usuario) AND (fecha = ((now() AT TIME ZONE
-    'America/Argentina/Buenos_Aires'::text))::date))))
+    (((private.get_rol() = 'admin'::public.rol_usuario) OR ((private.get_rol() = 'responsable'::public.rol_usuario) AND (((created_at AT TIME ZONE
+    'America/Argentina/Buenos_Aires'::text))::date = ((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date))))
   WITH
     CHECK
-    (((private.get_rol() = 'admin'::public.rol_usuario) OR ((private.get_rol() = 'responsable'::public.rol_usuario) AND (fecha = ((now() AT TIME ZONE
-    'America/Argentina/Buenos_Aires'::text))::date))));
+    (((private.get_rol() = 'admin'::public.rol_usuario) OR ((private.get_rol() = 'responsable'::public.rol_usuario) AND (((created_at AT TIME ZONE
+    'America/Argentina/Buenos_Aires'::text))::date = ((now() AT TIME ZONE 'America/Argentina/Buenos_Aires'::text))::date))));
 
 CREATE POLICY "inscripciones_delete_admin" ON "public"."inscripciones"
   FOR DELETE
@@ -1192,6 +1372,18 @@ REVOKE ALL ON FUNCTION "private"."get_rol"() FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "private"."get_rol"() TO "authenticated", "postgres", "service_role";
 
+REVOKE ALL ON FUNCTION "public"."baja_categoria"(uuid) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."baja_categoria"(uuid) TO "anon", "authenticated", "postgres", "service_role";
+
+REVOKE ALL ON FUNCTION "public"."baja_deporte"(uuid) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."baja_deporte"(uuid) TO "anon", "authenticated", "postgres", "service_role";
+
+REVOKE ALL ON FUNCTION "public"."categoria_edad_fuera_de_rango"(date, date, integer, integer) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."categoria_edad_fuera_de_rango"(date, date, integer, integer) TO "anon", "authenticated", "postgres", "service_role";
+
 REVOKE ALL ON FUNCTION "public"."categorias_rango_superpuesto"(uuid, integer, integer, uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "public"."categorias_rango_superpuesto"(uuid, integer, integer, uuid) TO "anon", "authenticated", "postgres", "service_role";
@@ -1212,11 +1404,23 @@ REVOKE ALL ON FUNCTION "public"."es_socio_moroso"(uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "public"."es_socio_moroso"(uuid) TO "anon", "authenticated", "postgres", "service_role";
 
-REVOKE ALL ON FUNCTION "public"."handle_new_user"() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION "public"."handle_new_user"() TO "postgres";
 
-GRANT EXECUTE ON FUNCTION "public"."handle_new_user"() TO "postgres", "service_role";
+REVOKE ALL ON FUNCTION "public"."previsualizar_inscripcion"(uuid, uuid) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."previsualizar_inscripcion"(uuid, uuid) TO "anon", "authenticated", "postgres", "service_role";
+
+REVOKE ALL ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) TO "anon", "authenticated", "postgres", "service_role";
+
+REVOKE ALL ON FUNCTION "public"."tramo_proporcional"(date, integer, integer) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."tramo_proporcional"(date, integer, integer) TO "anon", "authenticated", "postgres", "service_role";
 
 GRANT EXECUTE ON FUNCTION "public"."trg_cuotas_campos_inmutables"() TO PUBLIC, "anon", "authenticated", "postgres", "service_role";
+
+GRANT EXECUTE ON FUNCTION "public"."trg_gastos_edicion_mismo_dia"() TO PUBLIC, "anon", "authenticated", "postgres", "service_role";
 
 GRANT EXECUTE ON FUNCTION "public"."trg_pagos_campos_inmutables"() TO PUBLIC, "anon", "authenticated", "postgres", "service_role";
 
@@ -1287,6 +1491,8 @@ GRANT USAGE ON TYPE "public"."rol_usuario" TO "postgres";
 GRANT USAGE ON TYPE "public"."tipo_comprobante" TO "postgres";
 
 GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLE "public"."flujo_caja" TO "anon", "authenticated", "postgres", "service_role";
+
+GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLE "public"."v_morosidad_por_deporte" TO "anon", "authenticated", "postgres", "service_role";
 
 GRANT DELETE, INSERT, MAINTAIN, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE ON TABLE "public"."v_pagos_etiqueta_fiscal" TO "anon", "authenticated", "postgres", "service_role";
 
