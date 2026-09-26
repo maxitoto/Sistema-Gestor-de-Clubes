@@ -5,6 +5,7 @@ interface Payload {
 	asunto: string;
 	cuerpo: string;
 	sociosIds: string[];
+	incluirDesuscriptos?: boolean;
 }
 
 export async function dispararAvisoManual(payload: Payload) {

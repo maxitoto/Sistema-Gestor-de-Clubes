@@ -8,13 +8,27 @@ import { sendEmail } from "@core/mailer.ts";
 export class EnviarAvisoUseCase {
   constructor(private socioRepo: SocioRepository) {}
 
-  async execute(asunto: string, cuerpo: string, sociosIds: string[]) {
+  /**
+   * Envío manual segmentado (CU-07.2):
+   * - `incluirDesuscriptos` reincorpora SOLO desuscriptos
+   *   (acepta_comunicaciones=false); el repositorio mantiene siempre la
+   *   exclusión dura de email_invalido=true (regla 3).
+   */
+  async execute(
+    asunto: string,
+    cuerpo: string,
+    sociosIds: string[],
+    incluirDesuscriptos = false,
+  ) {
     if (!sociosIds || sociosIds.length === 0) {
       throw new Error("Debes seleccionar al menos un socio.");
     }
 
     // 1. Obtener datos (Infraestructura)
-    const socios = await this.socioRepo.obtenerSociosActivos(sociosIds);
+    const socios = await this.socioRepo.obtenerSociosActivos(
+      sociosIds,
+      incluirDesuscriptos,
+    );
     if (socios.length === 0) {
       throw new Error(
         "Ninguno de los socios seleccionados es válido para recibir correos.",
@@ -31,7 +45,6 @@ export class EnviarAvisoUseCase {
 
     // 3. Ejecutar acción secundaria (Infraestructura externa)
     await sendEmail(listaEmails, asunto, htmlFinal);
-
     return { success: true, enviados: listaEmails.length };
   }
 }
