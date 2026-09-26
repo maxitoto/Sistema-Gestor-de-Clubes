@@ -617,13 +617,9 @@ CREATE OR REPLACE FUNCTION public.reabrir_regularizacion_fiscal (
 )
   RETURNS void
   LANGUAGE plpgsql
-  SECURITY DEFINER
   SET search_path TO 'public'
   AS $function$
 BEGIN
-  IF private.get_rol() IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION 'Solo el Administrador puede reabrir la regularizacion fiscal (CU-05.7)';
-  END IF;
   UPDATE comprobantes
      SET estado_fiscal = 'pendiente_cae',
          intentos_reintento = 0,
@@ -634,6 +630,8 @@ BEGIN
   END IF;
 END;
 $function$;
+
+REVOKE ALL ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) FROM PUBLIC, "anon", "authenticated";
 
 CREATE OR REPLACE FUNCTION public.tramo_proporcional (
   p_fecha date,
@@ -1410,9 +1408,7 @@ REVOKE ALL ON FUNCTION "public"."previsualizar_inscripcion"(uuid, uuid) FROM PUB
 
 GRANT EXECUTE ON FUNCTION "public"."previsualizar_inscripcion"(uuid, uuid) TO "anon", "authenticated", "postgres", "service_role";
 
-REVOKE ALL ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) FROM PUBLIC;
-
-GRANT EXECUTE ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) TO "anon", "authenticated", "postgres", "service_role";
+GRANT EXECUTE ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) TO "postgres", "service_role";
 
 REVOKE ALL ON FUNCTION "public"."tramo_proporcional"(date, integer, integer) FROM PUBLIC;
 

@@ -188,17 +188,15 @@ $$;
 --=================================================================================
 -- REAPERTURA DE REGULARIZACIÓN FISCAL (CU-05.7)
 -- Solo transición fallido -> pendiente_cae; no toca pago, caja ni deuda.
--- SECURITY DEFINER acotado: comprobantes no tiene política UPDATE para
--- authenticated; la guarda de rol va dentro, estilo cobrar_cuota().
+-- SECURITY INVOKER + EXECUTE exclusivo de service_role
+-- (comprobantes sin UPDATE para authenticated). La autorización humana
+-- (rol admin) se verifica en la Edge Function que la invoca (requireRol).
 --=================================================================================
 CREATE OR REPLACE FUNCTION reabrir_regularizacion_fiscal(p_comprobante_id uuid)
 RETURNS void
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public
+LANGUAGE plpgsql SET search_path = public
 AS $$
 BEGIN
-  IF private.get_rol() IS DISTINCT FROM 'admin' THEN
-    RAISE EXCEPTION 'Solo el Administrador puede reabrir la regularizacion fiscal (CU-05.7)';
-  END IF;
   UPDATE comprobantes
      SET estado_fiscal = 'pendiente_cae',
          intentos_reintento = 0,
@@ -211,7 +209,8 @@ END;
 $$;
 
 REVOKE EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) TO authenticated, service_role;
+REVOKE EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.baja_deporte(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.baja_deporte(uuid) TO authenticated, service_role;
