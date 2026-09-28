@@ -60,19 +60,22 @@ ALTER TABLE "public"."club"
   ENABLE ROW LEVEL SECURITY;
 
 CREATE TABLE "public"."comprobantes" (
-  "id"                    uuid                     NOT NULL DEFAULT gen_random_uuid(),
-  "pago_id"               uuid                     NOT NULL,
-  "comprobante_origen_id" uuid,
-  "punto_venta"           integer                  NOT NULL DEFAULT 1,
-  "numero_comprobante"    character varying(50),
-  "cae"                   character varying(50),
-  "cae_vencimiento"       date,
-  "pdf_url"               text,
-  "motivo_anulacion"      text,
-  "intentos_reintento"    smallint                 NOT NULL DEFAULT 0,
-  "proximo_reintento_en"  timestamp with time zone,
-  "created_at"            timestamp with time zone DEFAULT now(),
-  "updated_at"            timestamp with time zone DEFAULT now(),
+  "id"                                 uuid                     NOT NULL DEFAULT gen_random_uuid(),
+  "pago_id"                            uuid                     NOT NULL,
+  "comprobante_origen_id"              uuid,
+  "punto_venta"                        integer                  NOT NULL DEFAULT 1,
+  "numero_comprobante"                 character varying(50),
+  "cae"                                character varying(50),
+  "cae_vencimiento"                    date,
+  "pdf_url"                            text,
+  "motivo_anulacion"                   text,
+  "detalle_error_fiscal"               text,
+  "numero_solicitado"                  character varying(50),
+  "ventana_regularizacion_iniciada_en" timestamp with time zone NOT NULL DEFAULT now(),
+  "intentos_reintento"                 smallint                 NOT NULL DEFAULT 0,
+  "proximo_reintento_en"               timestamp with time zone,
+  "created_at"                         timestamp with time zone DEFAULT now(),
+  "updated_at"                         timestamp with time zone DEFAULT now(),
   CONSTRAINT "chk_intentos_reintento" CHECK (((intentos_reintento >= 0) AND (intentos_reintento <= 6))),
   CONSTRAINT "comprobantes_pkey" PRIMARY KEY (id)
 );
@@ -393,6 +396,68 @@ CREATE OR REPLACE FUNCTION private.get_rol()
   WHERE id = auth.uid() AND estado = 'activo';
 $function$;
 
+CREATE OR REPLACE FUNCTION public.anular_pago (
+  p_pago_id uuid,
+  p_motivo  text
+)
+  RETURNS uuid
+  LANGUAGE plpgsql
+  SET search_path TO 'public'
+  AS $function$
+DECLARE
+  v_pago     pagos%ROWTYPE;
+  v_original comprobantes%ROWTYPE;
+  v_nc_id    uuid;
+BEGIN
+  IF p_motivo IS NULL OR btrim(p_motivo) = '' THEN
+    RAISE EXCEPTION 'El motivo de anulacion es obligatorio (CU-05.3)';
+  END IF;
+
+  SELECT * INTO v_pago FROM pagos WHERE id = p_pago_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Pago inexistente'; END IF;
+  IF v_pago.estado <> 'completado' THEN
+    RAISE EXCEPTION 'El pago ya fue anulado: no se permite una segunda anulacion (CU-05.3)';
+  END IF;
+
+  SELECT * INTO v_original FROM comprobantes
+   WHERE pago_id = p_pago_id AND tipo = 'factura' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'El pago no tiene factura asociada'; END IF;
+
+  -- (1) Caja y deuda: el reverso lo DERIVA la vista flujo_caja al quedar anulado;
+  --     la cuota vuelve a 'pendiente' y el indice uq_pago_vigente_por_cuota
+  --     habilita el recobro inmediato.
+  UPDATE pagos  SET estado = 'anulado'  WHERE id = p_pago_id;
+  UPDATE cuotas SET estado = 'pendiente' WHERE id = v_pago.cuota_id;
+
+  IF v_original.cae IS NOT NULL THEN
+    -- (2) Rama 4.a: hubo CAE => corresponde NC. El original NO se reintenta:
+    --     queda 'anulacion_pendiente' con proximo_reintento_en NULL y espera
+    --     el resultado de la NC (el estado pendiente vive en el documento fiscal).
+    UPDATE comprobantes
+       SET estado_fiscal = 'anulacion_pendiente',
+           motivo_anulacion = p_motivo,
+           proximo_reintento_en = NULL
+     WHERE id = v_original.id;
+
+    INSERT INTO comprobantes (pago_id, tipo, comprobante_origen_id, punto_venta,
+                              estado_fiscal, motivo_anulacion, proximo_reintento_en)
+    VALUES (p_pago_id, 'nota_credito', v_original.id, v_original.punto_venta,
+            'pendiente_cae', p_motivo, NOW() + interval '10 min')
+    RETURNING id INTO v_nc_id;
+  ELSE
+    -- (3) Rama 4.b: nunca obtuvo CAE => anulacion local sin NC y sin cola.
+    UPDATE comprobantes
+       SET estado_fiscal = 'anulado',
+           motivo_anulacion = p_motivo,
+           proximo_reintento_en = NULL
+     WHERE id = v_original.id;
+  END IF;
+
+  RETURN v_nc_id;
+END; $function$;
+
+REVOKE ALL ON FUNCTION "public"."anular_pago"(uuid, text) FROM PUBLIC, "anon", "authenticated";
+
 CREATE OR REPLACE FUNCTION public.baja_categoria (
   p_categoria_id uuid
 )
@@ -548,6 +613,29 @@ SELECT CASE WHEN tramo_proporcional(p_fecha_alta, p_periodo_mes, p_periodo_anio)
        END;
 $function$;
 
+CREATE OR REPLACE FUNCTION public.cuotas_del_periodo (
+  p_socio_id uuid,
+  p_mes      integer,
+  p_anio     integer
+)
+  RETURNS TABLE (
+    cuota_id         uuid,
+    categoria_id     uuid,
+    categoria_nombre character varying,
+    estado           public.estado_cuota,
+    monto            numeric
+  )
+  LANGUAGE sql
+  STABLE
+  SET search_path TO 'public'
+  AS $function$
+SELECT q.id, q.categoria_id, c.nombre, q.estado, q.monto
+FROM cuotas q JOIN categorias c ON c.id = q.categoria_id
+WHERE q.socio_id = p_socio_id
+  AND q.periodo_mes = p_mes AND q.periodo_anio = p_anio
+ORDER BY c.nombre;
+$function$;
+
 CREATE OR REPLACE FUNCTION public.es_socio_moroso (
   p_socio_id uuid
 )
@@ -619,17 +707,46 @@ CREATE OR REPLACE FUNCTION public.reabrir_regularizacion_fiscal (
   LANGUAGE plpgsql
   SET search_path TO 'public'
   AS $function$
+DECLARE
+  v_comp   comprobantes%ROWTYPE;
+  v_pago   pagos%ROWTYPE;
+  v_origen comprobantes%ROWTYPE;
 BEGIN
+  SELECT * INTO v_comp FROM comprobantes WHERE id = p_comprobante_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'El comprobante no existe';
+  END IF;
+  IF v_comp.estado_fiscal <> 'fallido' THEN
+    RAISE EXCEPTION 'El comprobante no esta en estado fallido';
+  END IF;
+
+  SELECT * INTO v_pago FROM pagos WHERE id = v_comp.pago_id FOR UPDATE;
+
+  IF v_comp.tipo = 'factura' THEN
+    -- solo se regulariza por reapertura un cobro VIGENTE
+    IF v_pago.estado <> 'completado' THEN
+      RAISE EXCEPTION 'La factura corresponde a un pago anulado: no se reabre. La operacion esta anulada; regularice via portal ARCA o mediante la nota de credito de la anulacion (CU-05.3/CU-05.7)';
+    END IF;
+  ELSE
+    -- Nota de credito: la anulacion debe seguir vigente
+    IF v_pago.estado <> 'anulado' THEN
+      RAISE EXCEPTION 'La nota de credito no tiene una anulacion vigente: no se reabre';
+    END IF;
+    SELECT * INTO v_origen FROM comprobantes
+     WHERE id = v_comp.comprobante_origen_id FOR UPDATE;
+    IF v_origen.estado_fiscal <> 'anulacion_pendiente' THEN
+      RAISE EXCEPTION 'El comprobante origen no espera esta nota de credito: no se reabre (regularizacion duplicada)';
+    END IF;
+  END IF;
+
   UPDATE comprobantes
      SET estado_fiscal = 'pendiente_cae',
+         detalle_error_fiscal = NULL,
          intentos_reintento = 0,
+         ventana_regularizacion_iniciada_en = NOW(), 
          proximo_reintento_en = NOW() + interval '10 min'
-   WHERE id = p_comprobante_id AND estado_fiscal = 'fallido';
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'El comprobante no existe o no esta en estado fallido';
-  END IF;
-END;
-$function$;
+   WHERE id = p_comprobante_id;
+END; $function$;
 
 REVOKE ALL ON FUNCTION "public"."reabrir_regularizacion_fiscal"(uuid) FROM PUBLIC, "anon", "authenticated";
 
@@ -999,6 +1116,9 @@ CREATE INDEX idx_socios_numero ON public.socios USING btree (numero_socio);
 
 CREATE UNIQUE INDEX uq_job_exitoso ON public.cuota_job_logs USING btree (periodo_mes, periodo_anio)
   WHERE (estado = 'exitoso'::public.estado_job);
+
+CREATE UNIQUE INDEX uq_nc_por_comprobante_origen ON public.comprobantes USING btree (comprobante_origen_id)
+  WHERE (tipo = 'nota_credito'::public.tipo_comprobante);
 
 CREATE UNIQUE INDEX uq_pago_vigente_por_cuota ON public.pagos USING btree (cuota_id)
   WHERE (estado = 'completado'::public.estado_pago);
@@ -1370,6 +1490,8 @@ REVOKE ALL ON FUNCTION "private"."get_rol"() FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "private"."get_rol"() TO "authenticated", "postgres", "service_role";
 
+GRANT EXECUTE ON FUNCTION "public"."anular_pago"(uuid, text) TO "postgres", "service_role";
+
 REVOKE ALL ON FUNCTION "public"."baja_categoria"(uuid) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "public"."baja_categoria"(uuid) TO "anon", "authenticated", "postgres", "service_role";
@@ -1397,6 +1519,10 @@ GRANT EXECUTE ON FUNCTION "public"."cuit_valido"(character varying) TO "anon", "
 REVOKE ALL ON FUNCTION "public"."cuota_proporcional"(date, integer, integer, numeric) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION "public"."cuota_proporcional"(date, integer, integer, numeric) TO "anon", "authenticated", "postgres", "service_role";
+
+REVOKE ALL ON FUNCTION "public"."cuotas_del_periodo"(uuid, integer, integer) FROM PUBLIC;
+
+GRANT EXECUTE ON FUNCTION "public"."cuotas_del_periodo"(uuid, integer, integer) TO "anon", "authenticated", "postgres", "service_role";
 
 REVOKE ALL ON FUNCTION "public"."es_socio_moroso"(uuid) FROM PUBLIC;
 

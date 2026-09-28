@@ -187,26 +187,136 @@ $$;
 
 --=================================================================================
 -- REAPERTURA DE REGULARIZACIÓN FISCAL (CU-05.7)
--- Solo transición fallido -> pendiente_cae; no toca pago, caja ni deuda.
--- SECURITY INVOKER + EXECUTE exclusivo de service_role
--- (comprobantes sin UPDATE para authenticated). La autorización humana
--- (rol admin) se verifica en la Edge Function que la invoca (requireRol).
 --=================================================================================
 CREATE OR REPLACE FUNCTION reabrir_regularizacion_fiscal(p_comprobante_id uuid)
 RETURNS void
 LANGUAGE plpgsql SET search_path = public
 AS $$
+DECLARE
+  v_comp   comprobantes%ROWTYPE;
+  v_pago   pagos%ROWTYPE;
+  v_origen comprobantes%ROWTYPE;
 BEGIN
+  SELECT * INTO v_comp FROM comprobantes WHERE id = p_comprobante_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'El comprobante no existe';
+  END IF;
+  IF v_comp.estado_fiscal <> 'fallido' THEN
+    RAISE EXCEPTION 'El comprobante no esta en estado fallido';
+  END IF;
+
+  SELECT * INTO v_pago FROM pagos WHERE id = v_comp.pago_id FOR UPDATE;
+
+  IF v_comp.tipo = 'factura' THEN
+    -- solo se regulariza por reapertura un cobro VIGENTE
+    IF v_pago.estado <> 'completado' THEN
+      RAISE EXCEPTION 'La factura corresponde a un pago anulado: no se reabre. La operacion esta anulada; regularice via portal ARCA o mediante la nota de credito de la anulacion (CU-05.3/CU-05.7)';
+    END IF;
+  ELSE
+    -- Nota de credito: la anulacion debe seguir vigente
+    IF v_pago.estado <> 'anulado' THEN
+      RAISE EXCEPTION 'La nota de credito no tiene una anulacion vigente: no se reabre';
+    END IF;
+    SELECT * INTO v_origen FROM comprobantes
+     WHERE id = v_comp.comprobante_origen_id FOR UPDATE;
+    IF v_origen.estado_fiscal <> 'anulacion_pendiente' THEN
+      RAISE EXCEPTION 'El comprobante origen no espera esta nota de credito: no se reabre (regularizacion duplicada)';
+    END IF;
+  END IF;
+
   UPDATE comprobantes
      SET estado_fiscal = 'pendiente_cae',
+         detalle_error_fiscal = NULL,
          intentos_reintento = 0,
+         ventana_regularizacion_iniciada_en = NOW(), 
          proximo_reintento_en = NOW() + interval '10 min'
-   WHERE id = p_comprobante_id AND estado_fiscal = 'fallido';
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'El comprobante no existe o no esta en estado fallido';
+   WHERE id = p_comprobante_id;
+END; $$;
+
+--=================================================================================
+-- ANULACIÓN DE PAGO (CU-05.3): transacción local ÚNICA y atómica
+-- Caja+deuda se resuelven en el mismo COMMIT; lo fiscal queda en el comprobante.
+-- SECURITY INVOKER + EXECUTE exclusivo service_role (mismo patrón que
+-- reabrir_regularizacion_fiscal): la autorización humana (rol y ventana
+-- same-day del Responsable) se verifica en la Edge Function requireRol.
+--=================================================================================
+CREATE OR REPLACE FUNCTION anular_pago(p_pago_id uuid, p_motivo text)
+RETURNS uuid  -- id de la nota de crédito creada; NULL en la rama 4.b
+LANGUAGE plpgsql SET search_path = public
+AS $$
+DECLARE
+  v_pago     pagos%ROWTYPE;
+  v_original comprobantes%ROWTYPE;
+  v_nc_id    uuid;
+BEGIN
+  IF p_motivo IS NULL OR btrim(p_motivo) = '' THEN
+    RAISE EXCEPTION 'El motivo de anulacion es obligatorio (CU-05.3)';
   END IF;
-END;
+
+  SELECT * INTO v_pago FROM pagos WHERE id = p_pago_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Pago inexistente'; END IF;
+  IF v_pago.estado <> 'completado' THEN
+    RAISE EXCEPTION 'El pago ya fue anulado: no se permite una segunda anulacion (CU-05.3)';
+  END IF;
+
+  SELECT * INTO v_original FROM comprobantes
+   WHERE pago_id = p_pago_id AND tipo = 'factura' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'El pago no tiene factura asociada'; END IF;
+
+  -- (1) Caja y deuda: el reverso lo DERIVA la vista flujo_caja al quedar anulado;
+  --     la cuota vuelve a 'pendiente' y el indice uq_pago_vigente_por_cuota
+  --     habilita el recobro inmediato.
+  UPDATE pagos  SET estado = 'anulado'  WHERE id = p_pago_id;
+  UPDATE cuotas SET estado = 'pendiente' WHERE id = v_pago.cuota_id;
+
+  IF v_original.cae IS NOT NULL THEN
+    -- (2) Rama 4.a: hubo CAE => corresponde NC. El original NO se reintenta:
+    --     queda 'anulacion_pendiente' con proximo_reintento_en NULL y espera
+    --     el resultado de la NC (el estado pendiente vive en el documento fiscal).
+    UPDATE comprobantes
+       SET estado_fiscal = 'anulacion_pendiente',
+           motivo_anulacion = p_motivo,
+           proximo_reintento_en = NULL
+     WHERE id = v_original.id;
+
+    INSERT INTO comprobantes (pago_id, tipo, comprobante_origen_id, punto_venta,
+                              estado_fiscal, motivo_anulacion, proximo_reintento_en)
+    VALUES (p_pago_id, 'nota_credito', v_original.id, v_original.punto_venta,
+            'pendiente_cae', p_motivo, NOW() + interval '10 min')
+    RETURNING id INTO v_nc_id;
+  ELSE
+    -- (3) Rama 4.b: nunca obtuvo CAE => anulacion local sin NC y sin cola.
+    UPDATE comprobantes
+       SET estado_fiscal = 'anulado',
+           motivo_anulacion = p_motivo,
+           proximo_reintento_en = NULL
+     WHERE id = v_original.id;
+  END IF;
+
+  RETURN v_nc_id;
+END; $$;
+
+--=================================================================================
+-- CUOTAS EXISTENTES DEL PERÍODO (CU-04.1 paso 5):
+-- alimenta el modal de advertencia con los cargos del mes antes de confirmar
+--=================================================================================
+CREATE OR REPLACE FUNCTION cuotas_del_periodo(p_socio_id uuid, p_mes integer, p_anio integer)
+RETURNS TABLE (cuota_id uuid, categoria_id uuid, categoria_nombre varchar,
+               estado estado_cuota, monto numeric)
+LANGUAGE sql STABLE SET search_path = public
+AS $$
+SELECT q.id, q.categoria_id, c.nombre, q.estado, q.monto
+FROM cuotas q JOIN categorias c ON c.id = q.categoria_id
+WHERE q.socio_id = p_socio_id
+  AND q.periodo_mes = p_mes AND q.periodo_anio = p_anio
+ORDER BY c.nombre;
 $$;
+REVOKE EXECUTE ON FUNCTION public.cuotas_del_periodo(uuid, integer, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cuotas_del_periodo(uuid, integer, integer) TO authenticated, service_role;
+
+REVOKE EXECUTE ON FUNCTION public.anular_pago(uuid, text) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.anular_pago(uuid, text) FROM anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.anular_pago(uuid, text) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION public.reabrir_regularizacion_fiscal(uuid) FROM anon, authenticated;
