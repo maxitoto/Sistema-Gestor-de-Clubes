@@ -193,44 +193,71 @@ RETURNS void
 LANGUAGE plpgsql SET search_path = public
 AS $$
 DECLARE
-  v_comp   comprobantes%ROWTYPE;
-  v_pago   pagos%ROWTYPE;
-  v_origen comprobantes%ROWTYPE;
+v_ref    comprobantes%ROWTYPE;
+v_comp   comprobantes%ROWTYPE;
+v_pago   pagos%ROWTYPE;
+v_origen comprobantes%ROWTYPE;
 BEGIN
-  SELECT * INTO v_comp FROM comprobantes WHERE id = p_comprobante_id FOR UPDATE;
+-- Lectura orientativa, sin bloqueo; no autoriza ni confirma cambios.
+SELECT * INTO v_ref FROM comprobantes WHERE id = p_comprobante_id;
+IF NOT FOUND THEN
+  RAISE EXCEPTION 'El comprobante no existe';
+END IF;
+
+-- Orden comun de bloqueos: pago -> factura original -> NC, cuando corresponda.
+SELECT * INTO v_pago FROM pagos WHERE id = v_ref.pago_id FOR UPDATE;
+IF NOT FOUND THEN
+  RAISE EXCEPTION 'El pago no existe';
+END IF;
+
+SELECT * INTO v_origen FROM comprobantes
+WHERE id = CASE
+             WHEN v_ref.tipo = 'factura' THEN v_ref.id
+             ELSE v_ref.comprobante_origen_id
+           END
+  AND pago_id = v_pago.id
+  AND tipo = 'factura'
+FOR UPDATE;
+IF NOT FOUND THEN
+  RAISE EXCEPTION 'La factura original no corresponde al pago';
+END IF;
+
+IF v_ref.tipo = 'factura' THEN
+  v_comp := v_origen;
+ELSE
+  SELECT * INTO v_comp FROM comprobantes
+  WHERE id = p_comprobante_id
+    AND tipo = 'nota_credito'
+    AND pago_id = v_pago.id
+    AND comprobante_origen_id = v_origen.id
+  FOR UPDATE;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'El comprobante no existe';
+    RAISE EXCEPTION 'La nota de credito cambio o no corresponde al origen';
   END IF;
-  IF v_comp.estado_fiscal <> 'fallido' THEN
-    RAISE EXCEPTION 'El comprobante no esta en estado fallido';
+END IF;
+
+IF v_comp.estado_fiscal <> 'fallido' THEN
+  RAISE EXCEPTION 'El comprobante no esta en estado fallido';
+END IF;
+
+IF v_comp.tipo = 'factura' THEN
+  IF v_pago.estado <> 'completado' THEN
+    RAISE EXCEPTION 'No se reabre una factura de pago anulado';
   END IF;
-
-  SELECT * INTO v_pago FROM pagos WHERE id = v_comp.pago_id FOR UPDATE;
-
-  IF v_comp.tipo = 'factura' THEN
-    -- solo se regulariza por reapertura un cobro VIGENTE
-    IF v_pago.estado <> 'completado' THEN
-      RAISE EXCEPTION 'La factura corresponde a un pago anulado: no se reabre. La operacion esta anulada; regularice via portal ARCA o mediante la nota de credito de la anulacion (CU-05.3/CU-05.7)';
-    END IF;
-  ELSE
-    -- Nota de credito: la anulacion debe seguir vigente
-    IF v_pago.estado <> 'anulado' THEN
-      RAISE EXCEPTION 'La nota de credito no tiene una anulacion vigente: no se reabre';
-    END IF;
-    SELECT * INTO v_origen FROM comprobantes
-     WHERE id = v_comp.comprobante_origen_id FOR UPDATE;
-    IF v_origen.estado_fiscal <> 'anulacion_pendiente' THEN
-      RAISE EXCEPTION 'El comprobante origen no espera esta nota de credito: no se reabre (regularizacion duplicada)';
-    END IF;
+ELSE
+  IF v_pago.estado <> 'anulado'
+     OR v_origen.estado_fiscal <> 'anulacion_pendiente'
+     OR v_origen.cae IS NULL THEN
+    RAISE EXCEPTION 'La nota de credito no tiene una anulacion fiscal elegible';
   END IF;
+END IF;
 
-  UPDATE comprobantes
-     SET estado_fiscal = 'pendiente_cae',
-         detalle_error_fiscal = NULL,
-         intentos_reintento = 0,
-         ventana_regularizacion_iniciada_en = NOW(), 
-         proximo_reintento_en = NOW() + interval '10 min'
-   WHERE id = p_comprobante_id;
+UPDATE comprobantes
+   SET estado_fiscal = 'pendiente_cae',
+       intentos_reintento = 0,
+       ventana_regularizacion_iniciada_en = NOW(),
+       proximo_reintento_en = NOW() + interval '10 min'
+ WHERE id = p_comprobante_id;
 END; $$;
 
 --=================================================================================
@@ -241,59 +268,82 @@ END; $$;
 -- same-day del Responsable) se verifica en la Edge Function requireRol.
 --=================================================================================
 CREATE OR REPLACE FUNCTION anular_pago(p_pago_id uuid, p_motivo text)
-RETURNS uuid  -- id de la nota de crédito creada; NULL en la rama 4.b
+RETURNS uuid  -- id de la NC creada; NULL significa "no se creó NC en esta llamada"
 LANGUAGE plpgsql SET search_path = public
 AS $$
 DECLARE
-  v_pago     pagos%ROWTYPE;
-  v_original comprobantes%ROWTYPE;
-  v_nc_id    uuid;
+v_pago     pagos%ROWTYPE;
+v_original comprobantes%ROWTYPE;
+v_nc_id    uuid;
 BEGIN
-  IF p_motivo IS NULL OR btrim(p_motivo) = '' THEN
-    RAISE EXCEPTION 'El motivo de anulacion es obligatorio (CU-05.3)';
-  END IF;
+IF p_motivo IS NULL OR btrim(p_motivo) = '' THEN
+RAISE EXCEPTION 'El motivo de anulacion es obligatorio (CU-05.3)';
+END IF;
 
-  SELECT * INTO v_pago FROM pagos WHERE id = p_pago_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Pago inexistente'; END IF;
-  IF v_pago.estado <> 'completado' THEN
-    RAISE EXCEPTION 'El pago ya fue anulado: no se permite una segunda anulacion (CU-05.3)';
-  END IF;
+SELECT * INTO v_pago FROM pagos WHERE id = p_pago_id FOR UPDATE;
+IF NOT FOUND THEN RAISE EXCEPTION 'Pago inexistente'; END IF;
+IF v_pago.estado <> 'completado' THEN
+RAISE EXCEPTION 'El pago ya fue anulado: no se permite una segunda anulacion (CU-05.3)';
+END IF;
 
-  SELECT * INTO v_original FROM comprobantes
-   WHERE pago_id = p_pago_id AND tipo = 'factura' FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'El pago no tiene factura asociada'; END IF;
+SELECT * INTO v_original FROM comprobantes
+WHERE pago_id = p_pago_id AND tipo = 'factura' FOR UPDATE;
+IF NOT FOUND THEN RAISE EXCEPTION 'El pago no tiene factura asociada'; END IF;
 
-  -- (1) Caja y deuda: el reverso lo DERIVA la vista flujo_caja al quedar anulado;
-  --     la cuota vuelve a 'pendiente' y el indice uq_pago_vigente_por_cuota
-  --     habilita el recobro inmediato.
-  UPDATE pagos  SET estado = 'anulado'  WHERE id = p_pago_id;
-  UPDATE cuotas SET estado = 'pendiente' WHERE id = v_pago.cuota_id;
+-- guardas de estado fiscal de la factura, después de bloquearla y ANTES de modificar pago/cuota.
+IF v_original.estado_fiscal NOT IN ('valido', 'fallido') THEN
+RAISE EXCEPTION 'La factura no admite anulacion en su estado actual';
+END IF;
+IF v_original.estado_fiscal = 'valido' AND v_original.cae IS NULL THEN
+RAISE EXCEPTION 'Factura valida sin CAE: requiere revisar la inconsistencia';
+END IF;
 
-  IF v_original.cae IS NOT NULL THEN
-    -- (2) Rama 4.a: hubo CAE => corresponde NC. El original NO se reintenta:
-    --     queda 'anulacion_pendiente' con proximo_reintento_en NULL y espera
-    --     el resultado de la NC (el estado pendiente vive en el documento fiscal).
-    UPDATE comprobantes
-       SET estado_fiscal = 'anulacion_pendiente',
-           motivo_anulacion = p_motivo,
-           proximo_reintento_en = NULL
-     WHERE id = v_original.id;
+-- (1) Caja y deuda: el reverso lo DERIVA la vista flujo_caja al quedar anulado;
+--     la cuota vuelve a 'pendiente' y el indice uq_pago_vigente_por_cuota
+--     habilita el recobro inmediato.
+UPDATE pagos  SET estado = 'anulado'  WHERE id = p_pago_id;
+UPDATE cuotas SET estado = 'pendiente' WHERE id = v_pago.cuota_id;
 
-    INSERT INTO comprobantes (pago_id, tipo, comprobante_origen_id, punto_venta,
-                              estado_fiscal, motivo_anulacion, proximo_reintento_en)
-    VALUES (p_pago_id, 'nota_credito', v_original.id, v_original.punto_venta,
-            'pendiente_cae', p_motivo, NOW() + interval '10 min')
-    RETURNING id INTO v_nc_id;
-  ELSE
-    -- (3) Rama 4.b: nunca obtuvo CAE => anulacion local sin NC y sin cola.
-    UPDATE comprobantes
-       SET estado_fiscal = 'anulado',
-           motivo_anulacion = p_motivo,
-           proximo_reintento_en = NULL
-     WHERE id = v_original.id;
-  END IF;
+IF v_original.cae IS NOT NULL THEN
+-- (2) Rama 4.a: hubo CAE => corresponde NC. El original NO se reintenta:
+--     queda 'anulacion_pendiente' con proximo_reintento_en NULL y espera
+--     el resultado de la NC (el estado pendiente vive en el documento fiscal).
+UPDATE comprobantes
+SET estado_fiscal = 'anulacion_pendiente',
+motivo_anulacion = p_motivo,
+proximo_reintento_en = NULL
+WHERE id = v_original.id;
+INSERT INTO comprobantes (pago_id, tipo, comprobante_origen_id, punto_venta,
+                          estado_fiscal, motivo_anulacion, proximo_reintento_en)
+VALUES (p_pago_id, 'nota_credito', v_original.id, v_original.punto_venta,
+        'pendiente_cae', p_motivo, NOW() + interval '10 min')
+RETURNING id INTO v_nc_id;
+-- dos ramas:
+ELSIF v_original.numero_solicitado IS NULL THEN
+-- (3) Rama 4.b: bajo ND-15, sin solicitud previa no hubo envio desde este
+--     sistema => ausencia de autorizacion confirmada => anulacion local sin NC.
+UPDATE comprobantes
+SET estado_fiscal = 'anulado',
+motivo_anulacion = p_motivo,
+proximo_reintento_en = NULL
+WHERE id = v_original.id;
+ELSE
+-- (4) Rama 4.c: hubo una solicitud y su resultado es desconocido: el CAE
+--     local NULL no prueba que ARCA no autorizo. La anulacion financiera ya
+--     quedo consumada arriba; solo se posterga la resolucion fiscal.
+UPDATE comprobantes
+SET estado_fiscal = 'anulacion_pendiente',
+motivo_anulacion = p_motivo,
+proximo_reintento_en = NULL,
+detalle_error_fiscal = concat_ws(
+  E'\n',
+  detalle_error_fiscal,
+  'Pago anulado; falta conciliar la autorizacion de la factura original'
+)
+WHERE id = v_original.id;
+END IF;
 
-  RETURN v_nc_id;
+RETURN v_nc_id;
 END; $$;
 
 --=================================================================================
