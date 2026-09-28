@@ -36,15 +36,23 @@ app.post("/reabrir", async (c) => {
     return errorResponse("El comprobante no esta en estado fallido", 409);
   }
 
-  // TODO(RF05/RF06): si comp.numero_solicitado != null, reconciliar
-  // con FECompConsultar antes de reencolar; si ARCA lo reporta autorizado,
-  // grabar CAE/número y responder { reconciliado: true } sin reabrir.
-  // En esta etapa no hay cliente SOAP real: se omite.
+  // Integracion pendiente: nunca reabrir un intento previo sin conciliarlo.
+  if (comp.numero_solicitado !== null) {
+    return errorResponse(
+      "Reapertura no disponible: falta conciliar el intento fiscal anterior. " +
+        "No se modifico el comprobante.",
+      501,
+    );
+  }
 
   const { error } = await admin.rpc("reabrir_regularizacion_fiscal", {
     p_comprobante_id: comp.id,
   });
-  if (error) return errorResponse(error.message, 409); // guardas de elegibilidad
+
+  if (error) {
+    return errorResponse(error.message, 409);
+  }
+
   return jsonResponse({ reabierto: true });
 });
 

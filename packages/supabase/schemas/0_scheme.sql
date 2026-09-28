@@ -161,6 +161,7 @@ pdf_url TEXT,
 motivo_anulacion TEXT,
 detalle_error_fiscal TEXT,
 numero_solicitado VARCHAR(50),
+solicitud_fiscal jsonb, -- copia exacta de la solicitud enviada a ARCA (sin credenciales), inmutable mientras el resultado sea desconocido (ND-15)
 ventana_regularizacion_iniciada_en TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 intentos_reintento SMALLINT NOT NULL DEFAULT 0,
 proximo_reintento_en TIMESTAMP WITH TIME ZONE,
