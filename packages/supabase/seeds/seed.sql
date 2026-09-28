@@ -13,7 +13,6 @@ VALUES (
 
 --=================================================================================
 -- 2. SOCIOS 
--- Usamos IDs predefinidos (empezando con 'a') para poder relacionarlos abajo
 --=================================================================================
 INSERT INTO public.socios (id, dni, nombre, apellido, fecha_nacimiento, email, telefono, estado, fecha_baja) 
 VALUES 
@@ -26,7 +25,6 @@ ON CONFLICT (dni) DO NOTHING;
 
 --=================================================================================
 -- 3. DEPORTES
--- IDs predefinidos (empezando con 'd')
 --=================================================================================
 INSERT INTO public.deportes (id, nombre, descripcion) VALUES
 ('d1111111-1111-1111-1111-111111111111', 'Fútbol', 'Fútbol 11 y Fútbol 5'),
@@ -37,7 +35,6 @@ ON CONFLICT (nombre) DO NOTHING;
 
 --=================================================================================
 -- 4. CATEGORÍAS
--- IDs predefinidos (empezando con 'c')
 --=================================================================================
 INSERT INTO public.categorias (id, deporte_id, nombre, arancel_mensual, edad_min, edad_max) VALUES
 ('c1111111-1111-1111-1111-111111111111', 'd1111111-1111-1111-1111-111111111111', 'Mayores Libre', 15000.00, 18, 99),
@@ -48,7 +45,6 @@ ON CONFLICT (deporte_id, nombre) DO NOTHING;
 
 --=================================================================================
 -- 5. INSCRIPCIONES
--- Conectamos a los socios (a...) con las categorías (c...)
 --=================================================================================
 INSERT INTO public.inscripciones (socio_id, categoria_id, estado, fecha_alta, fecha_baja) VALUES
 ('a1111111-1111-1111-1111-111111111111', 'c1111111-1111-1111-1111-111111111111', 'activa',   '2024-01-15', NULL),
@@ -59,8 +55,7 @@ INSERT INTO public.inscripciones (socio_id, categoria_id, estado, fecha_alta, fe
 ON CONFLICT DO NOTHING;
 
 --=================================================================================
--- 6. CUOTAS GENERADAS (Algunas pagadas, otras pendientes)
--- IDs predefinidos cambiados a 'e' para ser válidos en hexadecimal
+-- 6. CUOTAS GENERADAS
 --=================================================================================
 INSERT INTO public.cuotas (id, socio_id, categoria_id, periodo_mes, periodo_anio, monto, estado, created_at) VALUES
 ('e4444444-4444-4444-4444-444444444444', 'a4444444-4444-4444-4444-444444444444', 'c2222222-2222-2222-2222-222222222222', 6, 2026, 12000.00, 'pendiente', NOW() - interval '40 days'),
@@ -68,9 +63,16 @@ INSERT INTO public.cuotas (id, socio_id, categoria_id, periodo_mes, periodo_anio
 ('e5555556-5555-5555-5555-555555555556', 'a5555555-5555-5555-5555-555555555555', 'c4444444-4444-4444-4444-444444444444', 8, 2026, 10000.00, 'pendiente', NOW() - interval '2 days')
 ON CONFLICT DO NOTHING;
 
+-- socio INACTIVO con deuda antigua: debe computar deudor y moroso
+INSERT INTO public.cuotas (id, socio_id, categoria_id, periodo_mes, periodo_anio, monto, estado, created_at)
+VALUES ('e3333333-3333-3333-3333-333333333333',
+        'a3333333-3333-3333-3333-333333333333',
+        'c3333333-3333-3333-3333-333333333333',
+        5, 2026, 20000.00, 'pendiente', NOW() - interval '45 days')
+ON CONFLICT DO NOTHING;
+
 --=================================================================================
 -- 7. CATEGORÍAS DE GASTO
--- IDs predefinidos cambiados a 'f' para ser válidos en hexadecimal
 --=================================================================================
 INSERT INTO public.categorias_gasto (id, nombre, descripcion) VALUES
 ('f1111111-1111-1111-1111-111111111111', 'Mantenimiento', 'Arreglos de canchas e instalaciones'),
@@ -78,12 +80,13 @@ INSERT INTO public.categorias_gasto (id, nombre, descripcion) VALUES
 ('f3333333-3333-3333-3333-333333333333', 'Sueldos', 'Pago a profesores y personal')
 ON CONFLICT (nombre) DO NOTHING;
 
--- CREAR USUARIO ADMIN DE PRUEBA
+--=================================================================================
+-- 8. USUARIO ADMIN DE PRUEBA (DEBE IR ANTES DEL FIXTURE DE COMPROBANTE FALLIDO)
+--=================================================================================
 DO $$
 DECLARE
     v_user_id UUID := '4f2dbe40-2841-44bd-b730-0479364b1049'::uuid;
 BEGIN
-    -- 1. Crear en Supabase Auth con contraseña segura (cumple reglas de 8 caracteres, mayúsculas y números)
     IF NOT EXISTS (SELECT 1 FROM auth.users WHERE email = 'admin@clublosandes.com') THEN
     INSERT INTO auth.users (
         instance_id, id, aud, role, email, encrypted_password,
@@ -107,9 +110,33 @@ BEGIN
         '', '', '', '', '', '', '', ''
     );
 
-    -- 2. Vincular en public.usuarios con rol 'admin'
     INSERT INTO public.usuarios (id, nombre, apellido, email, rol, estado)
     VALUES (v_user_id, 'Administrador', 'Principal', 'admin@clublosandes.com', 'admin', 'activo')
     ON CONFLICT (id) DO UPDATE SET rol = 'admin';
     END IF;
 END $$;
+
+--=================================================================================
+-- 9. FIXTURE DE COMPROBANTE FALLIDO (prueba de /monitoreo/reabrir)
+-- DEBE IR DESPUÉS DEL BLOQUE DEL ADMIN: pagos.usuario_id FK a public.usuarios
+--=================================================================================
+INSERT INTO public.cuotas (id, socio_id, categoria_id, periodo_mes, periodo_anio, monto, estado)
+VALUES ('e9999999-9999-9999-9999-999999999999',
+        'a1111111-1111-1111-1111-111111111111',
+        'c1111111-1111-1111-1111-111111111111', 9, 2026, 15000.00, 'pagada')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.pagos (id, cuota_id, usuario_id, monto, medio_pago, estado)
+VALUES ('b9999999-9999-9999-9999-999999999999',
+        'e9999999-9999-9999-9999-999999999999',
+        '4f2dbe40-2841-44bd-b730-0479364b1049', 15000.00, 'efectivo', 'completado')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO public.comprobantes (id, pago_id, tipo, punto_venta, estado_fiscal,
+                                 intentos_reintento, proximo_reintento_en,
+                                 detalle_error_fiscal, ventana_regularizacion_iniciada_en)
+VALUES ('c9999999-9999-9999-9999-999999999999',
+        'b9999999-9999-9999-9999-999999999999', 'factura', 1, 'fallido', 6, NULL,
+        'Error de configuracion (fixture de prueba)',
+        NOW() - interval '30 hours')
+ON CONFLICT DO NOTHING;

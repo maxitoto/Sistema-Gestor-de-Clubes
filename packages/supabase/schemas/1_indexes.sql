@@ -8,6 +8,12 @@ WHERE estado = 'activa';
 CREATE UNIQUE INDEX uq_pago_vigente_por_cuota
 ON pagos(cuota_id) WHERE estado = 'completado'; -- indice para como maximo un pago completado
 
+-- Bloqueo de segunda anulacion a nivel motor:
+-- una unica nota de credito por comprobante de origen.
+CREATE UNIQUE INDEX uq_nc_por_comprobante_origen
+    ON comprobantes (comprobante_origen_id)
+    WHERE tipo = 'nota_credito';
+
 -- Cola del job CU-05.6: solo filas que esperan reintento
 CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
   ON comprobantes (proximo_reintento_en)
