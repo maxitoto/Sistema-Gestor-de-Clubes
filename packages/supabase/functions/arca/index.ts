@@ -1,29 +1,32 @@
-import { createEdgeClient } from "@core/supabase.ts";
+import { requireRol } from "@core/auth.ts";
+import { AppError } from "@core/errors.ts";
 import { corsHeaders, errorResponse, jsonResponse } from "@core/cors.ts";
 
+// I-26: respuesta honesta mientras se implementa el adaptador fiscal.
+// No registra un cobro, no simula una autorización y no expone secretos.
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", {
-      headers: corsHeaders,
+      headers: {
+        ...corsHeaders,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      },
     });
   }
-
-  const url = new URL(req.url);
-
+  if (req.method !== "GET" && req.method !== "POST") {
+    return errorResponse("Método no permitido", 405);
+  }
   try {
-    const supabase = createEdgeClient(req);
-
-    // hola mundo
-
-    return jsonResponse({ message: "hola mundo" });
-
-    return errorResponse("Ruta no encontrada", 404);
+    await requireRol({ req: { raw: req } }, ["admin", "responsable"]);
+    return jsonResponse({
+      error: "La integración fiscal todavía no está implementada.",
+      code: "ARCA_NOT_IMPLEMENTED",
+    }, 501);
   } catch (error) {
-    console.error("Error en comunicaciones:", error);
-
-    return errorResponse(
-      error instanceof Error ? error.message : "Error interno del servidor",
-      500,
-    );
+    if (error instanceof AppError) {
+      return errorResponse(error.message, error.statusCode);
+    }
+    console.error("Error al verificar el acceso a ARCA");
+    return errorResponse("No se pudo verificar el acceso. Reintente.", 503);
   }
 });

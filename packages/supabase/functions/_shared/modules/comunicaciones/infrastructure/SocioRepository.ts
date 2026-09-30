@@ -1,34 +1,39 @@
-import { SupabaseClient } from "@supabase/supabase-js";
-import { SocioDestinatario } from "../domain/email_domain.ts";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SolicitudCorreo } from "../domain/email_domain.ts";
+import { AppError } from "@core/errors.ts";
 
 export class SocioRepository {
   constructor(private db: SupabaseClient) {}
 
-  /**
-   * Destinatarios válidos para un envío (CU-07.2):
-   * - Regla 3: `email_invalido = false` es exclusión DURA: ni el checkbox de
-   *   alerta de deuda la levanta (un rebote duro = dirección inexistente).
-   * - Regla 1: `acepta_comunicaciones = true` es el filtro por defecto; solo
-   *   se levanta con `incluirDesuscriptos = true` (checkbox de CU-07.2).
-   * - Solo socios activos reciben envíos masivos.
-   */
-  async obtenerSociosActivos(
-    ids: string[],
-    incluirDesuscriptos = false,
-  ): Promise<SocioDestinatario[]> {
-    let query = this.db
-      .from("socios")
-      .select("id, email, nombre")
-      .in("id", ids)
-      .eq("estado", "activo")
-      .eq("email_invalido", false);
-
-    if (!incluirDesuscriptos) {
-      query = query.eq("acepta_comunicaciones", true);
+  async encolar(solicitud: SolicitudCorreo) {
+    // El JWT humano llega a la RPC SECURITY DEFINER, que verifica de nuevo el perfil activo.
+    const { data: id, error } = await this.db.rpc("crear_comunicacion", {
+      p_solicitud: solicitud,
+    });
+    if (error) {
+      if (error.code === "P0001" || error.code === "22P02") {
+        throw new AppError(error.message, 400);
+      }
+      throw new AppError(
+        "No se pudo guardar el envío. Reintente conservando la misma solicitud.",
+        503,
+      );
     }
-
-    const { data, error } = await query;
-    if (error) throw new Error("Error consultando socios en la base de datos.");
-    return data || [];
+    const { data, error: detalleError } = await this.db.from(
+      "email_destinatarios",
+    )
+      .select("estado_envio").eq("email_log_id", id);
+    if (detalleError || !data) {
+      throw new AppError(
+        "Envío guardado; no se pudo consultar su estado. Reintente con la misma solicitud.",
+        503,
+      );
+    }
+    return {
+      id: String(id),
+      estado: "procesando" as const,
+      encolados: data.filter((x) => x.estado_envio !== "excluido").length,
+      excluidos: data.filter((x) => x.estado_envio === "excluido").length,
+    };
   }
 }

@@ -1,0 +1,15 @@
+{
+  "version": "4",
+  "specifiers": {
+    "jsr:@hono/hono@4": "4.13.11"
+  },
+  "jsr": {
+    "@hono/hono@4.13.11": {
+      "integrity": "ac38e87b77af00e28602f112fe6770f9451697600a447ba18dbe05efd1520378"
+    }
+  },
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.116.0": "a38014743786a06c7dbf095a99e9ef3b38c0ec16bff076fc7cd403991192b34e",
+    "https://esm.sh/nodemailer@10.0.10": "8567be469200d559e9e2955d05d424ac253edbd0c061fba1de0827ad1b6a9c29"
+  }
+}
