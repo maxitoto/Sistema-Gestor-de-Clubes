@@ -9,7 +9,7 @@ import { AppError } from "@core/errors.ts";
 const app = new Hono().basePath("/monitoreo");
 app.use("*", cors());
 
-app.onError((err, c) => {
+app.onError((err, _c) => {
   const status = err instanceof AppError ? err.statusCode : 500;
   return errorResponse(err.message, status);
 });

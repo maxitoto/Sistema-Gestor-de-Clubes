@@ -13,6 +13,8 @@
     
     "dev:front": "bun --filter Frontend-Gestor-De-Clubes dev",
     "dev:back": "bun --filter Backend-Gestor-De-Clubes start",
-    "dev": "bun --filter '*' dev" 
+    "dev": "bun --filter '*' dev",
+    "correos:local": "bun --filter Backend-Gestor-De-Clubes correos:local",
+    "correos:una-vez": "bun --filter Backend-Gestor-De-Clubes correos:una-vez"
   }
 }

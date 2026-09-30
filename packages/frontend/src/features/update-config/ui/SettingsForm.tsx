@@ -1,133 +1,108 @@
-// src/features/club/update-config/ui/SettingsForm.tsx
-
 import { Alert, Box, Button, Paper, TextField, Typography } from '@mui/material';
-import { useState } from 'react';
+import { type FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ClubUpdate } from '#shared/types';
+import type { ClubConfig } from '#shared/types';
+import { type ClubForm, toClubForm, toClubUpdate } from '../model/clubForm';
 import { useUpdateClubConfig } from '../model/useUpdateClubConfig';
 
-export function SettingsForm({ initialData }: { initialData: ClubUpdate | null }) {
+export function SettingsForm({ initialData }: { initialData: ClubConfig }) {
 	const navigate = useNavigate();
-	const updateMutation = useUpdateClubConfig(); // <-- Lo lee de su propio segmento model/
-
-	const [formData, setFormData] = useState<ClubUpdate>({
-		nombre: initialData?.nombre || '',
-		cuit: initialData?.cuit || '',
-		domicilio_fiscal: initialData?.domicilio_fiscal || '',
-		email_contacto: initialData?.email_contacto || '',
-		punto_venta: initialData?.punto_venta || 1,
-		logo_url: initialData?.logo_url || '',
-	});
-
-	const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const { name, value, type } = e.target;
-		setFormData((prev) => ({
-			...prev,
-			[name]: type === 'number' ? Number(value) : value,
-		}));
+	const mutation = useUpdateClubConfig();
+	const [formData, setFormData] = useState(() => toClubForm(initialData));
+	const [validationError, setValidationError] = useState<string | null>(null);
+	const [saved, setSaved] = useState(false);
+	const change = (name: keyof ClubForm, value: string) => {
+		setFormData((previous) => ({ ...previous, [name]: value }));
+		setSaved(false);
+		setValidationError(null);
 	};
-
-	const handleGuardar = (e: React.SyntheticEvent<HTMLFormElement>) => {
-		e.preventDefault();
-		if (!initialData?.id) {
-			alert('No se encontró el ID de la configuración.');
-			return;
+	const save = (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		setValidationError(null);
+		setSaved(false);
+		try {
+			const payload = toClubUpdate(formData);
+			mutation.mutate({ id: initialData.id, payload }, { onSuccess: () => setSaved(true) });
+		} catch (error) {
+			setValidationError(error instanceof Error ? error.message : 'Revise los datos ingresados.');
 		}
-		updateMutation.mutate(
-			{ id: initialData.id, payload: formData },
-			{ onSuccess: () => alert('¡Configuración actualizada con éxito!') },
-		);
 	};
-
 	return (
-		<Paper elevation={3} sx={{ p: 4, maxWidth: 600, mx: 'auto', mt: 4 }}>
-			<Typography variant="h4" component="h1" gutterBottom sx={{ fontWeight: 'bold' }}>
+		<Paper sx={{ p: { xs: 2, sm: 4 }, maxWidth: 600, mx: 'auto', mt: 4 }}>
+			<Typography variant="h4" component="h1" gutterBottom>
 				Configuración del Club
 			</Typography>
-
-			{updateMutation.isError && (
-				<Alert severity="error" sx={{ mb: 2 }}>
-					{updateMutation.error.message}
+			{validationError && (
+				<Alert severity="warning" sx={{ mb: 2 }}>
+					{validationError}
 				</Alert>
 			)}
-
+			{mutation.isError && (
+				<Alert severity="error" sx={{ mb: 2 }}>
+					No pudimos guardar la configuración. Revise su conexión y vuelva a intentarlo.
+				</Alert>
+			)}
+			{saved && (
+				<Alert severity="success" sx={{ mb: 2 }}>
+					Configuración guardada.
+				</Alert>
+			)}
 			<Box
 				component="form"
-				onSubmit={handleGuardar}
+				onSubmit={save}
 				sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}
 			>
 				<TextField
 					label="Nombre / Razón Social"
-					name="nombre"
 					value={formData.nombre}
-					onChange={handleChange}
-					fullWidth
+					onChange={(e) => change('nombre', e.target.value)}
 					required
-					disabled={updateMutation.isPending}
+					disabled={mutation.isPending}
 				/>
 				<TextField
 					label="CUIT"
-					name="cuit"
 					value={formData.cuit}
-					onChange={handleChange}
-					fullWidth
+					onChange={(e) => change('cuit', e.target.value)}
 					required
-					disabled={updateMutation.isPending}
+					disabled={mutation.isPending}
 				/>
 				<TextField
 					label="Domicilio Fiscal"
-					name="domicilio_fiscal"
 					value={formData.domicilio_fiscal}
-					onChange={handleChange}
-					fullWidth
+					onChange={(e) => change('domicilio_fiscal', e.target.value)}
 					required
-					disabled={updateMutation.isPending}
+					disabled={mutation.isPending}
 				/>
 				<TextField
 					label="Email de Contacto"
-					name="email_contacto"
 					type="email"
 					value={formData.email_contacto}
-					onChange={handleChange}
-					fullWidth
+					onChange={(e) => change('email_contacto', e.target.value)}
 					required
-					disabled={updateMutation.isPending}
+					disabled={mutation.isPending}
 				/>
 				<TextField
 					label="Punto de Venta"
-					name="punto_venta"
 					type="number"
 					value={formData.punto_venta}
-					onChange={handleChange}
-					fullWidth
+					onChange={(e) => change('punto_venta', e.target.value)}
+					slotProps={{ htmlInput: { min: 1, max: 99999, step: 1 } }}
 					required
-					disabled={updateMutation.isPending}
+					disabled={mutation.isPending}
 				/>
 				<TextField
 					label="URL del Logo (Opcional)"
-					name="logo_url"
+					type="url"
 					value={formData.logo_url}
-					onChange={handleChange}
-					fullWidth
-					disabled={updateMutation.isPending}
+					onChange={(e) => change('logo_url', e.target.value)}
+					disabled={mutation.isPending}
 				/>
-
-				<Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 2 }}>
-					<Button
-						variant="outlined"
-						color="inherit"
-						onClick={() => navigate(-1)}
-						disabled={updateMutation.isPending}
-					>
+				<Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+					<Button onClick={() => navigate(-1)} disabled={mutation.isPending}>
 						Volver
 					</Button>
-					<Button
-						type="submit"
-						variant="contained"
-						color="primary"
-						disabled={updateMutation.isPending}
-					>
-						{updateMutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
+					<Button type="submit" variant="contained" disabled={mutation.isPending}>
+						{mutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
 					</Button>
 				</Box>
 			</Box>

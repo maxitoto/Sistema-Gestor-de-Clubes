@@ -1,13 +1,22 @@
-// src/modules/socios/model/useSocios.ts
+// src/entities/socio/model/useSocios.ts
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { getSocios } from '../api/socios.api';
 
-export function useSocios(page: number, limit: number, searchTerm: string) {
+export interface UseSociosOptions {
+	cacheScope?: string;
+	enabled?: boolean;
+}
+
+export function useSocios(
+	page: number,
+	limit: number,
+	searchTerm: string,
+	options?: UseSociosOptions,
+) {
 	return useQuery({
-		// La clave ahora está perfectamente estructurada
-		queryKey: ['socios', { page, limit, searchTerm }],
-		queryFn: () => getSocios({ page, limit, searchTerm }),
-		placeholderData: keepPreviousData, // Evita parpadeos en la paginación
+		queryKey: ['socios', options?.cacheScope, { page, limit, searchTerm }],
+		queryFn: ({ signal }) => getSocios({ page, limit, searchTerm }, signal),
+		enabled: options?.enabled ?? true,
 	});
 }

@@ -56,7 +56,7 @@ numero_socio SERIAL UNIQUE,
 dni VARCHAR(20) NOT NULL UNIQUE,
 dni_anterior VARCHAR(20),                          -- auditoría: valor previo a la última corrección
 dni_corregido_at TIMESTAMP WITH TIME ZONE,         -- auditoría: cuándo se corrigió
-dni_corregido_por UUID REFERENCES usuarios(id) ON DELETE SET NULL, -- auditoría: quién corrigió
+dni_corregido_por UUID REFERENCES usuarios(id) ON DELETE RESTRICT, -- auditoría: quién corrigió
 nombre VARCHAR(100) NOT NULL,
 apellido VARCHAR(100) NOT NULL,
 fecha_nacimiento DATE NOT NULL,
@@ -69,17 +69,13 @@ acepta_comunicaciones BOOLEAN NOT NULL DEFAULT TRUE,
 email_invalido BOOLEAN NOT NULL DEFAULT FALSE,
 contacto_emergencia_nombre VARCHAR(150),
 contacto_emergencia_telefono VARCHAR(50),
-fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
+fecha_alta DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
 fecha_baja DATE,
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 CONSTRAINT chk_estado_fecha_baja CHECK (
   (estado = 'activo'   AND fecha_baja IS NULL) OR
   (estado = 'inactivo' AND fecha_baja IS NOT NULL)
-),
-CONSTRAINT chk_contacto_emergencia_menor CHECK (
-  age(fecha_nacimiento) >= interval '18 years' OR
-  (contacto_emergencia_nombre IS NOT NULL AND contacto_emergencia_telefono IS NOT NULL)
 )
 );
 --=================================================================================
@@ -98,8 +94,15 @@ id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 deporte_id UUID NOT NULL REFERENCES deportes(id) ON DELETE RESTRICT,
 nombre VARCHAR(100) NOT NULL,
 arancel_mensual DECIMAL(10,2) NOT NULL CHECK (arancel_mensual > 0),
-edad_min INTEGER CHECK (edad_min >= 0),
-edad_max INTEGER CHECK (edad_max >= edad_min),
+edad_min INTEGER,
+edad_max INTEGER,
+CONSTRAINT chk_categorias_rango_etario CHECK (
+  (edad_min IS NULL AND edad_max IS NULL)
+  OR (
+    edad_min IS NOT NULL AND edad_max IS NOT NULL
+    AND edad_min >= 0 AND edad_max >= edad_min
+  )
+),
 estado estado_basico NOT NULL DEFAULT 'activo',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -109,7 +112,7 @@ CREATE TABLE inscripciones (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 socio_id UUID NOT NULL REFERENCES socios(id) ON DELETE RESTRICT,
 categoria_id UUID NOT NULL REFERENCES categorias(id) ON DELETE RESTRICT,
-fecha_alta DATE NOT NULL DEFAULT CURRENT_DATE,
+fecha_alta DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
 fecha_baja DATE,
 estado estado_inscripcion NOT NULL DEFAULT 'activa',
 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -143,14 +146,24 @@ medio_pago medio_pago NOT NULL,
 referencia_pago VARCHAR(255),
 fecha_pago TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 estado estado_pago NOT NULL DEFAULT 'completado',
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+anulado_at TIMESTAMP WITH TIME ZONE,
+anulado_por UUID REFERENCES usuarios(id) ON DELETE RESTRICT,
+motivo_anulacion TEXT,
+created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+CONSTRAINT chk_pago_anulacion CHECK (
+  (estado = 'completado' AND anulado_at IS NULL AND anulado_por IS NULL
+    AND motivo_anulacion IS NULL)
+  OR
+  (estado = 'anulado' AND anulado_at IS NOT NULL AND anulado_por IS NOT NULL
+    AND motivo_anulacion IS NOT NULL AND btrim(motivo_anulacion) <> '')
+)
 );
 
 CREATE TABLE comprobantes (
 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 pago_id UUID NOT NULL REFERENCES pagos(id) ON DELETE RESTRICT,
-comprobante_origen_id UUID REFERENCES comprobantes(id) ON DELETE SET NULL, -- Relaciona Nota de Crédito con Factura Original, null si es tipo factura
+comprobante_origen_id UUID REFERENCES comprobantes(id) ON DELETE RESTRICT, -- Relaciona Nota de Crédito con Factura Original, null si es tipo factura
 tipo tipo_comprobante NOT NULL,
 punto_venta INTEGER NOT NULL DEFAULT 1,
 numero_comprobante VARCHAR(50),
@@ -187,20 +200,33 @@ created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 CREATE TABLE gastos (
-id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-categoria_id UUID NOT NULL REFERENCES categorias_gasto(id) ON DELETE RESTRICT,
-usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
-fecha DATE NOT NULL DEFAULT CURRENT_DATE,
-concepto VARCHAR(255) NOT NULL,
-monto DECIMAL(10,2) NOT NULL CHECK (monto > 0),
-metodo_pago medio_pago NOT NULL,
-referencia_banco VARCHAR(255),
-descripcion TEXT,
-evidencia_url TEXT,
-estado estado_gasto NOT NULL DEFAULT 'activo',
-motivo_anulacion TEXT,
-created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  categoria_id UUID NOT NULL REFERENCES categorias_gasto(id) ON DELETE RESTRICT,
+  usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE RESTRICT,
+  fecha DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date),
+  concepto VARCHAR(255) NOT NULL,
+  monto DECIMAL(10,2) NOT NULL CHECK (monto > 0),
+  metodo_pago medio_pago NOT NULL,
+  referencia_banco VARCHAR(255),
+  CONSTRAINT chk_gastos_transferencia_referencia CHECK (
+    metodo_pago <> 'transferencia'
+    OR NULLIF(btrim(referencia_banco), '') IS NOT NULL
+  ),
+  descripcion TEXT,
+  evidencia_url TEXT,
+  estado estado_gasto NOT NULL DEFAULT 'activo',
+  motivo_anulacion TEXT,
+  anulado_at TIMESTAMP WITH TIME ZONE,
+  anulado_por UUID REFERENCES usuarios(id) ON DELETE RESTRICT,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_gasto_anulacion CHECK (
+    (estado = 'activo' AND anulado_at IS NULL AND anulado_por IS NULL
+      AND motivo_anulacion IS NULL)
+    OR
+    (estado = 'anulado' AND anulado_at IS NOT NULL AND anulado_por IS NOT NULL
+      AND motivo_anulacion IS NOT NULL AND btrim(motivo_anulacion) <> '')
+  )
 );
 
 --=================================================================================
@@ -244,4 +270,53 @@ cuotas_generadas INTEGER DEFAULT 0,
 cuotas_omitidas INTEGER DEFAULT 0,
 fecha_inicio TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 fecha_fin TIMESTAMP WITH TIME ZONE
+);
+
+-- persistencia de comunicaciones.
+ALTER TABLE public.plantillas_correo
+  ADD CONSTRAINT plantilla_nombre_no_vacio CHECK (length(btrim(nombre_interno))>0),
+  ADD CONSTRAINT plantilla_asunto_valido CHECK (length(btrim(asunto)) BETWEEN 1 AND 255 AND asunto !~ E'[\r\n]'),
+  ADD CONSTRAINT plantilla_cuerpo_valido CHECK (length(btrim(cuerpo)) BETWEEN 1 AND 10000),
+  ADD CONSTRAINT plantilla_etiquetas_validas CHECK (
+    regexp_replace(asunto||cuerpo,'\{\{(nombre|apellido|deporte|deuda)\}\}','','g') !~ '\{\{|\}\}');
+ALTER TABLE public.email_logs DROP CONSTRAINT email_logs_plantilla_id_fkey;
+ALTER TABLE public.email_logs ADD CONSTRAINT email_logs_plantilla_id_fkey
+  FOREIGN KEY (plantilla_id) REFERENCES public.plantillas_correo(id) ON DELETE RESTRICT;
+ALTER TABLE public.email_logs ALTER COLUMN usuario_id DROP NOT NULL;
+ALTER TABLE public.email_logs
+  ADD COLUMN origen text NOT NULL DEFAULT 'manual' CHECK (origen IN ('manual','automatico')),
+  ADD COLUMN tipo text NOT NULL DEFAULT 'general' CHECK (tipo IN ('general','deuda','transaccional')),
+  ADD COLUMN request_id uuid UNIQUE,
+  ADD COLUMN solicitud jsonb,
+  ADD COLUMN incluir_desuscriptos boolean NOT NULL DEFAULT false,
+  ADD CONSTRAINT email_logs_autoria CHECK (
+    (origen='manual' AND usuario_id IS NOT NULL) OR (origen='automatico' AND usuario_id IS NULL)),
+  ADD CONSTRAINT email_logs_excepcion_deuda CHECK (NOT incluir_desuscriptos OR tipo='deuda');
+ALTER TABLE public.email_destinatarios DROP COLUMN event_id;
+ALTER TABLE public.email_destinatarios ALTER COLUMN email DROP NOT NULL;
+ALTER TABLE public.email_destinatarios
+  ADD COLUMN estado_envio text NOT NULL DEFAULT 'pendiente'
+    CHECK (estado_envio IN ('pendiente','procesando','aceptado','fallido','excluido','incierto')),
+  ADD COLUMN motivo text,
+  ADD COLUMN asunto_snapshot text,
+  ADD COLUMN cuerpo_snapshot text,
+  ADD COLUMN proveedor text CHECK (proveedor IN ('resend','mailpit')),
+  ADD COLUMN provider_message_id text,
+  ADD COLUMN entrega_estado text NOT NULL DEFAULT 'sin_confirmar'
+    CHECK (entrega_estado IN ('sin_confirmar','demorada','entregada','rebote_duro','fallida')),
+  ADD COLUMN reservado_en timestamptz,
+  ADD COLUMN reserva_id uuid,
+  ADD COLUMN aceptado_en timestamptz,
+  ADD CONSTRAINT email_destinatarios_por_socio UNIQUE (email_log_id,socio_id),
+  ADD CONSTRAINT email_destinatarios_message_unique UNIQUE (proveedor,provider_message_id);
+CREATE TABLE public.email_eventos (
+  proveedor text NOT NULL DEFAULT 'resend' CHECK (proveedor='resend'),
+  event_id text NOT NULL,
+  provider_message_id text NOT NULL,
+  destinatario_id uuid REFERENCES public.email_destinatarios(id) ON DELETE RESTRICT,
+  tipo text NOT NULL,
+  bounce_tipo text CHECK (bounce_tipo IN ('Permanent','Transient','Undetermined')),
+  ocurrido_en timestamptz NOT NULL,
+  recibido_en timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (proveedor,event_id)
 );

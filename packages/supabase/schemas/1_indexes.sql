@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_comprobantes_reintento
   WHERE estado_fiscal IN ('pendiente_cae', 'anulacion_pendiente');
   
 CREATE INDEX idx_email_dest_log ON email_destinatarios(email_log_id);
-CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- para cruzar el webhook por direccion (CU-07.4 paso 5)
+CREATE INDEX idx_email_dest_email ON email_destinatarios(email);  -- consulta de historial por direccion; el webhook usa identidad del mensaje
 
 CREATE UNIQUE INDEX uq_job_exitoso ON cuota_job_logs(periodo_mes, periodo_anio)
 WHERE estado = 'exitoso';   -- idempotencia: previene ejecucion dobles el mismo mes y permite reintentos fallidos
@@ -44,3 +44,12 @@ CREATE INDEX idx_email_logs_fecha ON email_logs(fecha_envio);
 CREATE INDEX idx_cuotas_pendientes_socio
 ON cuotas (socio_id)
 WHERE estado = 'pendiente';
+-- el historial de cobros une una sola factura original por pago.
+CREATE UNIQUE INDEX uq_factura_por_pago
+ON public.comprobantes(pago_id) WHERE tipo = 'factura';
+
+-- consulta de eventos y cola.
+CREATE INDEX email_eventos_message_idx ON public.email_eventos(proveedor,provider_message_id);
+CREATE INDEX email_destinatarios_cola_idx ON public.email_destinatarios(created_at,id)
+  WHERE estado_envio='pendiente';
+CREATE INDEX email_destinatarios_reserva_idx ON public.email_destinatarios(reservado_en);

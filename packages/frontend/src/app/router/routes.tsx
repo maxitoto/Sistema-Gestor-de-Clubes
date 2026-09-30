@@ -5,15 +5,12 @@ import { RequireAuth } from './RequireAuth';
 import { RequireRole } from './RequireRole';
 
 export const routerConfig = createBrowserRouter([
+	{ element: <AuthLayout />, children: [{ path: '/login', element: <LoginPage /> }] },
 	{
-		element: <AuthLayout />,
-		children: [{ path: '/login', element: <LoginPage /> }],
-	},
-	{
-		element: <MainLayout />,
+		element: <RequireAuth />,
 		children: [
 			{
-				element: <RequireAuth />,
+				element: <MainLayout />,
 				children: [
 					{ path: '/', element: <Navigate to="/dashboard" replace /> },
 					{ path: '/dashboard', element: <DashboardPage /> },

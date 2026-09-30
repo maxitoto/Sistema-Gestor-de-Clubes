@@ -1,24 +1,18 @@
 // src/app/router/RequireAuth.tsx
 
-import { CircularProgress } from '@mui/material';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '#entities/session';
+import { SessionStatus, useAuth } from '#entities/session';
 
-// src/app/router/RequireAuth.tsx
-export const RequireAuth = () => {
-	const { session, perfil, isLoading } = useAuth();
-
+export function RequireAuth() {
+	const { session, profileStatus, isLoading, cacheScope } = useAuth();
 	if (isLoading) {
-		return <CircularProgress />; // muestra la rueda
+		return <SessionStatus />;
 	}
-
 	if (!session) {
 		return <Navigate to="/login" replace />;
 	}
-
-	if (!perfil) {
-		return <CircularProgress />;
+	if (profileStatus !== 'ready') {
+		return <SessionStatus />;
 	}
-
-	return <Outlet />;
-};
+	return <Outlet key={cacheScope} />;
+}

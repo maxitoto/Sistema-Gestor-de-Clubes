@@ -1,11 +1,13 @@
-export type ClubUpdate = {
-	id: string;
-	nombre: string;
-	cuit: string;
-	domicilioFiscal: string;
-	emailContacto: string;
-	puntoVenta: number;
-	logoUrl: string | null;
-};
+import type { Tables, TablesUpdate } from './model';
 
-export type ClubUpdateUi = Partial<Omit<ClubUpdate, 'id' | 'updatedAt'>>;
+// El id se usa para localizar la fila y no forma parte del payload editable.
+export type ClubEditableFields =
+	| 'nombre'
+	| 'cuit'
+	| 'domicilio_fiscal'
+	| 'email_contacto'
+	| 'punto_venta'
+	| 'logo_url';
+export type ClubConfig = Pick<Tables<'club'>, 'id' | ClubEditableFields>;
+export type ClubUpdate = Pick<TablesUpdate<'club'>, ClubEditableFields>;
+export type ClubUpdateUi = ClubUpdate;
