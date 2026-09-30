@@ -1,188 +1,97 @@
-# Sistema Club Los Andes
+# Sistema de Gestión de Clubes
 
-## 1. Entorno de Node.js
+Monorepo con frontend React/MUI servido y compilado con Bun, y backend Supabase local. La base contiene reglas de negocio, funciones RPC y políticas de acceso. Las Edge Functions cubren comunicaciones y monitoreo; ARCA conserva un punto de entrada pendiente de integración. La existencia de tablas y RPC no significa que todos los módulos tengan ya una pantalla y un circuito completo.
 
-Este proyecto requiere una versión específica de Node.js para asegurar la compatibilidad con todas las dependencias (como pnpm y Vite). Se recomienda utilizar Node Version Manager (NVM).
+## Preparación
 
-En la raíz del proyecto, ejecuta:
-
-```bash
-nvm use
-
-```
-
-Si la terminal indica que no tienes la versión instalada, instálala y actívala ejecutando:
+Requisitos: Bun compatible con las versiones fijadas en el repositorio, Docker en ejecución y acceso a Supabase CLI mediante `bunx supabase`. Instalar dependencias desde la raíz:
 
 ```bash
-nvm install
-nvm use
-
+bun install
 ```
 
-Miren la documentacion de FSD -> https://feature-sliced.design/docs
+Completar los entornos locales, conservando cualquier configuración existente:
 
-Crear estrutura.txt para la IA
+- Backend: crear `packages/supabase/functions/.env` tomando como base `.env.example` de esa misma carpeta. Completar dos secretos aleatorios distintos para el correo. Ver [configuración del backend](packages/supabase/README.md).
+- Frontend: configurar `packages/frontend/.env` con `PUBLIC_SUPABASE_URL` y `PUBLIC_SUPABASE_ANON_KEY` del proyecto local. Usar la clave pública; los secretos del backend no corresponden a este archivo. Ver [configuración del frontend](packages/frontend/README.md).
+
+## Aplicar la corrección de permisos a una base existente
+
+El archivo fuente que se modifica es `packages/supabase/schemas/5_politics.sql`. Con la fuente corregida y los scripts de esta propuesta copiados, ejecutar desde `packages/supabase`:
+
 ```bash
-find src/ -type f | sort | while IFS= read -r f; do echo "===== $f ====="; cat "$f"; echo; done > estructura.txt
+bun run start:containers
+bun run db:finalizar --correccion
+bunx supabase --workdir .. migration up --local
 ```
 
----
+`db:finalizar --correccion` prepara una nueva migración de permisos; el siguiente comando aplica las migraciones locales pendientes. Revisar el archivo generado antes de aplicarlo. Ejecutar esta preparación una vez por corrección, no en cada arranque. Conservar las migraciones anteriores. El flujo no requiere reinicializar la base ni descartar datos.
 
-## 2. Backend (Supabase Local)
+El [README del backend](packages/supabase/README.md) explica también cómo completar una migración nueva que todavía no fue aplicada.
 
-### comandos básicos
- - npx supabase start
+## Arranque diario
 
- - npx supabase db schema declarative sync " siguiente paso, colocar le nombre ejm: init_scheme"
+Terminal 1, desde `packages/supabase`:
 
- - npx supabase db reset
-
-Mirar https://supabase.com/docs/guides/getting-started/architecture
-visitar Arquitectura, desarollo local y flujo de trabajo.
-
-este es muy bueno y esta en español -> https://www.rodalexanderson.com/docs/supabase/ 
-más!!!
-https://supabase.com/docs/guides/functions/development-tips habla de las fat functions (funciones gordas)
-https://supabase.com/docs/guides/functions/function-configuration
-
-como resolví las migraciones y el esquema
-https://supabase.com/docs/guides/local-development/declarative-database-schemas
-que son los comandos arriba!
-
-
-Crear estrutura.txt para la IA
 ```bash
-#!/bin/bash
-
-# === CONFIGURACIÓN ===
-DIR="./"
-OUTPUT="estructura.txt"
-SKIP=""              # patrones a saltar (ej: "schema|politics")
-FULL_PATTERNS="config.toml"     # archivos que siempre se muestran completos (ej: "*.log|config.yml")
-TRUNCATE_AFTER=150   # umbral para truncar (en líneas)
-SHOW_LINES=20        # líneas a mostrar al truncar
-
-# === SCRIPT ===
-find "$DIR" -type f \
-  -not -name "$(basename "$OUTPUT")" \
-  -not -path "*/node_modules/*" \
-  -not -path "*/dist/*" \
-  -not -path "*/.temp/*" \
-  -not -path "*/.branches/*" \
-  | sort | while IFS= read -r f; do
-
-  echo "===== $f ====="
-
-  # Blacklist: mostrar nombre pero no contenido
-  if [ -n "$SKIP" ] && echo "$f" | grep -qiE "$SKIP"; then
-    echo "[SALTADO]"
-  else
-    # Intentar contar líneas (si falla, es binario o ilegible)
-    lines=$(wc -l < "$f" 2>/dev/null | tr -d ' ')
-    if [ -z "$lines" ]; then
-      echo "[BINARY O ILEGIBLE]"
-    else
-      # Verificar si el archivo debe mostrarse completo siempre
-      if [ -n "$FULL_PATTERNS" ] && echo "$f" | grep -qiE "$FULL_PATTERNS"; then
-        cat "$f"
-      elif [ "$lines" -gt "$TRUNCATE_AFTER" ]; then
-        head -"$SHOW_LINES" "$f"
-        echo "..."
-      else
-        cat "$f"
-      fi
-    fi
-  fi
-
-  echo
-
-done > "$OUTPUT"
+bun run start
 ```
----
 
-## 3. Frontend (React + Vite)
+Inicia los contenedores y sirve las Edge Functions con `functions/.env` cargado explícitamente. `bun run dev` es un alias del mismo arranque.
 
-Miren la documentacion de FSD -> https://feature-sliced.design/docs
+Terminal 2, también desde `packages/supabase`:
 
-Crear estrutura.txt para la IA
 ```bash
-find src/ -type f | sort | while IFS= read -r f; do echo "===== $f ====="; cat "$f"; echo; done > estructura.txt
+bun run correos:local
 ```
 
-### Comandos básicos
-  - pnpm install
-  - pnpm run dev
+Mantener esta terminal abierta para procesar la cola local. Para procesar sólo un lote de prueba, usar en su lugar `bun run correos:una-vez`. Los correos capturados aparecen en Mailpit: <http://localhost:54324>. No se envían a las casillas externas con el proveedor `mailpit`.
 
----
----
-*frontend*
-| Capa / Carpeta | Responsabilidad según FSD | Qué contiene en tu proyecto |
-| --- | --- | --- |
-| **`app/`** | **Inicialización global del sistema.** Configura providers, estilos globales y el enrutador raíz. No contiene lógica de negocio ni componentes de UI reutilizables.
+Terminal 3, desde `packages/frontend`:
 
- | `App.tsx`, `AppRouterProvider.tsx`, `AuthProvider.tsx`, `ThemeModeProvider.tsx`, y los protectores de ruta `RequireAuth.tsx`, `RequireRole.tsx`.
+```bash
+bun run types:sync
+bun run build
+bun run dev
+```
 
- |
-| **`pages/`** | **Vistas completas de la aplicación (páginas del router).** Su única función es componer *widgets*, *features* y *entities* para armar una pantalla. No implementa llamadas directas a APIs ni maneja estado de negocio pesado.
+Regenerar tipos después de aplicar cambios del esquema, con la base correcta en ejecución. `build` incluye `typecheck`. En posteriores arranques, si el esquema no cambió y ya se validó la compilación, basta con `bun run dev`.
 
- | `DashboardPage.tsx`, `LoginPage.tsx`, `SettingsPage.tsx`, `SociosPage.tsx`.
+El botón de correo registra destinatarios en la cola; la terminal del procesador realiza los envíos después. Cerrar esa terminal deja los nuevos avisos pendientes hasta el siguiente procesamiento.
 
- |
-| **`widgets/`** | **Bloques autónomos y complejos de la interfaz.** Orquestan la interacción visual entre entidades y features. Son unidades funcionales completas que se insertan en las páginas.
+## Organización del frontend
 
- | `dashboard-panel/` (combina la nómina de socios con el buscador, paginador y botón de correo) y `layout/` (`MainLayout`, `AuthLayout`).
+El código está en `packages/frontend/src`. La separación de capas sigue estas responsabilidades:
 
- |
-| **`features/`** | **Acciones e interacciones con valor de negocio para el usuario.** Contienen las mutaciones, formularios y casos de uso interactivos. No pueden importarse entre sí en el mismo nivel.
+| Capa       | Responsabilidad                                         | Elementos presentes                                                    |
+| ---------- | ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `app`      | Inicialización, proveedores globales y rutas protegidas | `App`, proveedores de sesión/tema/router, `RequireAuth`, `RequireRole` |
+| `pages`    | Composición de pantallas                                | Login, dashboard, configuración y socios                               |
+| `widgets`  | Bloques que coordinan componentes y acciones            | `dashboard-panel`, `layout`                                            |
+| `features` | Interacciones del usuario                               | `login-by-email`, `update-config`, `send-email`                        |
+| `entities` | Datos y estado del dominio                              | `club`, `session`, `socio`                                             |
+| `shared`   | Infraestructura común                                   | Cliente Supabase, temas, utilidades y tipos generados                  |
 
- | `auth/login-by-email/` (inicio de sesión), `club/update-config/` (mutación de configuración), `comunicaciones/send-email/` (envío manual).
+Las dependencias bajan de `app` hacia `shared`: una capa puede importar las inferiores, pero no las superiores. `shared` no importa `entities`, `features`, `widgets`, `pages` ni `app`. Los límites que comprueba el repositorio se validan con `bun run lint:arch`; no se crean carpetas de módulos sin una implementación que las necesite.
 
- |
-| **`entities/`** | **Modelos y conceptos del dominio del negocio.** Representan los datos que maneja la institución. Exponen consultas de lectura (`api`), estado y hooks (`model`), y fichas o avatares (`ui`). No pueden importar features ni widgets.
+## Organización del backend
 
- | `club/` (datos y configuración institucional), `session/` (usuario autenticado y perfil), `socio/` (datos de los miembros).
+| Directorio                                 | Responsabilidad actual                                                                  |
+| ------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `packages/supabase/schemas`                | Fuente declarativa de tablas, índices, funciones SQL, vistas, triggers y permisos       |
+| `packages/supabase/migrations`             | Historial SQL aplicado a la base; se conserva para reproducir su evolución              |
+| `packages/supabase/seeds`                  | Datos de prueba definidos por el proyecto                                               |
+| `functions/comunicaciones`                 | Entrada HTTP de avisos, plantillas, historial, cola, eventos y baja de comunicaciones   |
+| `functions/monitoreo`                      | Entrada HTTP de monitoreo con validación de acceso                                      |
+| `functions/arca`                           | Entrada pendiente de integración fiscal; no representa una emisión fiscal terminada     |
+| `functions/_shared/core`                   | Autenticación, clientes Supabase, errores, transporte de correo y firmas                |
+| `functions/_shared/modules/comunicaciones` | Dominio, caso de uso de aviso y repositorio de comunicaciones                           |
+| `scripts`                                  | Herramientas locales de arranque, procesamiento de correo y finalización de migraciones |
 
- |
-| **`shared/`** | **Infraestructura técnica y utilidades reutilizables.** Código completamente agnóstico al negocio del club. Reutilizable en cualquier otro proyecto.
+En comunicaciones, `domain` concentra validaciones/formato sin acceso a red; `application` coordina el caso de uso y `infrastructure` implementa acceso a datos. Algunas rutas HTTP coordinan directamente RPC y adaptadores compartidos, por lo que esta estructura no debe presentarse como una separación completa de todos los módulos del sistema.
 
- | `api/` (cliente Supabase), `config/styles/` (temas MUI), `lib/` (`useDebounce`), `types/` (esquema de base de datos generado).
+## Verificación de cambios
 
----
----
-*supabase*
+Desde el frontend, ejecutar `bun run build` y `bun run lint`. Desde el backend, `bun run lint:functions` y `bun run lint:arch`. El script backend `lint` también formatea archivos; usar los comandos separados para una revisión sin aplicar formato.
 
-| Directorio | Capa Hexagonal / Clean | Responsabilidad oficial |
-| --- | --- | --- |
-| **`functions/comunicaciones/`**, **`functions/arca/`** | **Driving Adapters (Controladores HTTP)** | Puntos de entrada HTTP de Deno desplegados. Validan encabezados, manejan CORS, parsean JSON e instancian y ejecutan los casos de uso correspondientes. No contienen sentencias SQL ni reglas de negocio.
-
- |
-| **`_shared/core/`** | **Infraestructura Transversal Compartida** | Adaptadores técnicos comunes a todos los dominios. Clientes HTTP (`cors.ts`), clases de error (`errors.ts`), transporte SMTP (`mailer.ts`) y creador de clientes autenticados (`supabase.ts`).
-
- |
-| **`_shared/modules/<modulo>/domain/`** | **Dominio (Entities & Value Objects)** | El núcleo del sistema. Funciones puras e inmutables (ej. `email_domain.ts` con `extraerEmails` y formato HTML). **Cero dependencias externas**: no importa Supabase, Deno, HTTP ni frameworks.
-
- |
-| **`_shared/modules/<modulo>/application/`** | **Casos de Uso (Application Services)** | El director de orquesta de cada operación (ej. `EnviarAvisoUseCase.ts`). Implementa el flujo del caso de uso: consulta al repositorio, ejecuta las reglas del dominio y despacha acciones a través de puertos de salida.
-
- |
-| **`_shared/modules/<modulo>/infrastructure/`** | **Driven Adapters (Persistencia e Integraciones)** | Implementación técnica de acceso a datos (ej. `SocioRepository.ts`). Es el único lugar donde se escribe código dependiente de Supabase (`supabase.from(...)`) o APIs externas.
-
- |
-
-layers: {
-  app: {can_use:{shared, entities, features, widgets, pages}, can_be_used_by:{*}},
-  pages: {can_use:{shared, entities, features, widgets}, can_be_used_by:{app}},
-  widgets: {can_use:{shared, entities, features }, can_be_used_by:{app, pages}},
-  features: {can_use:{shared, entities }, can_be_used_by:{app, pages, widgets}},
-  entities: {can_use:{shared}, can_be_used_by:{app, pages, widgets, features}},
-  shared: {can_use:{*}, can_be_used_by:{app, pages, widgets, features, entities}}
-}
-
-| Layer        | Can use                                    | Can be used by                          |
-| ------------ | ------------------------------------------ | --------------------------------------- |
-| **app**      | shared, entities, features, widgets, pages | *                                       |
-| **pages**    | shared, entities, features, widgets        | app                                     |
-| **widgets**  | shared, entities, features                 | pages, app                              |
-| **features** | shared, entities                           | widgets, pages, app                     |
-| **entities** | shared                                     | features, widgets, pages, app           |
-| **shared**   | *                                          | entities, features, widgets, pages, app |
+Además de los controles estáticos, probar inicio y cierre de sesión, edición de configuración autorizada, búsqueda/selección de socios y recorrido de un aviso hasta Mailpit. Una compilación correcta no demuestra por sí sola que los permisos de la base o el envío de correo estén bien conectados.
