@@ -9,16 +9,21 @@ import type {
 import { createContext } from 'react';
 import type { Tables } from '#shared/types';
 
-type PerfilUsuario = Tables<'usuarios'>;
+export type ProfileStatus = 'loading' | 'ready' | 'signed_out' | 'error' | 'missing' | 'inactive';
 
 export interface AuthContextType {
 	session: Session | null;
 	user: User | null;
+	perfil: Tables<'usuarios'> | null;
 	isLoading: boolean;
-	perfil: PerfilUsuario | null;
-
+	profileStatus: ProfileStatus;
+	message: string | null;
+	isSigningOut: boolean;
+	// Cambia también al salir y volver con el mismo usuario.
+	cacheScope: string;
+	retryProfile: () => void;
 	login: (credentials: SignInWithPasswordCredentials) => Promise<{ error: AuthError | null }>;
-	logout: () => Promise<void>;
+	logout: (reason?: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);

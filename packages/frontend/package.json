@@ -5,12 +5,13 @@
 	"type": "module",
 	"scripts": {
 		"dev": "bun --hot src/index.ts",
-		"build": "bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --define:process.env.NODE_ENV='\"production\"' --env='BUN_PUBLIC_*'",
+		"build": "bun run typecheck && bun build ./src/index.html --outdir=dist --sourcemap --target=browser --minify --define:process.env.NODE_ENV='\"production\"' --env='PUBLIC_*'",
 		"start": "NODE_ENV=production bun src/index.ts",
-		"types:sync": "bunx supabase gen types typescript --local > src/types/model.ts",
+		"types:sync": "bun scripts/sync-types.ts && biome format --write src/shared/types/model.ts",
 		"lint:arch": "bunx --bun depcruise src",
 		"lint": "biome check . && bun run lint:arch",
-		"lint:fix": "biome check --write ."
+		"lint:fix": "biome check --write .",
+		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
 		"@emotion/react": "11.14.0",

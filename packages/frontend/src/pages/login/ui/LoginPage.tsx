@@ -1,18 +1,27 @@
 // src/pages/login/ui/LoginPage.tsx
 
-import { Box, CircularProgress } from '@mui/material';
+import { Alert, Box, Stack } from '@mui/material';
 import { Navigate } from 'react-router-dom';
-import { LoginForm } from '#/features/login-by-email';
-import { useAuth } from '#entities/session';
+import { SessionStatus, useAuth } from '#entities/session';
+import { LoginForm } from '#features/login-by-email';
 
 export function LoginPage() {
-	const { session, isLoading } = useAuth();
-
+	const { session, profileStatus, isLoading, message, isSigningOut } = useAuth();
+	if (isLoading || isSigningOut) {
+		return <SessionStatus />;
+	}
+	if (session) {
+		if (profileStatus !== 'ready') {
+			return <SessionStatus />;
+		}
+		return <Navigate to="/dashboard" replace />;
+	}
 	return (
 		<Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-			{isLoading && <CircularProgress />}
-			{!isLoading && <LoginForm />}
-			{!isLoading && !session && <Navigate to="/login" replace />}
+			<Stack spacing={2} sx={{ width: '100%', maxWidth: 440 }}>
+				{message && <Alert severity="info">{message}</Alert>}
+				<LoginForm />
+			</Stack>
 		</Box>
 	);
 }

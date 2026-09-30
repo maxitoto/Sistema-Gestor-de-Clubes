@@ -1,4 +1,3 @@
-// src/shared/types/model.ts
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
@@ -11,12 +10,7 @@ export type Database = {
 		};
 		Functions: {
 			graphql: {
-				Args: {
-					extensions?: Json;
-					operationName?: string;
-					query?: string;
-					variables?: Json;
-				};
+				Args: { extensions?: Json; operationName?: string; query?: string; variables?: Json };
 				Returns: Json;
 			};
 		};
@@ -70,6 +64,13 @@ export type Database = {
 						isOneToOne: false;
 						referencedRelation: 'deportes';
 						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'categorias_deporte_id_fkey';
+						columns: ['deporte_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_morosidad_por_deporte';
+						referencedColumns: ['deporte_id'];
 					},
 				];
 			};
@@ -148,51 +149,63 @@ export type Database = {
 					cae_vencimiento: string | null;
 					comprobante_origen_id: string | null;
 					created_at: string | null;
+					detalle_error_fiscal: string | null;
 					estado_fiscal: Database['public']['Enums']['estado_fiscal'];
 					id: string;
 					intentos_reintento: number;
 					motivo_anulacion: string | null;
 					numero_comprobante: string | null;
+					numero_solicitado: string | null;
 					pago_id: string;
 					pdf_url: string | null;
 					proximo_reintento_en: string | null;
 					punto_venta: number;
+					solicitud_fiscal: Json | null;
 					tipo: Database['public']['Enums']['tipo_comprobante'];
 					updated_at: string | null;
+					ventana_regularizacion_iniciada_en: string;
 				};
 				Insert: {
 					cae?: string | null;
 					cae_vencimiento?: string | null;
 					comprobante_origen_id?: string | null;
 					created_at?: string | null;
+					detalle_error_fiscal?: string | null;
 					estado_fiscal?: Database['public']['Enums']['estado_fiscal'];
 					id?: string;
 					intentos_reintento?: number;
 					motivo_anulacion?: string | null;
 					numero_comprobante?: string | null;
+					numero_solicitado?: string | null;
 					pago_id: string;
 					pdf_url?: string | null;
 					proximo_reintento_en?: string | null;
 					punto_venta?: number;
+					solicitud_fiscal?: Json | null;
 					tipo: Database['public']['Enums']['tipo_comprobante'];
 					updated_at?: string | null;
+					ventana_regularizacion_iniciada_en?: string;
 				};
 				Update: {
 					cae?: string | null;
 					cae_vencimiento?: string | null;
 					comprobante_origen_id?: string | null;
 					created_at?: string | null;
+					detalle_error_fiscal?: string | null;
 					estado_fiscal?: Database['public']['Enums']['estado_fiscal'];
 					id?: string;
 					intentos_reintento?: number;
 					motivo_anulacion?: string | null;
 					numero_comprobante?: string | null;
+					numero_solicitado?: string | null;
 					pago_id?: string;
 					pdf_url?: string | null;
 					proximo_reintento_en?: string | null;
 					punto_venta?: number;
+					solicitud_fiscal?: Json | null;
 					tipo?: Database['public']['Enums']['tipo_comprobante'];
 					updated_at?: string | null;
+					ventana_regularizacion_iniciada_en?: string;
 				};
 				Relationships: [
 					{
@@ -203,10 +216,24 @@ export type Database = {
 						referencedColumns: ['id'];
 					},
 					{
+						foreignKeyName: 'comprobantes_comprobante_origen_id_fkey';
+						columns: ['comprobante_origen_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_etiqueta_fiscal';
+						referencedColumns: ['comprobante_id'];
+					},
+					{
 						foreignKeyName: 'comprobantes_pago_id_fkey';
 						columns: ['pago_id'];
 						isOneToOne: false;
 						referencedRelation: 'pagos';
+						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_pago_id_fkey';
+						columns: ['pago_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_etiqueta_fiscal';
 						referencedColumns: ['id'];
 					},
 				];
@@ -293,6 +320,20 @@ export type Database = {
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
 					},
+					{
+						foreignKeyName: 'cuotas_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_etiqueta_fiscal';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'cuotas_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_socios_estado_pago';
+						referencedColumns: ['id'];
+					},
 				];
 			};
 			deportes: {
@@ -324,30 +365,57 @@ export type Database = {
 			};
 			email_destinatarios: {
 				Row: {
+					aceptado_en: string | null;
+					asunto_snapshot: string | null;
 					created_at: string | null;
-					email: string;
+					cuerpo_snapshot: string | null;
+					email: string | null;
 					email_log_id: string;
+					entrega_estado: string;
 					estado: Database['public']['Enums']['estado_email'];
-					event_id: string | null;
+					estado_envio: string;
 					id: string;
+					motivo: string | null;
+					proveedor: string | null;
+					provider_message_id: string | null;
+					reserva_id: string | null;
+					reservado_en: string | null;
 					socio_id: string | null;
 				};
 				Insert: {
+					aceptado_en?: string | null;
+					asunto_snapshot?: string | null;
 					created_at?: string | null;
-					email: string;
+					cuerpo_snapshot?: string | null;
+					email?: string | null;
 					email_log_id: string;
+					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
-					event_id?: string | null;
+					estado_envio?: string;
 					id?: string;
+					motivo?: string | null;
+					proveedor?: string | null;
+					provider_message_id?: string | null;
+					reserva_id?: string | null;
+					reservado_en?: string | null;
 					socio_id?: string | null;
 				};
 				Update: {
+					aceptado_en?: string | null;
+					asunto_snapshot?: string | null;
 					created_at?: string | null;
-					email?: string;
+					cuerpo_snapshot?: string | null;
+					email?: string | null;
 					email_log_id?: string;
+					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
-					event_id?: string | null;
+					estado_envio?: string;
 					id?: string;
+					motivo?: string | null;
+					proveedor?: string | null;
+					provider_message_id?: string | null;
+					reserva_id?: string | null;
+					reservado_en?: string | null;
 					socio_id?: string | null;
 				};
 				Relationships: [
@@ -365,6 +433,61 @@ export type Database = {
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
 					},
+					{
+						foreignKeyName: 'email_destinatarios_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_etiqueta_fiscal';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'email_destinatarios_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_socios_estado_pago';
+						referencedColumns: ['id'];
+					},
+				];
+			};
+			email_eventos: {
+				Row: {
+					bounce_tipo: string | null;
+					destinatario_id: string | null;
+					event_id: string;
+					ocurrido_en: string;
+					proveedor: string;
+					provider_message_id: string;
+					recibido_en: string;
+					tipo: string;
+				};
+				Insert: {
+					bounce_tipo?: string | null;
+					destinatario_id?: string | null;
+					event_id: string;
+					ocurrido_en: string;
+					proveedor?: string;
+					provider_message_id: string;
+					recibido_en?: string;
+					tipo: string;
+				};
+				Update: {
+					bounce_tipo?: string | null;
+					destinatario_id?: string | null;
+					event_id?: string;
+					ocurrido_en?: string;
+					proveedor?: string;
+					provider_message_id?: string;
+					recibido_en?: string;
+					tipo?: string;
+				};
+				Relationships: [
+					{
+						foreignKeyName: 'email_eventos_destinatario_id_fkey';
+						columns: ['destinatario_id'];
+						isOneToOne: false;
+						referencedRelation: 'email_destinatarios';
+						referencedColumns: ['id'];
+					},
 				];
 			};
 			email_logs: {
@@ -375,8 +498,13 @@ export type Database = {
 					estado: Database['public']['Enums']['estado_email'];
 					fecha_envio: string;
 					id: string;
+					incluir_desuscriptos: boolean;
+					origen: string;
 					plantilla_id: string | null;
-					usuario_id: string;
+					request_id: string | null;
+					solicitud: Json | null;
+					tipo: string;
+					usuario_id: string | null;
 				};
 				Insert: {
 					asunto: string;
@@ -385,8 +513,13 @@ export type Database = {
 					estado?: Database['public']['Enums']['estado_email'];
 					fecha_envio?: string;
 					id?: string;
+					incluir_desuscriptos?: boolean;
+					origen?: string;
 					plantilla_id?: string | null;
-					usuario_id: string;
+					request_id?: string | null;
+					solicitud?: Json | null;
+					tipo?: string;
+					usuario_id?: string | null;
 				};
 				Update: {
 					asunto?: string;
@@ -395,8 +528,13 @@ export type Database = {
 					estado?: Database['public']['Enums']['estado_email'];
 					fecha_envio?: string;
 					id?: string;
+					incluir_desuscriptos?: boolean;
+					origen?: string;
 					plantilla_id?: string | null;
-					usuario_id?: string;
+					request_id?: string | null;
+					solicitud?: Json | null;
+					tipo?: string;
+					usuario_id?: string | null;
 				};
 				Relationships: [
 					{
@@ -417,9 +555,11 @@ export type Database = {
 			};
 			gastos: {
 				Row: {
+					anulado_at: string | null;
+					anulado_por: string | null;
 					categoria_id: string;
 					concepto: string;
-					created_at: string | null;
+					created_at: string;
 					descripcion: string | null;
 					estado: Database['public']['Enums']['estado_gasto'];
 					evidencia_url: string | null;
@@ -429,13 +569,15 @@ export type Database = {
 					monto: number;
 					motivo_anulacion: string | null;
 					referencia_banco: string | null;
-					updated_at: string | null;
+					updated_at: string;
 					usuario_id: string;
 				};
 				Insert: {
+					anulado_at?: string | null;
+					anulado_por?: string | null;
 					categoria_id: string;
 					concepto: string;
-					created_at?: string | null;
+					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
 					evidencia_url?: string | null;
@@ -445,13 +587,15 @@ export type Database = {
 					monto: number;
 					motivo_anulacion?: string | null;
 					referencia_banco?: string | null;
-					updated_at?: string | null;
+					updated_at?: string;
 					usuario_id: string;
 				};
 				Update: {
+					anulado_at?: string | null;
+					anulado_por?: string | null;
 					categoria_id?: string;
 					concepto?: string;
-					created_at?: string | null;
+					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
 					evidencia_url?: string | null;
@@ -461,10 +605,17 @@ export type Database = {
 					monto?: number;
 					motivo_anulacion?: string | null;
 					referencia_banco?: string | null;
-					updated_at?: string | null;
+					updated_at?: string;
 					usuario_id?: string;
 				};
 				Relationships: [
+					{
+						foreignKeyName: 'gastos_anulado_por_fkey';
+						columns: ['anulado_por'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
 					{
 						foreignKeyName: 'gastos_categoria_id_fkey';
 						columns: ['categoria_id'];
@@ -527,46 +678,76 @@ export type Database = {
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
 					},
+					{
+						foreignKeyName: 'inscripciones_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_etiqueta_fiscal';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'inscripciones_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_socios_estado_pago';
+						referencedColumns: ['id'];
+					},
 				];
 			};
 			pagos: {
 				Row: {
-					created_at: string | null;
+					anulado_at: string | null;
+					anulado_por: string | null;
+					created_at: string;
 					cuota_id: string;
 					estado: Database['public']['Enums']['estado_pago'];
 					fecha_pago: string;
 					id: string;
 					medio_pago: Database['public']['Enums']['medio_pago'];
 					monto: number;
+					motivo_anulacion: string | null;
 					referencia_pago: string | null;
-					updated_at: string | null;
+					updated_at: string;
 					usuario_id: string;
 				};
 				Insert: {
-					created_at?: string | null;
+					anulado_at?: string | null;
+					anulado_por?: string | null;
+					created_at?: string;
 					cuota_id: string;
 					estado?: Database['public']['Enums']['estado_pago'];
 					fecha_pago?: string;
 					id?: string;
 					medio_pago: Database['public']['Enums']['medio_pago'];
 					monto: number;
+					motivo_anulacion?: string | null;
 					referencia_pago?: string | null;
-					updated_at?: string | null;
+					updated_at?: string;
 					usuario_id: string;
 				};
 				Update: {
-					created_at?: string | null;
+					anulado_at?: string | null;
+					anulado_por?: string | null;
+					created_at?: string;
 					cuota_id?: string;
 					estado?: Database['public']['Enums']['estado_pago'];
 					fecha_pago?: string;
 					id?: string;
 					medio_pago?: Database['public']['Enums']['medio_pago'];
 					monto?: number;
+					motivo_anulacion?: string | null;
 					referencia_pago?: string | null;
-					updated_at?: string | null;
+					updated_at?: string;
 					usuario_id?: string;
 				};
 				Relationships: [
+					{
+						foreignKeyName: 'pagos_anulado_por_fkey';
+						columns: ['anulado_por'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
 					{
 						foreignKeyName: 'pagos_cuota_id_fkey';
 						columns: ['cuota_id'];
@@ -622,6 +803,9 @@ export type Database = {
 					created_at: string | null;
 					direccion: string | null;
 					dni: string;
+					dni_anterior: string | null;
+					dni_corregido_at: string | null;
+					dni_corregido_por: string | null;
 					email: string | null;
 					email_invalido: boolean;
 					estado: Database['public']['Enums']['estado_basico'];
@@ -643,6 +827,9 @@ export type Database = {
 					created_at?: string | null;
 					direccion?: string | null;
 					dni: string;
+					dni_anterior?: string | null;
+					dni_corregido_at?: string | null;
+					dni_corregido_por?: string | null;
 					email?: string | null;
 					email_invalido?: boolean;
 					estado?: Database['public']['Enums']['estado_basico'];
@@ -664,6 +851,9 @@ export type Database = {
 					created_at?: string | null;
 					direccion?: string | null;
 					dni?: string;
+					dni_anterior?: string | null;
+					dni_corregido_at?: string | null;
+					dni_corregido_por?: string | null;
 					email?: string | null;
 					email_invalido?: boolean;
 					estado?: Database['public']['Enums']['estado_basico'];
@@ -677,7 +867,15 @@ export type Database = {
 					telefono?: string | null;
 					updated_at?: string | null;
 				};
-				Relationships: [];
+				Relationships: [
+					{
+						foreignKeyName: 'socios_dni_corregido_por_fkey';
+						columns: ['dni_corregido_por'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
+				];
 			};
 			usuarios: {
 				Row: {
@@ -729,8 +927,125 @@ export type Database = {
 				};
 				Relationships: [];
 			};
+			v_morosidad_por_deporte: {
+				Row: {
+					cuotas_morosas: number | null;
+					deporte: string | null;
+					deporte_id: string | null;
+					deuda_morosa: number | null;
+				};
+				Relationships: [];
+			};
+			v_pagos_etiqueta_fiscal: {
+				Row: {
+					comprobante_id: string | null;
+					cuota_id: string | null;
+					estado_fiscal: Database['public']['Enums']['estado_fiscal'] | null;
+					estado_pago: Database['public']['Enums']['estado_pago'] | null;
+					etiqueta_recibo: string | null;
+					fecha_pago: string | null;
+					id: string | null;
+					intentos_reintento: number | null;
+					medio_pago: Database['public']['Enums']['medio_pago'] | null;
+					monto: number | null;
+					numero_comprobante: string | null;
+					proximo_reintento_en: string | null;
+					referencia_pago: string | null;
+					socio_apellido: string | null;
+					socio_dni: string | null;
+					socio_estado: Database['public']['Enums']['estado_basico'] | null;
+					socio_id: string | null;
+					socio_nombre: string | null;
+					tipo_comprobante: Database['public']['Enums']['tipo_comprobante'] | null;
+					usuario_id: string | null;
+				};
+				Relationships: [
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'cuotas';
+						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'pagos_usuario_id_fkey';
+						columns: ['usuario_id'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
+				];
+			};
+			v_socios_estado_pago: {
+				Row: {
+					acepta_comunicaciones: boolean | null;
+					apellido: string | null;
+					contacto_emergencia_nombre: string | null;
+					contacto_emergencia_telefono: string | null;
+					created_at: string | null;
+					deuda_pendiente: number | null;
+					direccion: string | null;
+					dni: string | null;
+					dni_anterior: string | null;
+					dni_corregido_at: string | null;
+					dni_corregido_por: string | null;
+					email: string | null;
+					email_invalido: boolean | null;
+					es_moroso: boolean | null;
+					estado: Database['public']['Enums']['estado_basico'] | null;
+					estado_pago: string | null;
+					fecha_alta: string | null;
+					fecha_baja: string | null;
+					fecha_nacimiento: string | null;
+					foto_url: string | null;
+					id: string | null;
+					nombre: string | null;
+					numero_socio: number | null;
+					pendientes_count: number | null;
+					telefono: string | null;
+					updated_at: string | null;
+				};
+				Relationships: [
+					{
+						foreignKeyName: 'socios_dni_corregido_por_fkey';
+						columns: ['dni_corregido_por'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
+				];
+			};
 		};
 		Functions: {
+			anular_gasto: { Args: { p_gasto_id: string; p_motivo: string }; Returns: undefined };
+			anular_pago: { Args: { p_motivo: string; p_pago_id: string }; Returns: string };
+			baja_categoria: { Args: { p_categoria_id: string }; Returns: undefined };
+			baja_deporte: { Args: { p_deporte_id: string }; Returns: undefined };
+			baja_inscripcion: { Args: { p_inscripcion_id: string }; Returns: undefined };
+			baja_socio: { Args: { p_socio_id: string }; Returns: undefined };
+			categoria_edad_fuera_de_rango: {
+				Args: {
+					p_edad_max: number;
+					p_edad_min: number;
+					p_fecha_alta: string;
+					p_fecha_nacimiento: string;
+				};
+				Returns: boolean;
+			};
+			categorias_rango_superpuesto: {
+				Args: {
+					p_deporte_id: string;
+					p_edad_max: number;
+					p_edad_min: number;
+					p_excluir_categoria?: string;
+				};
+				Returns: {
+					categoria_id: string;
+					edad_max: number;
+					edad_min: number;
+					nombre: string;
+				}[];
+			};
 			cobrar_cuota: {
 				Args: {
 					p_cuota_id: string;
@@ -740,11 +1055,99 @@ export type Database = {
 				};
 				Returns: string;
 			};
-			es_admin: { Args: never; Returns: boolean };
-			es_responsable: { Args: never; Returns: boolean };
+			confirmar_inscripcion: {
+				Args: { p_categoria_id: string; p_socio_id: string };
+				Returns: Json;
+			};
+			crear_comunicacion: { Args: { p_solicitud: Json }; Returns: string };
+			cuit_valido: { Args: { p_cuit: string }; Returns: boolean };
+			cuota_proporcional: {
+				Args: {
+					p_arancel: number;
+					p_fecha_alta: string;
+					p_periodo_anio: number;
+					p_periodo_mes: number;
+				};
+				Returns: number;
+			};
+			cuotas_del_periodo: {
+				Args: { p_anio: number; p_mes: number; p_socio_id: string };
+				Returns: {
+					categoria_id: string;
+					categoria_nombre: string;
+					cuota_id: string;
+					estado: Database['public']['Enums']['estado_cuota'];
+					monto: number;
+				}[];
+			};
+			desuscribir_correo: { Args: { p_destinatario: string }; Returns: undefined };
 			es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean };
-			show_limit: { Args: never; Returns: number };
-			show_trgm: { Args: { '': string }; Returns: string[] };
+			finalizar_correo: {
+				Args: {
+					p_estado: string;
+					p_id: string;
+					p_message_id: string;
+					p_motivo: string;
+					p_reserva: string;
+				};
+				Returns: undefined;
+			};
+			generar_cuotas_mes_actual: { Args: Record<PropertyKey, never>; Returns: Json };
+			generar_cuotas_mes_manual: { Args: Record<PropertyKey, never>; Returns: Json };
+			previsualizar_inscripcion: {
+				Args: { p_categoria_id: string; p_socio_id: string };
+				Returns: {
+					advertencia_edad: boolean;
+					edad_socio_anios: number;
+					monto_proporcional: number;
+					rango_max: number;
+					rango_min: number;
+					tramo_pct: number;
+				}[];
+			};
+			reabrir_regularizacion_fiscal: { Args: { p_comprobante_id: string }; Returns: undefined };
+			reactivar_socio: { Args: { p_socio_id: string }; Returns: undefined };
+			registrar_evento_correo: {
+				Args: {
+					p_bounce_tipo?: string;
+					p_event_id: string;
+					p_message_id: string;
+					p_ocurrido: string;
+					p_tipo: string;
+				};
+				Returns: undefined;
+			};
+			reservar_correos: {
+				Args: { p_proveedor: string };
+				Returns: {
+					aceptado_en: string | null;
+					asunto_snapshot: string | null;
+					created_at: string | null;
+					cuerpo_snapshot: string | null;
+					email: string | null;
+					email_log_id: string;
+					entrega_estado: string;
+					estado: Database['public']['Enums']['estado_email'];
+					estado_envio: string;
+					id: string;
+					motivo: string | null;
+					proveedor: string | null;
+					provider_message_id: string | null;
+					reserva_id: string | null;
+					reservado_en: string | null;
+					socio_id: string | null;
+				}[];
+				SetofOptions: {
+					from: '*';
+					to: 'email_destinatarios';
+					isOneToOne: false;
+					isSetofReturn: true;
+				};
+			};
+			tramo_proporcional: {
+				Args: { p_anio: number; p_fecha: string; p_mes: number };
+				Returns: number;
+			};
 		};
 		Enums: {
 			estado_basico: 'activo' | 'inactivo';
@@ -779,9 +1182,7 @@ export type Tables<
 		? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables'] &
 				DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Views'])
 		: never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-	schema: keyof DatabaseWithoutInternals;
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
 	? (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables'] &
 			DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Views'])[TableName] extends {
 			Row: infer R;
@@ -805,9 +1206,7 @@ export type TablesInsert<
 	}
 		? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables']
 		: never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-	schema: keyof DatabaseWithoutInternals;
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
 	? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables'][TableName] extends {
 			Insert: infer I;
 		}
@@ -830,9 +1229,7 @@ export type TablesUpdate<
 	}
 		? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables']
 		: never = never,
-> = DefaultSchemaTableNameOrOptions extends {
-	schema: keyof DatabaseWithoutInternals;
-}
+> = DefaultSchemaTableNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
 	? DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions['schema']]['Tables'][TableName] extends {
 			Update: infer U;
 		}
@@ -855,9 +1252,7 @@ export type Enums<
 	}
 		? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions['schema']]['Enums']
 		: never = never,
-> = DefaultSchemaEnumNameOrOptions extends {
-	schema: keyof DatabaseWithoutInternals;
-}
+> = DefaultSchemaEnumNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
 	? DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions['schema']]['Enums'][EnumName]
 	: DefaultSchemaEnumNameOrOptions extends keyof DefaultSchema['Enums']
 		? DefaultSchema['Enums'][DefaultSchemaEnumNameOrOptions]
@@ -872,9 +1267,7 @@ export type CompositeTypes<
 	}
 		? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions['schema']]['CompositeTypes']
 		: never = never,
-> = PublicCompositeTypeNameOrOptions extends {
-	schema: keyof DatabaseWithoutInternals;
-}
+> = PublicCompositeTypeNameOrOptions extends { schema: keyof DatabaseWithoutInternals }
 	? DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions['schema']]['CompositeTypes'][CompositeTypeName]
 	: PublicCompositeTypeNameOrOptions extends keyof DefaultSchema['CompositeTypes']
 		? DefaultSchema['CompositeTypes'][PublicCompositeTypeNameOrOptions]
