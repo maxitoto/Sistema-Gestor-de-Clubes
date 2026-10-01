@@ -1,6 +1,10 @@
-import { requireRol } from "@core/auth.ts";
-import { AppError } from "@core/errors.ts";
-import { corsHeaders, errorResponse, jsonResponse } from "@core/cors.ts";
+import {
+  AppError,
+  corsHeaders,
+  errorResponse,
+  jsonResponse,
+  requireRol,
+} from "@core/index.ts";
 
 // I-26: respuesta honesta mientras se implementa el adaptador fiscal.
 // No registra un cobro, no simula una autorización y no expone secretos.

@@ -10,24 +10,36 @@ Requisitos: Bun compatible con las versiones fijadas en el repositorio, Docker e
 bun install
 ```
 
+Preparar también el runtime de Deno que usa el lint del backend. `deno-bin` está fijado en las dependencias y descarga el binario en la primera invocación si todavía falta; seguir el paso de [preparación de Deno](packages/supabase/README.md#preparar-deno-para-los-controles) antes de considerar esos controles disponibles.
+
 Completar los entornos locales, conservando cualquier configuración existente:
 
 - Backend: crear `packages/supabase/functions/.env` tomando como base `.env.example` de esa misma carpeta. Completar dos secretos aleatorios distintos para el correo. Ver [configuración del backend](packages/supabase/README.md).
 - Frontend: configurar `packages/frontend/.env` con `PUBLIC_SUPABASE_URL` y `PUBLIC_SUPABASE_ANON_KEY` del proyecto local. Usar la clave pública; los secretos del backend no corresponden a este archivo. Ver [configuración del frontend](packages/frontend/README.md).
 
-## Aplicar la corrección de permisos a una base existente
+## Preparar la base local
 
-El archivo fuente que se modifica es `packages/supabase/schemas/5_politics.sql`. Con la fuente corregida y los scripts de esta propuesta copiados, ejecutar desde `packages/supabase`:
+Desde `packages/supabase`, iniciar los contenedores y consultar el estado de las migraciones:
 
 ```bash
 bun run start:containers
-bun run db:finalizar --correccion
+bunx supabase --workdir .. migration list --local
+```
+
+Los comandos leen la configuración local desde packages/supabase/config.toml. La migración inicial del repositorio ya consolida el esquema completo y las
+políticas de permisos (ACL) finales, por lo que no es necesario generar correcciones adicionales al preparar el proyecto.
+
+Si el listado muestra migraciones locales pendientes de aplicar en este entorno, aplicarlas con:
+
+```bash
 bunx supabase --workdir .. migration up --local
 ```
 
-`db:finalizar --correccion` prepara una nueva migración de permisos; el siguiente comando aplica las migraciones locales pendientes. Revisar el archivo generado antes de aplicarlo. Ejecutar esta preparación una vez por corrección, no en cada arranque. Conservar las migraciones anteriores. El flujo no requiere reinicializar la base ni descartar datos.
+Conservar las migraciones aplicadas y los datos de prueba; db:reset no forma parte del arranque habitual ya que restablece la base desde cero descartando los
+datos locales.
 
-El [README del backend](packages/supabase/README.md) explica también cómo completar una migración nueva que todavía no fue aplicada.
+El [README del backend](packages/supabase/README.md) detalla cómo preparar nuevas migraciones declarativas y cuándo corresponde realizar ajustes posteriores de
+permisos.
 
 ## Arranque diario
 
@@ -92,6 +104,6 @@ En comunicaciones, `domain` concentra validaciones/formato sin acceso a red; `ap
 
 ## Verificación de cambios
 
-Desde el frontend, ejecutar `bun run build` y `bun run lint`. Desde el backend, `bun run lint:functions` y `bun run lint:arch`. El script backend `lint` también formatea archivos; usar los comandos separados para una revisión sin aplicar formato.
+Desde el frontend, ejecutar `bun run build` y `bun run lint`. Desde el backend, ejecutar `bun run lint` y `bun run typecheck:functions`: el primero comprueba Deno lint y arquitectura sin formatear; el segundo comprueba tipos de los tres entrypoints y sus dependencias. También pueden ejecutarse por separado `bun run lint:functions` y `bun run lint:arch`. El control de arquitectura resuelve los alias locales de Deno y considera imports de tipos. Para aplicar formato explícitamente, usar `bun run format:functions` o `bun run lint:fix`.
 
 Además de los controles estáticos, probar inicio y cierre de sesión, edición de configuración autorizada, búsqueda/selección de socios y recorrido de un aviso hasta Mailpit. Una compilación correcta no demuestra por sí sola que los permisos de la base o el envío de correo estén bien conectados.

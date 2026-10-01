@@ -2,9 +2,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { Hono } from "jsr:@hono/hono@^4";
 import { cors } from "jsr:@hono/hono@^4/cors";
-import { requireRol } from "@core/auth.ts";
-import { errorResponse, jsonResponse } from "@core/cors.ts";
-import { AppError } from "@core/errors.ts";
+import { AppError, errorResponse, jsonResponse, requireRol } from "@core/index.ts";
 
 const app = new Hono().basePath("/monitoreo");
 app.use("*", cors());

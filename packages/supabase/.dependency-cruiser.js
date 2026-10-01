@@ -2,9 +2,18 @@ module.exports = {
   options: {
     // Deno usa imports con extensión .ts
     doNotFollow: { path: "node_modules" },
+    tsConfig: { fileName: "tsconfig.arch.json" },
+    tsPreCompilationDeps: true,
   },
 
   forbidden: [
+    {
+      name: "imports-locales-deben-resolverse",
+      comment: "Un alias Deno o import relativo sin resolver invalida el control de arquitectura.",
+      severity: "error",
+      from: {},
+      to: { path: "^(\\.|@core/|@modules/|functions/)", couldNotResolve: true },
+    },
 
     // ============================================================
     // 1. EDGE FUNCTIONS
