@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@core/*": ["./functions/_shared/core/*"],
+      "@modules/*": ["./functions/_shared/modules/*"]
+    }
+  },
+  "include": ["functions/**/*.ts"]
+}

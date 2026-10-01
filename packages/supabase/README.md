@@ -2,6 +2,16 @@
 
 Este paquete contiene el esquema declarativo, las migraciones, datos de prueba, Edge Functions y herramientas de desarrollo local. Los comandos siguientes se ejecutan desde `packages/supabase`, salvo indicación contraria. Instalar primero las dependencias con `bun install` desde la raíz del monorepo y mantener Docker en ejecución.
 
+## Preparar Deno para los controles
+
+`lint:functions` y el formateo utilizan el paquete fijado `deno-bin` 2.2.7. Su wrapper descarga el binario Deno de esa versión desde GitHub si todavía falta; instalar el paquete no demuestra que el runtime ya esté disponible. Después de `bun install`, verificar desde `packages/supabase`:
+
+```bash
+bunx --bun deno --version
+```
+
+Debe informar Deno 2.2.7. Si el binario falta, el wrapper intenta descargarlo en esa primera invocación, que requiere acceso a red. Los scripts fuerzan Bun para ejecutar el wrapper, sin exigir una instalación separada de Node. Un error de descarga o de ejecución deja el control Deno pendiente de resolver.
+
 ## Configuración local del correo
 
 Crear `functions/.env` a partir de `functions/.env.example` sólo si todavía no existe. Si ya existe, incorporar las variables faltantes sin sobrescribir sus valores válidos:
@@ -26,16 +36,20 @@ No versionar `.env` ni copiar estos secretos al frontend. Supabase aporta sus va
 
 La configuración actual de `config.toml` expone Mailpit en <http://localhost:54324> y SMTP en `54325`. El host `host.docker.internal` permite que las funciones dentro del contenedor usen ese SMTP. `MAIL_PUBLIC_BASE_URL` es la dirección accesible desde el navegador local para los enlaces de baja; no es la URL SMTP.
 
-## Corregir los permisos de la base actual
+## Preparar y verificar la base local
 
-Aplicar primero los cambios acordados a `schemas/5_politics.sql`. Esa fuente debe mantener las revocaciones antes de las concesiones finales por columna. Después:
+Los comandos de Supabase toman la configuración de `packages/supabase/config.toml` mediante `--workdir ..`. Para iniciar los servicios y consultar el estado de
+las migraciones locales:
 
 ```bash
 bun run start:containers
-bun run db:finalizar --correccion
+bunx supabase --workdir .. migration list --local
 ```
 
-El segundo comando crea una nueva migración con nombre `<fecha>_correccion_permisos.sql`, leyendo la sección final de permisos del esquema. No conecta a la base ni ejecuta SQL. Revisar su contenido y luego aplicar las migraciones pendientes:
+La migración inicial consolidada ya incluye la estructura completa y las políticas de permisos (ACL) finales. No es necesario generar ninguna corrección de
+permisos al preparar una base nueva o clonada.
+
+Si el listado muestra migraciones locales pendientes de aplicar en este entorno, aplicarlas con:
 
 ```bash
 bunx supabase --workdir .. migration up --local
@@ -43,7 +57,17 @@ bunx supabase --workdir .. migration up --local
 
 El `--workdir ..` identifica `packages` como directorio de trabajo de la CLI, que busca la configuración en `supabase/config.toml`. No corresponde crear otra configuración Supabase dentro de este paquete.
 
-Este flujo corrige una base que ya recibió la migración anterior. No editar esa migración aplicada ni eliminar el historial. Crear la corrección una vez; el arranque diario no necesita generar otra migración.
+Si el historial no coincide con lo esperado, resolver la diferencia antes de aplicar cambios o generar tipos. No editar una migración aplicada ni eliminar el historial. `db:reset` borra los datos locales y no corresponde al arranque ni a una comprobación rutinaria.
+
+## Corrección posterior de permisos
+
+Usar este flujo sólo ante un defecto de permisos comprobado en una base que ya recibió su migración. Corregir primero `schemas/5_politics.sql`, manteniendo las revocaciones antes de las concesiones finales por columna, y preparar una migración posterior:
+
+```bash
+bun run db:finalizar --correccion
+```
+
+El comando crea `<fecha>_correccion_permisos.sql` desde la sección final de permisos del esquema; no conecta a la base ni ejecuta SQL. Revisar el archivo nuevo y el historial antes de aplicar las migraciones pendientes con `bunx supabase --workdir .. migration up --local`. Crear la corrección una vez por defecto; conservar las migraciones anteriores.
 
 ## Próximos cambios declarativos
 
@@ -77,7 +101,7 @@ bun run types:sync
 bun run build
 ```
 
-`types:sync` toma el esquema de la base local en ejecución; debe correrse después de corregir esa base. `build` incluye la comprobación de TypeScript.
+`types:sync` toma el esquema de la base local en ejecución; debe correrse después de aplicar cambios de esquema en el proyecto correcto. `build` incluye la comprobación de TypeScript.
 
 ## Iniciar funciones y procesar correo
 
@@ -122,8 +146,10 @@ La captura en Mailpit demuestra el recorrido SMTP local, no una entrega externa.
 Para controles sin reformatear archivos:
 
 ```bash
-bun run lint:functions
-bun run lint:arch
+bun run lint
+bun run typecheck:functions
 ```
 
-El script `lint` existente incluye formateo; usarlo cuando también se quiera aplicar ese formato.
+`lint` ejecuta `lint:functions` (Deno) y `lint:arch`. `typecheck:functions` ejecuta Deno check sobre comunicaciones, monitoreo y ARCA, con sus imports transitivos y la configuración de `functions/deno.json`; valida tipos sin iniciar esas funciones. Arquitectura resuelve los alias locales declarados en `functions/deno.json` mediante `tsconfig.arch.json` y también comprueba imports de tipos; mantener esas rutas alineadas al cambiar alias. Los consumidores externos acceden a las API públicas `@core/index.ts` y `@modules/comunicaciones/index.ts`, y el caso de uso depende del puerto `RepositorioAvisos`.
+
+Para aplicar formato, ejecutar `bun run format:functions`; `bun run lint:fix` formatea y luego comprueba. `lint:functionsfix` se conserva como alias del formateo. El control Deno requiere que su runtime esté instalado; no debe confundirse un control de arquitectura aprobado con una validación completa de Edge Functions.

@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SolicitudCorreo } from "../domain/email_domain.ts";
-import { AppError } from "@core/errors.ts";
+import type { RepositorioAvisos } from "../application/RepositorioAvisos.ts";
+import { AppError } from "@core/index.ts";
 
-export class SocioRepository {
+export class SocioRepository implements RepositorioAvisos {
   constructor(private db: SupabaseClient) {}
 
   async encolar(solicitud: SolicitudCorreo) {

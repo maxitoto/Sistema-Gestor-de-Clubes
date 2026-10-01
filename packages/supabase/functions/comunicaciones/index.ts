@@ -1,26 +1,27 @@
-import { createEdgeClient } from "@core/supabase.ts";
-import { requireRol } from "@core/auth.ts";
-import { AppError } from "@core/errors.ts";
-import { corsHeaders, errorResponse, jsonResponse } from "@core/cors.ts";
-import { createMailAdmin, requiredEnv } from "@core/mail-admin.ts";
 import {
+  AppError,
   compararSecreto,
-  firmarBaja,
-  verificarBaja,
-  verificarSvix,
-} from "@core/mail-security.ts";
-import {
+  corsHeaders,
+  createEdgeClient,
+  createMailAdmin,
   EnvioFallido,
+  errorResponse,
+  firmarBaja,
+  jsonResponse,
+  requiredEnv,
+  requireRol,
   sendEmail,
   validarConfiguracionCorreo,
-} from "@core/mailer.ts";
-import { SocioRepository } from "@modules/comunicaciones/infrastructure/SocioRepository.ts";
-import { EnviarAvisoUseCase } from "@modules/comunicaciones/application/EnviarAvisoUseCase.ts";
+  verificarBaja,
+  verificarSvix,
+} from "@core/index.ts";
 import {
   CorreoInvalido,
+  EnviarAvisoUseCase,
   formatearCuerpoCorreo,
+  SocioRepository,
   uuidValido,
-} from "@modules/comunicaciones/domain/email_domain.ts";
+} from "@modules/comunicaciones/index.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
