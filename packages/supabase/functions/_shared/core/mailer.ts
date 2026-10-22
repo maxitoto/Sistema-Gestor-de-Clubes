@@ -1,5 +1,5 @@
 import nodemailer from "nodemailer";
-import { requiredEnv } from "./mail-admin.ts";
+import { requiredEnv } from "./env.ts";
 
 export type MensajeIndividual = {
   destinatarioId: string;
