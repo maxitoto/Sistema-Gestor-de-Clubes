@@ -96,6 +96,7 @@ WHERE q.estado = 'pendiente'
   AND q.created_at < NOW() - interval '30 days'
 GROUP BY d.id, d.nombre;
 
+GRANT SELECT ON public.flujo_caja              TO authenticated, service_role;
 GRANT SELECT ON public.v_morosidad_por_deporte TO authenticated, service_role;
 
 GRANT SELECT ON public.v_socios_estado_pago    TO authenticated, service_role;

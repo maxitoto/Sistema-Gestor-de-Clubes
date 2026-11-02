@@ -35,6 +35,7 @@ export type Database = {
 					nombre: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					arancel_mensual: number;
 					created_at?: string | null;
@@ -83,6 +84,7 @@ export type Database = {
 					nombre: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					created_at?: string | null;
 					descripcion?: string | null;
@@ -115,6 +117,7 @@ export type Database = {
 					punto_venta: number;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					certificado_arca?: string | null;
 					certificado_key?: string | null;
@@ -165,6 +168,7 @@ export type Database = {
 					updated_at: string | null;
 					ventana_regularizacion_iniciada_en: string;
 				};
+				ComputedFields: never;
 				Insert: {
 					cae?: string | null;
 					cae_vencimiento?: string | null;
@@ -249,6 +253,7 @@ export type Database = {
 					periodo_anio: number;
 					periodo_mes: number;
 				};
+				ComputedFields: never;
 				Insert: {
 					cuotas_generadas?: number | null;
 					cuotas_omitidas?: number | null;
@@ -283,6 +288,7 @@ export type Database = {
 					socio_id: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					categoria_id: string;
 					created_at?: string | null;
@@ -345,6 +351,7 @@ export type Database = {
 					nombre: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					created_at?: string | null;
 					descripcion?: string | null;
@@ -382,6 +389,7 @@ export type Database = {
 					reservado_en: string | null;
 					socio_id: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					aceptado_en?: string | null;
 					asunto_snapshot?: string | null;
@@ -460,6 +468,7 @@ export type Database = {
 					recibido_en: string;
 					tipo: string;
 				};
+				ComputedFields: never;
 				Insert: {
 					bounce_tipo?: string | null;
 					destinatario_id?: string | null;
@@ -506,6 +515,7 @@ export type Database = {
 					tipo: string;
 					usuario_id: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					asunto: string;
 					cuerpo: string;
@@ -572,6 +582,7 @@ export type Database = {
 					updated_at: string;
 					usuario_id: string;
 				};
+				ComputedFields: never;
 				Insert: {
 					anulado_at?: string | null;
 					anulado_por?: string | null;
@@ -643,6 +654,7 @@ export type Database = {
 					socio_id: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					categoria_id: string;
 					created_at?: string | null;
@@ -710,6 +722,7 @@ export type Database = {
 					updated_at: string;
 					usuario_id: string;
 				};
+				ComputedFields: never;
 				Insert: {
 					anulado_at?: string | null;
 					anulado_por?: string | null;
@@ -774,6 +787,7 @@ export type Database = {
 					nombre_interno: string;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					asunto: string;
 					created_at?: string | null;
@@ -819,6 +833,7 @@ export type Database = {
 					telefono: string | null;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					acepta_comunicaciones?: boolean;
 					apellido: string;
@@ -888,6 +903,7 @@ export type Database = {
 					rol: Database['public']['Enums']['rol_usuario'];
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Insert: {
 					apellido: string;
 					created_at?: string | null;
@@ -925,40 +941,43 @@ export type Database = {
 					tipo_movimiento: string | null;
 					usuario_id: string | null;
 				};
+				ComputedFields: never;
 				Relationships: [];
 			};
 			v_morosidad_por_deporte: {
 				Row: {
 					cuotas_morosas: number | null;
-					deporte: string | null;
-					deporte_id: string | null;
+					deporte: string;
+					deporte_id: string;
 					deuda_morosa: number | null;
 				};
+				ComputedFields: never;
 				Relationships: [];
 			};
 			v_pagos_etiqueta_fiscal: {
 				Row: {
-					comprobante_id: string | null;
-					cuota_id: string | null;
-					estado_fiscal: Database['public']['Enums']['estado_fiscal'] | null;
-					estado_pago: Database['public']['Enums']['estado_pago'] | null;
+					comprobante_id: string;
+					cuota_id: string;
+					estado_fiscal: Database['public']['Enums']['estado_fiscal'];
+					estado_pago: Database['public']['Enums']['estado_pago'];
 					etiqueta_recibo: string | null;
-					fecha_pago: string | null;
-					id: string | null;
-					intentos_reintento: number | null;
-					medio_pago: Database['public']['Enums']['medio_pago'] | null;
-					monto: number | null;
+					fecha_pago: string;
+					id: string;
+					intentos_reintento: number;
+					medio_pago: Database['public']['Enums']['medio_pago'];
+					monto: number;
 					numero_comprobante: string | null;
 					proximo_reintento_en: string | null;
 					referencia_pago: string | null;
-					socio_apellido: string | null;
-					socio_dni: string | null;
-					socio_estado: Database['public']['Enums']['estado_basico'] | null;
-					socio_id: string | null;
-					socio_nombre: string | null;
-					tipo_comprobante: Database['public']['Enums']['tipo_comprobante'] | null;
-					usuario_id: string | null;
+					socio_apellido: string;
+					socio_dni: string;
+					socio_estado: Database['public']['Enums']['estado_basico'];
+					socio_id: string;
+					socio_nombre: string;
+					tipo_comprobante: Database['public']['Enums']['tipo_comprobante'];
+					usuario_id: string;
 				};
+				ComputedFields: never;
 				Relationships: [
 					{
 						foreignKeyName: 'pagos_cuota_id_fkey';
@@ -978,33 +997,34 @@ export type Database = {
 			};
 			v_socios_estado_pago: {
 				Row: {
-					acepta_comunicaciones: boolean | null;
-					apellido: string | null;
+					acepta_comunicaciones: boolean;
+					apellido: string;
 					contacto_emergencia_nombre: string | null;
 					contacto_emergencia_telefono: string | null;
 					created_at: string | null;
 					deuda_pendiente: number | null;
 					direccion: string | null;
-					dni: string | null;
+					dni: string;
 					dni_anterior: string | null;
 					dni_corregido_at: string | null;
 					dni_corregido_por: string | null;
 					email: string | null;
-					email_invalido: boolean | null;
+					email_invalido: boolean;
 					es_moroso: boolean | null;
-					estado: Database['public']['Enums']['estado_basico'] | null;
+					estado: Database['public']['Enums']['estado_basico'];
 					estado_pago: string | null;
-					fecha_alta: string | null;
+					fecha_alta: string;
 					fecha_baja: string | null;
-					fecha_nacimiento: string | null;
+					fecha_nacimiento: string;
 					foto_url: string | null;
-					id: string | null;
-					nombre: string | null;
-					numero_socio: number | null;
+					id: string;
+					nombre: string;
+					numero_socio: number;
 					pendientes_count: number | null;
 					telefono: string | null;
 					updated_at: string | null;
 				};
+				ComputedFields: never;
 				Relationships: [
 					{
 						foreignKeyName: 'socios_dni_corregido_por_fkey';

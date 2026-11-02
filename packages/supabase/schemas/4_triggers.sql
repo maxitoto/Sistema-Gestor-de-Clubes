@@ -259,13 +259,25 @@ RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
+DECLARE
+  v_rol public.rol_usuario;
 BEGIN
-  INSERT INTO public.usuarios (id, email, nombre, apellido)
+  -- Serializa el alta inicial para que solo la primera cuenta reciba rol 'admin'
+  PERFORM pg_advisory_xact_lock(hashtextextended('usuarios:primer_admin', 0));
+
+  IF NOT EXISTS (SELECT 1 FROM public.usuarios) THEN
+    v_rol := 'admin';
+  ELSE
+    v_rol := 'responsable';
+  END IF;
+
+  INSERT INTO public.usuarios (id, email, nombre, apellido, rol)
   VALUES (
     NEW.id,
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'nombre', 'Sin Nombre'),
-    COALESCE(NEW.raw_user_meta_data->>'apellido', 'Sin Apellido')
+    COALESCE(NULLIF(btrim(NEW.raw_user_meta_data->>'nombre'), ''), 'Sin Nombre'),
+    COALESCE(NULLIF(btrim(NEW.raw_user_meta_data->>'apellido'), ''), 'Sin Apellido'),
+    v_rol
   );
   RETURN NEW;
 END;
