@@ -32,28 +32,18 @@ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------------------------
--- 1. Helper único de rol
--- Para optimizar rendimiento y no hacer subconsultas constantemente
+-- 1. Limpieza de funciones de rol obsoletas (private.get_rol() se define en 3_functions.sql)
 -- ---------------------------------------------------------------------------------
 DROP FUNCTION IF EXISTS public.es_admin() CASCADE;
 DROP FUNCTION IF EXISTS public.es_responsable() CASCADE;
 DROP FUNCTION IF EXISTS public.get_rol() CASCADE;
 
-CREATE OR REPLACE FUNCTION private.get_rol()
-RETURNS public.rol_usuario
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
-AS $$
-  SELECT rol FROM public.usuarios
-  WHERE id = auth.uid() AND estado = 'activo';
-$$;
-GRANT EXECUTE ON FUNCTION private.get_rol() TO authenticated, service_role;
-REVOKE EXECUTE ON FUNCTION private.get_rol() FROM PUBLIC;
-
 -- ---------------------------------------------------------------------------------
--- 2. Permisos base a roles de API)
+-- 2. Permisos base a roles de API
 -- ---------------------------------------------------------------------------------
 GRANT USAGE ON SCHEMA public TO authenticated, service_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.categorias_gasto, public.plantillas_correo TO authenticated;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated, service_role;
 

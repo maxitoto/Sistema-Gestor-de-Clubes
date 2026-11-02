@@ -59,42 +59,35 @@ El `--workdir ..` identifica `packages` como directorio de trabajo de la CLI, qu
 
 Si el historial no coincide con lo esperado, resolver la diferencia antes de aplicar cambios o generar tipos. No editar una migración aplicada ni eliminar el historial. `db:reset` borra los datos locales y no corresponde al arranque ni a una comprobación rutinaria.
 
-## Corrección posterior de permisos
+## Generación de la migración desde los esquemas
 
-Usar este flujo sólo ante un defecto de permisos comprobado en una base que ya recibió su migración. Corregir primero `schemas/5_politics.sql`, manteniendo las revocaciones antes de las concesiones finales por columna, y preparar una migración posterior:
+Las fuentes declarativas en `schemas/` están ordenadas sin dependencias circulares ni referencias adelantadas (`0_scheme.sql`, `1_indexes.sql`, `3_functions.sql`, `2_views.sql`, `4_triggers.sql` y `5_politics.sql`), manteniendo en `5_politics.sql` todas las revocaciones (`REVOKE`) antes de las concesiones por columna (`GRANT`).
+
+Para regenerar la migración consolidada directamente desde `schemas/` (evitando que `pg-delta` invierta el orden de los permisos por columna):
 
 ```bash
-bun run db:finalizar --correccion
+cat schemas/0_scheme.sql \
+    schemas/1_indexes.sql \
+    schemas/3_functions.sql \
+    schemas/2_views.sql \
+    schemas/4_triggers.sql \
+    schemas/5_politics.sql \
+    > migrations/$(date -u +%Y%m%d%H%M%S)_init_scheme.sql
 ```
 
-El comando crea `<fecha>_correccion_permisos.sql` desde la sección final de permisos del esquema; no conecta a la base ni ejecuta SQL. Revisar el archivo nuevo y el historial antes de aplicar las migraciones pendientes con `bunx supabase --workdir .. migration up --local`. Crear la corrección una vez por defecto; conservar las migraciones anteriores.
+Si se está inicializando o recreando la base local desde cero junto con los datos de prueba (`seeds/seed.sql`):
 
-## Próximos cambios declarativos
+```bash
+bun run db:reset
+```
 
-1. Modificar las fuentes pertinentes de `schemas/`.
-2. Generar la migración sin aplicarla todavía:
+Si en cambio se creó una migración incremental nueva sobre una base ya en uso, aplicarla con:
 
-   ```bash
-   bunx supabase --workdir .. db schema declarative sync -f ajuste_esquema --no-apply
-   ```
+```bash
+bunx supabase --workdir .. migration up --local
+```
 
-3. Tomar el nombre exacto del archivo emitido dentro de `migrations/` y completar sus permisos finales:
-
-   ```bash
-   bun run db:finalizar --completar <nombre-exacto-emitido.sql>
-   ```
-
-4. Revisar la migración terminada y aplicarla:
-
-   ```bash
-   bunx supabase --workdir .. migration up --local
-   ```
-
-`--completar` acepta el nombre del archivo, no una ruta, y sólo corresponde a una migración que aún no fue aplicada. El script no consulta el historial de la base: esa condición debe verificarse antes de usarlo. Si la migración ya se aplicó, usar `--correccion` para preparar un archivo nuevo. El finalizador no reemplaza el diff de cambios estructurales: reproduce al final las ACL de la sección 10 y retira la antigua política de borrado del club.
-
-Conservar `migrations/`. Estos pasos no requieren reiniciar los datos de la base. Si una migración falla, revisar el error y su estado antes de continuar.
-
-Después de una aplicación exitosa, ir a `packages/frontend` y ejecutar:
+Después de aplicar cambios en el esquema de la base, ir a `packages/frontend` y ejecutar:
 
 ```bash
 bun run types:sync

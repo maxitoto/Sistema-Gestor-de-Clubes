@@ -14,7 +14,6 @@
     "db:reset": "bunx supabase db reset --workdir ..",
     "db:push": "bunx supabase db push --workdir ..",
     "db:pull": "bunx supabase db pull --workdir ..",
-    "db:finalizar": "bun scripts/finalizar-migracion.mjs",
     "newEdge": "bunx supabase functions new --workdir ..",
     "lint:arch": "bunx --bun depcruise functions",
     "lint:functions": "bunx --bun deno lint functions/",

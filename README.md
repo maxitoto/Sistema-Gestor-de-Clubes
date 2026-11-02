@@ -38,8 +38,7 @@ bunx supabase --workdir .. migration up --local
 Conservar las migraciones aplicadas y los datos de prueba; db:reset no forma parte del arranque habitual ya que restablece la base desde cero descartando los
 datos locales.
 
-El [README del backend](packages/supabase/README.md) detalla cómo preparar nuevas migraciones declarativas y cuándo corresponde realizar ajustes posteriores de
-permisos.
+El [README del backend](packages/supabase/README.md) detalla cómo generar y aplicar migraciones a partir de los esquemas en `schemas/`.
 
 ## Arranque diario
 
@@ -98,7 +97,7 @@ Las dependencias bajan de `app` hacia `shared`: una capa puede importar las infe
 | `functions/arca`                           | Entrada pendiente de integración fiscal; no representa una emisión fiscal terminada     |
 | `functions/_shared/core`                   | Autenticación, clientes Supabase, errores, transporte de correo y firmas                |
 | `functions/_shared/modules/comunicaciones` | Dominio, caso de uso de aviso y repositorio de comunicaciones                           |
-| `scripts`                                  | Herramientas locales de arranque, procesamiento de correo y finalización de migraciones |
+| `scripts`                                  | Herramientas locales de arranque y procesamiento de cola de correo                      |
 
 En comunicaciones, `domain` concentra validaciones/formato sin acceso a red; `application` coordina el caso de uso y `infrastructure` implementa acceso a datos. Algunas rutas HTTP coordinan directamente RPC y adaptadores compartidos, por lo que esta estructura no debe presentarse como una separación completa de todos los módulos del sistema.
 

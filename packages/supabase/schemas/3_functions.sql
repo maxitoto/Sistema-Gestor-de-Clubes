@@ -1,4 +1,14 @@
 CREATE SCHEMA IF NOT EXISTS private;
+CREATE OR REPLACE FUNCTION private.get_rol()
+RETURNS public.rol_usuario
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public
+AS $$
+  SELECT rol FROM public.usuarios
+  WHERE id = auth.uid() AND estado = 'activo';
+$$;
+REVOKE EXECUTE ON FUNCTION private.get_rol() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION private.get_rol() TO authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION private.bloquear_estructura_deportiva()
 RETURNS void
 LANGUAGE sql VOLATILE SET search_path = public, pg_temp
