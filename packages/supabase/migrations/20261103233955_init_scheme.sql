@@ -1318,7 +1318,22 @@ $$;
 REVOKE ALL ON FUNCTION public.generar_cuotas_mes_manual()
 FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.generar_cuotas_mes_manual() TO authenticated;
---=================================================================================
+
+-- devuelve exactamente la fecha calendario canónica de Buenos Aires que utilizan internamente otras funciones como previsualizar_inscripcion y confirmar_inscripcion
+CREATE OR REPLACE FUNCTION public.fecha_actual_club()
+RETURNS date
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF private.get_rol() IS NULL THEN
+    RAISE EXCEPTION 'Se requiere un operador activo' USING ERRCODE = '42501';
+  END IF;
+  RETURN (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+END;
+$$;--=================================================================================
 -- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
 -- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
@@ -2147,6 +2162,8 @@ GRANT INSERT (dni, nombre, apellido, fecha_nacimiento, email, telefono, direccio
   foto_url, acepta_comunicaciones, contacto_emergencia_nombre, contacto_emergencia_telefono)
 ON public.socios TO authenticated;
 
+REVOKE ALL ON FUNCTION public.fecha_actual_club() FROM PUBLIC, anon, service_role;
+
 GRANT UPDATE (dni, nombre, apellido, fecha_nacimiento, email, telefono, direccion,
   foto_url, acepta_comunicaciones, contacto_emergencia_nombre, contacto_emergencia_telefono)
 ON public.socios TO authenticated;
@@ -2188,6 +2205,8 @@ ON public.club TO authenticated;
 
 GRANT UPDATE (nombre, cuit, domicilio_fiscal, email_contacto, logo_url, punto_venta)
 ON public.club TO authenticated;
+
+GRANT EXECUTE ON FUNCTION public.fecha_actual_club() TO authenticated;
 
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';
