@@ -1,5 +1,5 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
-import { DashboardPage, LoginPage, SettingsPage, SociosPage } from '#pages';
+import { DashboardPage, DeportesPage, LoginPage, SettingsPage, SociosPage } from '#pages';
 import { AuthLayout, MainLayout } from '#widgets/layout';
 import { RequireAuth } from './RequireAuth';
 import { RequireRole } from './RequireRole';
@@ -17,7 +17,10 @@ export const routerConfig = createBrowserRouter([
 					{ path: '/socios', element: <SociosPage /> },
 					{
 						element: <RequireRole roles={['admin']} />,
-						children: [{ path: '/settings', element: <SettingsPage /> }],
+						children: [
+							{ path: '/settings', element: <SettingsPage /> },
+							{ path: '/deportes', element: <DeportesPage /> },
+						],
 					},
 				],
 			},
