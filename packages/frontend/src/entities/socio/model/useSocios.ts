@@ -18,5 +18,6 @@ export function useSocios(
 		queryKey: ['socios', options?.cacheScope, { page, limit, searchTerm }],
 		queryFn: ({ signal }) => getSocios({ page, limit, searchTerm }, signal),
 		enabled: options?.enabled ?? true,
+		retry: 1,
 	});
 }
