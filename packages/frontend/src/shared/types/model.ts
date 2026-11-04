@@ -1102,6 +1102,7 @@ export type Database = {
 			};
 			desuscribir_correo: { Args: { p_destinatario: string }; Returns: undefined };
 			es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean };
+			fecha_actual_club: { Args: Record<PropertyKey, never>; Returns: string };
 			finalizar_correo: {
 				Args: {
 					p_estado: string;
