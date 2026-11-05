@@ -17,16 +17,22 @@
     "newEdge": "bunx supabase functions new --workdir ..",
     "lint:arch": "bunx --bun depcruise functions",
     "lint:functions": "bunx --bun deno lint functions/",
-    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts",
+    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts functions/archivos/index.ts",
     "format:functions": "bunx --bun deno fmt functions/",
     "lint:functionsfix": "bun run format:functions",
     "lint:fix": "bun run format:functions && bun run lint",
-    "lint": "bun run lint:functions && bun run lint:arch"
+    "lint": "bun run lint:functions && bun run lint:arch",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "deno-bin": "2.2.7",
     "dependency-cruiser": "18.3.1",
     "typescript": "6"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4",
+    "pdf-lib": "1.17.1",
+    "pngjs": "7.0.0"
   }
 }

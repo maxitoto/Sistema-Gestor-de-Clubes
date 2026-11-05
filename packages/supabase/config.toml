@@ -433,3 +433,8 @@ verify_jwt = false
 [functions.monitoreo]
 enabled = true
 verify_jwt = true # JWT de usuario validado por el runtime; el rol admin se chequea en requireRol
+
+[functions.archivos]
+enabled = true
+verify_jwt = true
+
