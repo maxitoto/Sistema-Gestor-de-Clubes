@@ -48,3 +48,41 @@ export async function buscarDeportePorNombre(
 	}
 	return data;
 }
+
+export async function getDeporte(id: string, signal?: AbortSignal): Promise<Deporte | null> {
+	const { data, error } = await supabase
+		.from('deportes')
+		.select(columnas)
+		.eq('id', id)
+		.abortSignal(requestSignal(signal))
+		.maybeSingle();
+	if (error) {
+		throw error;
+	}
+	return data;
+}
+export async function actualizarDeporte(
+	id: string,
+	payload: CrearDeportePayload,
+	signal?: AbortSignal,
+): Promise<Deporte> {
+	const { data, error, status } = await supabase
+		.from('deportes')
+		.update({ nombre: payload.nombre, descripcion: payload.descripcion })
+		.eq('id', id)
+		.select(columnas)
+		.abortSignal(requestSignal(signal))
+		.single();
+	if (error) {
+		throw Object.assign(error, { status });
+	}
+	return data;
+}
+export async function darDeBajaDeporte(id: string, signal?: AbortSignal): Promise<void> {
+	const { error, status } = await supabase
+		.rpc('baja_deporte', { p_deporte_id: id })
+		.abortSignal(requestSignal(signal));
+	if (error) {
+		throw Object.assign(error, { status });
+	}
+}

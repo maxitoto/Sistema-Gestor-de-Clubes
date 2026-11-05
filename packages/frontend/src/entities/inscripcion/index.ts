@@ -1,8 +1,12 @@
+export type { InscripcionHistorial } from './api/inscripciones.api';
 export {
+	bajaInscripcion,
 	confirmarInscripcion,
 	consultarResultadoInscripcion,
 	getCargosDelPeriodo,
 	getFechaActualClub,
+	getHistorialInscripciones,
+	getInscripcion,
 	previsualizarInscripcion,
 	recuperarInscripcion,
 } from './api/inscripciones.api';
@@ -25,3 +29,4 @@ export {
 	periodoDeFecha,
 	RespuestaInscripcionIncierta,
 } from './model/inscripcionContract';
+export { useHistorialInscripciones } from './model/useHistorialInscripciones';

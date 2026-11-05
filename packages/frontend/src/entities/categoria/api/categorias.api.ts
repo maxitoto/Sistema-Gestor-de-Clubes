@@ -88,13 +88,14 @@ export async function buscarCategoriaPorIdentidad(
 export async function consultarSuperposicion(
 	payload: Pick<CrearCategoriaPayload, 'deporte_id' | 'edad_min' | 'edad_max'>,
 	signal?: AbortSignal,
+	excluirCategoria: string | null = null,
 ): Promise<CategoriaSuperpuesta[]> {
 	// La función SQL acepta NULL; el generador actual omite esa nulabilidad en Args.
 	const args = {
 		p_deporte_id: payload.deporte_id,
 		p_edad_min: payload.edad_min,
 		p_edad_max: payload.edad_max,
-		p_excluir_categoria: null,
+		p_excluir_categoria: excluirCategoria,
 	};
 	const { data, error } = await supabase
 		.rpc(
@@ -106,4 +107,48 @@ export async function consultarSuperposicion(
 		throw error;
 	}
 	return data ?? [];
+}
+
+export type EditarCategoriaPayload = Omit<CrearCategoriaPayload, 'deporte_id'>;
+export async function getCategoria(id: string, signal?: AbortSignal): Promise<Categoria | null> {
+	const { data, error } = await supabase
+		.from('categorias')
+		.select(columnas)
+		.eq('id', id)
+		.abortSignal(requestSignal(signal))
+		.maybeSingle();
+	if (error) {
+		throw error;
+	}
+	return data;
+}
+export async function actualizarCategoria(
+	id: string,
+	payload: EditarCategoriaPayload,
+	signal?: AbortSignal,
+): Promise<Categoria> {
+	const { data, error, status } = await supabase
+		.from('categorias')
+		.update({
+			nombre: payload.nombre,
+			arancel_mensual: payload.arancel_mensual,
+			edad_min: payload.edad_min,
+			edad_max: payload.edad_max,
+		})
+		.eq('id', id)
+		.select(columnas)
+		.abortSignal(requestSignal(signal))
+		.single();
+	if (error) {
+		throw Object.assign(error, { status });
+	}
+	return data;
+}
+export async function darDeBajaCategoria(id: string, signal?: AbortSignal): Promise<void> {
+	const { error, status } = await supabase
+		.rpc('baja_categoria', { p_categoria_id: id })
+		.abortSignal(requestSignal(signal));
+	if (error) {
+		throw Object.assign(error, { status });
+	}
 }

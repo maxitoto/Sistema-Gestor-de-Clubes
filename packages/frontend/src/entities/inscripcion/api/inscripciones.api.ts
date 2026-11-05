@@ -164,3 +164,40 @@ export async function recuperarInscripcion(identidad: IdentidadInscripcion, sign
 	}
 	return comprobarRecuperacion(identidad, inscripcion.data, cuota.data);
 }
+
+const historialSelect =
+	'id,socio_id,categoria_id,fecha_alta,fecha_baja,estado,categoria:categorias(nombre,estado,arancel_mensual,deporte:deportes(nombre,estado))';
+export async function getHistorialInscripciones(socioId: string, signal?: AbortSignal) {
+	const { data, error } = await supabase
+		.from('inscripciones')
+		.select(historialSelect)
+		.eq('socio_id', socioId)
+		.order('fecha_alta', { ascending: false })
+		.order('id')
+		.abortSignal(lecturaSignal(signal));
+	if (error) {
+		throw error;
+	}
+	return data ?? [];
+}
+export type InscripcionHistorial = Awaited<ReturnType<typeof getHistorialInscripciones>>[number];
+export async function getInscripcion(id: string, signal?: AbortSignal) {
+	const { data, error } = await supabase
+		.from('inscripciones')
+		.select(historialSelect)
+		.eq('id', id)
+		.abortSignal(lecturaSignal(signal))
+		.maybeSingle();
+	if (error) {
+		throw error;
+	}
+	return data;
+}
+export async function bajaInscripcion(id: string, signal?: AbortSignal) {
+	const { error, status } = await supabase
+		.rpc('baja_inscripcion', { p_inscripcion_id: id })
+		.abortSignal(lecturaSignal(signal));
+	if (error) {
+		throw Object.assign(error, { status });
+	}
+}
