@@ -20,6 +20,7 @@ import {
 	Typography,
 } from '@mui/material';
 import { type ReactNode, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '#entities/session';
 import { type SocioListado, useSocios } from '#entities/socio';
 import { CreateSocioDialog } from '#features/create-socio';
@@ -52,6 +53,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 	const [page, setPage] = useState(1);
 	const [pageSize, setPageSize] = useState(20);
 	const [searchTerm, setSearchTerm] = useState('');
+	const [estado, setEstado] = useState<'activo' | 'inactivo' | 'todos'>('activo');
 	const [selectedSocio, setSelectedSocio] = useState<SocioListado | null>(null);
 	const [createOpen, setCreateOpen] = useState(false);
 	const [inscripcionTarget, setInscripcionTarget] = useState<SocioListado | null>(null);
@@ -72,7 +74,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 		page,
 		pageSize,
 		debouncedSearchTerm,
-		{ cacheScope, enabled: enabled && !filtering },
+		{ cacheScope, enabled: enabled && !filtering, estado },
 	);
 	const loading = !enabled || isPending || isFetching || filtering;
 	const result = !loading && !isError ? data : undefined;
@@ -151,6 +153,24 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 						</MenuItem>
 					))}
 				</TextField>
+				<TextField
+					select
+					label="Estado del socio"
+					value={estado}
+					sx={{ minWidth: 160 }}
+					onChange={(event) => {
+						const value = event.target.value;
+						if (value === 'activo' || value === 'inactivo' || value === 'todos') {
+							clearSelection();
+							setPage(1);
+							setEstado(value);
+						}
+					}}
+				>
+					<MenuItem value="activo">Activos</MenuItem>
+					<MenuItem value="inactivo">Inactivos</MenuItem>
+					<MenuItem value="todos">Todos</MenuItem>
+				</TextField>
 			</Box>
 			{loading && (
 				<Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}>
@@ -180,6 +200,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 										<TableCell>Socio</TableCell>
 										<TableCell>Matrícula</TableCell>
 										<TableCell>Estado</TableCell>
+										<TableCell>Acciones</TableCell>
 									</TableRow>
 								</TableHead>
 								<TableBody>
@@ -220,6 +241,11 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 													color={socio.estado === 'activo' ? 'success' : 'default'}
 													variant="outlined"
 												/>
+											</TableCell>
+											<TableCell>
+												<Button component={Link} to={`/socios/${socio.id}`}>
+													Ver ficha
+												</Button>
 											</TableCell>
 										</TableRow>
 									))}
@@ -295,6 +321,9 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 							El socio debe estar activo para inscribirlo.
 						</Typography>
 					)}
+					<Button component={Link} to={`/socios/${selected.id}`} sx={{ mt: 2, ml: 1 }}>
+						Abrir ficha
+					</Button>
 					{renderSelectedSocio?.(selected)}
 				</Box>
 			)}

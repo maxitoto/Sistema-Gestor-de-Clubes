@@ -4,5 +4,6 @@ export { DeportesPage } from './deportes/ui/DeportesPage';
 export { LoginPage } from './login/ui/LoginPage';
 // src/pages/settings/index.ts
 export { SettingsPage } from './settings/ui/SettingsPage';
+export { SocioPage } from './socio/ui/SocioPage';
 // src/pages/socios/index.ts
 export { SociosPage } from './socios/ui/SociosPage';

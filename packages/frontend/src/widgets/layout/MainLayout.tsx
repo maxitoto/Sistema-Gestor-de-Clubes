@@ -48,7 +48,10 @@ export const MainLayout = () => {
 				]
 			: []),
 	];
-	const pageTitle = navigation.find((item) => item.to === pathname)?.label ?? 'Gestión del club';
+	const pageTitle =
+		navigation.find(
+			(item) => item.to === pathname || (item.to === '/socios' && pathname.startsWith('/socios/')),
+		)?.label ?? 'Gestión del club';
 	const sidebar = (
 		<Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 			<Box

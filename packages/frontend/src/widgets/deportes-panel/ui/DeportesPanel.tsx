@@ -19,11 +19,14 @@ import {
 	Typography,
 } from '@mui/material';
 import { useState } from 'react';
-import { useCategorias } from '#entities/categoria';
-import { useDeportes } from '#entities/deporte';
+import { type Categoria, useCategorias } from '#entities/categoria';
+import { type Deporte, useDeportes } from '#entities/deporte';
 import { useAuth } from '#entities/session';
 import { CreateCategoriaDialog } from '#features/create-categoria';
 import { CreateDeporteDialog } from '#features/create-deporte';
+import { type CatalogoBajaTarget, DeactivateCatalogoDialog } from '#features/deactivate-catalogo';
+import { EditCategoriaDialog } from '#features/edit-categoria';
+import { EditDeporteDialog } from '#features/edit-deporte';
 
 const formatArancel = (value: number) =>
 	new Intl.NumberFormat('es-AR', {
@@ -39,11 +42,21 @@ export function DeportesPanel() {
 
 function Catalogo() {
 	const { cacheScope, profileStatus, perfil, isSigningOut } = useAuth();
-	const enabled = profileStatus === 'ready' && perfil?.rol === 'admin' && !isSigningOut;
+	const enabled =
+		profileStatus === 'ready' &&
+		perfil?.rol === 'admin' &&
+		perfil.estado === 'activo' &&
+		!isSigningOut;
 	const [selectedId, setSelectedId] = useState<string | null>(null);
 	const [createDeporte, setCreateDeporte] = useState(false);
 	const [createCategoria, setCreateCategoria] = useState(false);
 	const [success, setSuccess] = useState<string | null>(null);
+	const [editDeporte, setEditDeporte] = useState<Deporte | null>(null);
+	const [editCategoria, setEditCategoria] = useState<{
+		registro: Categoria;
+		deporteNombre: string;
+	} | null>(null);
+	const [bajaTarget, setBajaTarget] = useState<CatalogoBajaTarget | null>(null);
 	const deportes = useDeportes({ cacheScope, enabled });
 	const selected =
 		enabled && !deportes.isFetching && !deportes.isError
@@ -54,6 +67,12 @@ function Catalogo() {
 		enabled: enabled && Boolean(selected),
 	});
 	const loading = !enabled || deportes.isPending || deportes.isFetching;
+	const reloadCatalogo = () => {
+		void deportes.refetch();
+		if (selected) {
+			void categorias.refetch();
+		}
+	};
 	return (
 		<Stack spacing={3}>
 			<Box>
@@ -207,6 +226,24 @@ function Catalogo() {
 										<Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
 											Aranceles mensuales y rangos de edad orientativos.
 										</Typography>
+										<Box sx={{ mt: 1, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+											<Button
+												size="small"
+												variant="outlined"
+												onClick={() => setEditDeporte(selected)}
+												disabled={!enabled}
+											>
+												Editar deporte
+											</Button>
+											<Button
+												size="small"
+												color="error"
+												onClick={() => setBajaTarget({ tipo: 'deporte', registro: selected })}
+												disabled={!enabled || selected.estado !== 'activo'}
+											>
+												Dar de baja deporte
+											</Button>
+										</Box>
 									</Box>
 									<Button
 										variant="contained"
@@ -258,6 +295,7 @@ function Catalogo() {
 													<TableCell align="right">Arancel mensual</TableCell>
 													<TableCell>Rango de edad</TableCell>
 													<TableCell>Estado</TableCell>
+													<TableCell>Acciones</TableCell>
 												</TableRow>
 											</TableHead>
 											<TableBody>
@@ -285,6 +323,34 @@ function Catalogo() {
 																color={categoria.estado === 'activo' ? 'success' : 'default'}
 																variant="outlined"
 															/>
+														</TableCell>
+														<TableCell>
+															<Stack direction="row" spacing={0.5} sx={{ whiteSpace: 'nowrap' }}>
+																<Button
+																	size="small"
+																	aria-label={`Editar categoría ${categoria.nombre}`}
+																	disabled={!enabled}
+																	onClick={() =>
+																		setEditCategoria({
+																			registro: categoria,
+																			deporteNombre: selected.nombre,
+																		})
+																	}
+																>
+																	Editar
+																</Button>
+																<Button
+																	size="small"
+																	color="error"
+																	aria-label={`Dar de baja categoría ${categoria.nombre}`}
+																	disabled={!enabled || categoria.estado !== 'activo'}
+																	onClick={() =>
+																		setBajaTarget({ tipo: 'categoria', registro: categoria })
+																	}
+																>
+																	Dar de baja
+																</Button>
+															</Stack>
 														</TableCell>
 													</TableRow>
 												))}
@@ -332,6 +398,45 @@ function Catalogo() {
 					)}
 				</Paper>
 			</Box>
+			{editDeporte && (
+				<EditDeporteDialog
+					key={`edit-deporte-${editDeporte.id}`}
+					deporte={editDeporte}
+					onClose={() => setEditDeporte(null)}
+					onSaved={(row) => {
+						setEditDeporte(null);
+						setSuccess(`Deporte ${row.nombre} actualizado.`);
+						reloadCatalogo();
+					}}
+				/>
+			)}
+			{editCategoria && (
+				<EditCategoriaDialog
+					key={`edit-categoria-${editCategoria.registro.id}`}
+					categoria={editCategoria.registro}
+					deporteNombre={editCategoria.deporteNombre}
+					onClose={() => setEditCategoria(null)}
+					onSaved={(row) => {
+						setEditCategoria(null);
+						setSuccess(
+							`Categoría ${row.nombre} actualizada. Las cuotas emitidas conservan su importe.`,
+						);
+						reloadCatalogo();
+					}}
+				/>
+			)}
+			{bajaTarget && (
+				<DeactivateCatalogoDialog
+					key={`baja-${bajaTarget.tipo}-${bajaTarget.registro.id}`}
+					target={bajaTarget}
+					onClose={() => setBajaTarget(null)}
+					onChanged={() => {
+						setBajaTarget(null);
+						setSuccess(`${bajaTarget.registro.nombre} quedó inactivo. El historial se conserva.`);
+						reloadCatalogo();
+					}}
+				/>
+			)}
 			{createDeporte && (
 				<CreateDeporteDialog
 					open
