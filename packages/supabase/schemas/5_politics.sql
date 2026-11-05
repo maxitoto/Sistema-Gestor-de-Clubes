@@ -253,5 +253,25 @@ ON public.club TO authenticated;
 
 GRANT EXECUTE ON FUNCTION public.fecha_actual_club() TO authenticated;
 
+-- permisos de tabla, funciones y columnas de referencias de archivos privados.
+REVOKE ALL ON private.archivos_cargas FROM PUBLIC, anon, authenticated;
+GRANT ALL ON private.archivos_cargas TO service_role;
+
+REVOKE ALL ON FUNCTION private.archivo_prefijo(text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.validar_archivo_asociado() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_autorizar_carga(text, uuid) FROM PUBLIC, anon, service_role;
+REVOKE ALL ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_finalizar_descarte(uuid, text) FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.archivo_autorizar_carga(text, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_finalizar_descarte(uuid, text) TO service_role;
+
+GRANT UPDATE (foto_storage_path) ON public.socios TO authenticated;
+GRANT SELECT (logo_storage_path), UPDATE (logo_storage_path) ON public.club TO authenticated;
+GRANT UPDATE (evidencia_storage_path) ON public.gastos TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

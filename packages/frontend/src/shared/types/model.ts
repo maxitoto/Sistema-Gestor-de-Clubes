@@ -112,6 +112,7 @@ export type Database = {
 					domicilio_fiscal: string;
 					email_contacto: string;
 					id: string;
+					logo_storage_path: string | null;
 					logo_url: string | null;
 					nombre: string;
 					punto_venta: number;
@@ -126,6 +127,7 @@ export type Database = {
 					domicilio_fiscal: string;
 					email_contacto: string;
 					id?: string;
+					logo_storage_path?: string | null;
 					logo_url?: string | null;
 					nombre: string;
 					punto_venta: number;
@@ -139,6 +141,7 @@ export type Database = {
 					domicilio_fiscal?: string;
 					email_contacto?: string;
 					id?: string;
+					logo_storage_path?: string | null;
 					logo_url?: string | null;
 					nombre?: string;
 					punto_venta?: number;
@@ -572,6 +575,7 @@ export type Database = {
 					created_at: string;
 					descripcion: string | null;
 					estado: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path: string | null;
 					evidencia_url: string | null;
 					fecha: string;
 					id: string;
@@ -591,6 +595,7 @@ export type Database = {
 					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path?: string | null;
 					evidencia_url?: string | null;
 					fecha?: string;
 					id?: string;
@@ -609,6 +614,7 @@ export type Database = {
 					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path?: string | null;
 					evidencia_url?: string | null;
 					fecha?: string;
 					id?: string;
@@ -826,6 +832,7 @@ export type Database = {
 					fecha_alta: string;
 					fecha_baja: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path: string | null;
 					foto_url: string | null;
 					id: string;
 					nombre: string;
@@ -851,6 +858,7 @@ export type Database = {
 					fecha_alta?: string;
 					fecha_baja?: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path?: string | null;
 					foto_url?: string | null;
 					id?: string;
 					nombre: string;
@@ -875,6 +883,7 @@ export type Database = {
 					fecha_alta?: string;
 					fecha_baja?: string | null;
 					fecha_nacimiento?: string;
+					foto_storage_path?: string | null;
 					foto_url?: string | null;
 					id?: string;
 					nombre?: string;
@@ -1016,6 +1025,7 @@ export type Database = {
 					fecha_alta: string;
 					fecha_baja: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path: string | null;
 					foto_url: string | null;
 					id: string;
 					nombre: string;
@@ -1039,6 +1049,29 @@ export type Database = {
 		Functions: {
 			anular_gasto: { Args: { p_gasto_id: string; p_motivo: string }; Returns: undefined };
 			anular_pago: { Args: { p_motivo: string; p_pago_id: string }; Returns: string };
+			archivo_autorizar_carga: {
+				Args: { p_entidad_id: string; p_tipo: string };
+				Returns: undefined;
+			};
+			archivo_finalizar_descarte: {
+				Args: { p_actor_id: string; p_storage_path: string };
+				Returns: undefined;
+			};
+			archivo_registrar_validado: {
+				Args: {
+					p_actor_id: string;
+					p_entidad_id: string;
+					p_mime: string;
+					p_storage_path: string;
+					p_tamano: number;
+					p_tipo: string;
+				};
+				Returns: undefined;
+			};
+			archivo_reservar_descarte: {
+				Args: { p_actor_id: string; p_entidad_id: string; p_storage_path: string; p_tipo: string };
+				Returns: undefined;
+			};
 			baja_categoria: { Args: { p_categoria_id: string }; Returns: undefined };
 			baja_deporte: { Args: { p_deporte_id: string }; Returns: undefined };
 			baja_inscripcion: { Args: { p_inscripcion_id: string }; Returns: undefined };

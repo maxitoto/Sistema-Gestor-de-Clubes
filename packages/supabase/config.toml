@@ -68,6 +68,8 @@ schema_paths = [
   "./schemas/2_views.sql",
   "./schemas/4_triggers.sql",
   "./schemas/5_politics.sql",
+  "./schemas/6_storage.sql",
+  "./schemas/7_cron.sql",
 ]
 
 [db.seed]

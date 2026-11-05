@@ -25,6 +25,7 @@ cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
 email_contacto VARCHAR(255) NOT NULL,
 logo_url TEXT,
+logo_storage_path TEXT,
 punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
 certificado_key TEXT, -- Encriptado en aplicación
@@ -64,6 +65,7 @@ email VARCHAR(255),
 telefono VARCHAR(50),
 direccion TEXT,
 foto_url TEXT,
+foto_storage_path TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
 acepta_comunicaciones BOOLEAN NOT NULL DEFAULT TRUE,
 email_invalido BOOLEAN NOT NULL DEFAULT FALSE,
@@ -214,6 +216,7 @@ CREATE TABLE gastos (
   ),
   descripcion TEXT,
   evidencia_url TEXT,
+  evidencia_storage_path TEXT,
   estado estado_gasto NOT NULL DEFAULT 'activo',
   motivo_anulacion TEXT,
   anulado_at TIMESTAMP WITH TIME ZONE,
@@ -319,4 +322,21 @@ CREATE TABLE public.email_eventos (
   ocurrido_en timestamptz NOT NULL,
   recibido_en timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (proveedor,event_id)
+);
+
+
+-- ---------------------------------------------------------------------------------
+-- Cargas validadas de archivos privados
+-- ---------------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE TABLE private.archivos_cargas (
+  storage_path TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL CHECK (tipo IN ('socio-foto', 'club-logo', 'gasto-evidencia')),
+  entidad_id UUID NOT NULL,
+  actor_id UUID NOT NULL REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+  tipo_mime TEXT NOT NULL CHECK (tipo_mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+  tamano BIGINT NOT NULL CHECK (tamano > 0 AND tamano <= 10485760),
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'asociado', 'descartando', 'descartado')),
+  creado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

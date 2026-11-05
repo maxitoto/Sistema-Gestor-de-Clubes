@@ -957,3 +957,161 @@ BEGIN
   RETURN (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
 END;
 $$;
+
+-- autoridad y ciclo de vida de referencias de archivos privados.
+CREATE OR REPLACE FUNCTION private.archivo_prefijo(p_tipo text, p_entidad_id uuid)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog
+AS $$
+  SELECT CASE p_tipo
+    WHEN 'socio-foto' THEN 'socios/'
+    WHEN 'club-logo' THEN 'club/'
+    WHEN 'gasto-evidencia' THEN 'gastos/'
+  END || p_entidad_id::text || '/';
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_autorizar_carga(p_tipo text, p_entidad_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_rol public.rol_usuario;
+  v_estado public.estado_gasto;
+  v_registro timestamptz;
+BEGIN
+  v_rol := private.require_operador();
+  IF p_tipo = 'socio-foto' THEN
+    PERFORM 1 FROM public.socios WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Socio no encontrado';
+    END IF;
+  ELSIF p_tipo = 'club-logo' THEN
+    IF v_rol <> 'admin' THEN
+      RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo Administrador puede cambiar el logo';
+    END IF;
+    PERFORM 1 FROM public.club WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Club no encontrado';
+    END IF;
+  ELSIF p_tipo = 'gasto-evidencia' THEN
+    SELECT estado, created_at INTO v_estado, v_registro FROM public.gastos WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Gasto no encontrado';
+    END IF;
+    IF v_estado <> 'activo'
+       OR (v_registro AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <> (clock_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date THEN
+      RAISE EXCEPTION 'El gasto no admite cambios de evidencia';
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'Tipo de archivo invalido';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_registrar_validado(
+  p_tipo text,
+  p_entidad_id uuid,
+  p_actor_id uuid,
+  p_storage_path text,
+  p_mime text,
+  p_tamano bigint
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_prefijo text;
+  v_extension text;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  v_prefijo := private.archivo_prefijo(p_tipo, p_entidad_id);
+  v_extension := CASE p_mime
+    WHEN 'image/png' THEN 'png'
+    WHEN 'image/jpeg' THEN 'jpg'
+    WHEN 'application/pdf' THEN 'pdf'
+  END;
+  IF v_prefijo IS NULL
+     OR v_extension IS NULL
+     OR p_storage_path !~ ('^' || v_prefijo || '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.' || v_extension || '$')
+     OR p_tamano <= 0
+     OR p_tamano > (CASE WHEN p_tipo = 'gasto-evidencia' THEN 10485760 ELSE 5242880 END)
+     OR (p_tipo <> 'gasto-evidencia' AND p_mime = 'application/pdf') THEN
+    RAISE EXCEPTION 'Archivo validado invalido';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.usuarios WHERE id = p_actor_id AND estado = 'activo')
+     OR NOT EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = p_storage_path) THEN
+    RAISE EXCEPTION 'Actor u objeto no disponible';
+  END IF;
+  INSERT INTO private.archivos_cargas (storage_path, tipo, entidad_id, actor_id, tipo_mime, tamano)
+  VALUES (p_storage_path, p_tipo, p_entidad_id, p_actor_id, p_mime, p_tamano);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_reservar_descarte(
+  p_tipo text,
+  p_entidad_id uuid,
+  p_actor_id uuid,
+  p_storage_path text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_carga private.archivos_cargas%ROWTYPE;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  SELECT * INTO v_carga FROM private.archivos_cargas WHERE storage_path = p_storage_path FOR UPDATE;
+  IF NOT FOUND
+     OR v_carga.actor_id IS DISTINCT FROM p_actor_id
+     OR v_carga.tipo IS DISTINCT FROM p_tipo
+     OR v_carga.entidad_id IS DISTINCT FROM p_entidad_id
+     OR v_carga.estado NOT IN ('pendiente', 'descartando', 'descartado')
+     OR EXISTS (SELECT 1 FROM public.socios WHERE foto_storage_path = p_storage_path)
+     OR EXISTS (SELECT 1 FROM public.club WHERE logo_storage_path = p_storage_path)
+     OR EXISTS (SELECT 1 FROM public.gastos WHERE evidencia_storage_path = p_storage_path) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo se descarta la carga propia que no este asociada';
+  END IF;
+  UPDATE private.archivos_cargas
+  SET estado = 'descartando'
+  WHERE storage_path = p_storage_path AND estado <> 'descartado';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_finalizar_descarte(
+  p_actor_id uuid,
+  p_storage_path text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  IF EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = p_storage_path) THEN
+    RAISE EXCEPTION 'El objeto aun existe';
+  END IF;
+  UPDATE private.archivos_cargas
+  SET estado = 'descartado'
+  WHERE storage_path = p_storage_path
+    AND actor_id = p_actor_id
+    AND estado IN ('descartando', 'descartado');
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'La carga no pertenece a este descarte';
+  END IF;
+END;
+$$;

@@ -203,10 +203,10 @@ BEGIN
   v_dia_registro := (OLD.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
   v_operativos_cambiaron := ROW(
     NEW.fecha, NEW.categoria_id, NEW.concepto, NEW.monto, NEW.metodo_pago,
-    NEW.referencia_banco, NEW.descripcion, NEW.evidencia_url
+    NEW.referencia_banco, NEW.descripcion, NEW.evidencia_url, NEW.evidencia_storage_path
   ) IS DISTINCT FROM ROW(
     OLD.fecha, OLD.categoria_id, OLD.concepto, OLD.monto, OLD.metodo_pago,
-    OLD.referencia_banco, OLD.descripcion, OLD.evidencia_url
+    OLD.referencia_banco, OLD.descripcion, OLD.evidencia_url, OLD.evidencia_storage_path
   );
 
   IF NEW.estado = 'anulado' THEN
@@ -515,3 +515,67 @@ CREATE TRIGGER inscripciones_no_borrar BEFORE DELETE ON public.inscripciones
 FOR EACH ROW EXECUTE FUNCTION private.trg_impedir_borrado_historico();
 REVOKE ALL ON FUNCTION private.trg_impedir_borrado_historico()
 FROM PUBLIC, anon, authenticated, service_role;
+
+-- validación de referencia de archivo validado al asociar en socios, club o gastos.
+CREATE OR REPLACE FUNCTION private.validar_archivo_asociado()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_tipo text;
+  v_path text;
+  v_old text;
+  v_carga private.archivos_cargas%ROWTYPE;
+BEGIN
+  IF TG_TABLE_NAME = 'socios' THEN
+    v_tipo := 'socio-foto';
+    v_path := NEW.foto_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.foto_storage_path; END IF;
+  ELSIF TG_TABLE_NAME = 'club' THEN
+    v_tipo := 'club-logo';
+    v_path := NEW.logo_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.logo_storage_path; END IF;
+  ELSIF TG_TABLE_NAME = 'gastos' THEN
+    v_tipo := 'gasto-evidencia';
+    v_path := NEW.evidencia_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.evidencia_storage_path; END IF;
+  END IF;
+
+  IF (TG_OP = 'UPDATE' AND v_path IS NOT DISTINCT FROM v_old) OR (TG_OP = 'INSERT' AND v_path IS NULL) THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM public.archivo_autorizar_carga(v_tipo, NEW.id);
+  -- replacement never deletes an associated object.
+  IF v_path IS NULL THEN
+    RAISE EXCEPTION 'Para reemplazar el archivo, cargue otro archivo validado';
+  END IF;
+
+  SELECT * INTO v_carga FROM private.archivos_cargas WHERE storage_path = v_path FOR UPDATE;
+  IF NOT FOUND
+     OR v_carga.tipo IS DISTINCT FROM v_tipo
+     OR v_carga.entidad_id IS DISTINCT FROM NEW.id
+     OR v_carga.actor_id IS DISTINCT FROM auth.uid()
+     OR v_carga.estado NOT IN ('pendiente', 'asociado')
+     OR NOT EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = v_path) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'La referencia requiere una carga validada del actor para esta entidad';
+  END IF;
+
+  UPDATE private.archivos_cargas SET estado = 'asociado' WHERE storage_path = v_path;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER socios_archivo_asociado
+BEFORE INSERT OR UPDATE OF foto_storage_path ON public.socios
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+CREATE TRIGGER club_archivo_asociado
+BEFORE INSERT OR UPDATE OF logo_storage_path ON public.club
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+CREATE TRIGGER gastos_archivo_asociado
+BEFORE INSERT OR UPDATE OF evidencia_storage_path ON public.gastos
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();

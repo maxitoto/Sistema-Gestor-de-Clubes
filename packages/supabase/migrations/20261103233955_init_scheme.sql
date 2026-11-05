@@ -25,6 +25,7 @@ cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
 email_contacto VARCHAR(255) NOT NULL,
 logo_url TEXT,
+logo_storage_path TEXT,
 punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
 certificado_key TEXT, -- Encriptado en aplicación
@@ -64,6 +65,7 @@ email VARCHAR(255),
 telefono VARCHAR(50),
 direccion TEXT,
 foto_url TEXT,
+foto_storage_path TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
 acepta_comunicaciones BOOLEAN NOT NULL DEFAULT TRUE,
 email_invalido BOOLEAN NOT NULL DEFAULT FALSE,
@@ -214,6 +216,7 @@ CREATE TABLE gastos (
   ),
   descripcion TEXT,
   evidencia_url TEXT,
+  evidencia_storage_path TEXT,
   estado estado_gasto NOT NULL DEFAULT 'activo',
   motivo_anulacion TEXT,
   anulado_at TIMESTAMP WITH TIME ZONE,
@@ -319,6 +322,23 @@ CREATE TABLE public.email_eventos (
   ocurrido_en timestamptz NOT NULL,
   recibido_en timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (proveedor,event_id)
+);
+
+
+-- ---------------------------------------------------------------------------------
+-- 17. Cargas validadas de archivos privados (Iteración 2 - I2-05)
+-- ---------------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE TABLE private.archivos_cargas (
+  storage_path TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL CHECK (tipo IN ('socio-foto', 'club-logo', 'gasto-evidencia')),
+  entidad_id UUID NOT NULL,
+  actor_id UUID NOT NULL REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+  tipo_mime TEXT NOT NULL CHECK (tipo_mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+  tamano BIGINT NOT NULL CHECK (tamano > 0 AND tamano <= 10485760),
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'asociado', 'descartando', 'descartado')),
+  creado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 --=================================================================================
 -- ÍNDICES DE RENDIMIENTO Y BÚSQUEDA
@@ -1333,7 +1353,166 @@ BEGIN
   END IF;
   RETURN (now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
 END;
-$$;--=================================================================================
+$$;
+
+-- I2-05: autoridad y ciclo de vida de referencias de archivos privados.
+CREATE OR REPLACE FUNCTION private.archivo_prefijo(p_tipo text, p_entidad_id uuid)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = pg_catalog
+AS $$
+  SELECT CASE p_tipo
+    WHEN 'socio-foto' THEN 'socios/'
+    WHEN 'club-logo' THEN 'club/'
+    WHEN 'gasto-evidencia' THEN 'gastos/'
+  END || p_entidad_id::text || '/';
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_autorizar_carga(p_tipo text, p_entidad_id uuid)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_rol public.rol_usuario;
+  v_estado public.estado_gasto;
+  v_registro timestamptz;
+BEGIN
+  v_rol := private.require_operador();
+  IF p_tipo = 'socio-foto' THEN
+    PERFORM 1 FROM public.socios WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Socio no encontrado';
+    END IF;
+  ELSIF p_tipo = 'club-logo' THEN
+    IF v_rol <> 'admin' THEN
+      RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo Administrador puede cambiar el logo';
+    END IF;
+    PERFORM 1 FROM public.club WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Club no encontrado';
+    END IF;
+  ELSIF p_tipo = 'gasto-evidencia' THEN
+    SELECT estado, created_at INTO v_estado, v_registro FROM public.gastos WHERE id = p_entidad_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Gasto no encontrado';
+    END IF;
+    IF v_estado <> 'activo'
+       OR (v_registro AT TIME ZONE 'America/Argentina/Buenos_Aires')::date <> (clock_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date THEN
+      RAISE EXCEPTION 'El gasto no admite cambios de evidencia';
+    END IF;
+  ELSE
+    RAISE EXCEPTION 'Tipo de archivo invalido';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_registrar_validado(
+  p_tipo text,
+  p_entidad_id uuid,
+  p_actor_id uuid,
+  p_storage_path text,
+  p_mime text,
+  p_tamano bigint
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_prefijo text;
+  v_extension text;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  v_prefijo := private.archivo_prefijo(p_tipo, p_entidad_id);
+  v_extension := CASE p_mime
+    WHEN 'image/png' THEN 'png'
+    WHEN 'image/jpeg' THEN 'jpg'
+    WHEN 'application/pdf' THEN 'pdf'
+  END;
+  IF v_prefijo IS NULL
+     OR v_extension IS NULL
+     OR p_storage_path !~ ('^' || v_prefijo || '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.' || v_extension || '$')
+     OR p_tamano <= 0
+     OR p_tamano > (CASE WHEN p_tipo = 'gasto-evidencia' THEN 10485760 ELSE 5242880 END)
+     OR (p_tipo <> 'gasto-evidencia' AND p_mime = 'application/pdf') THEN
+    RAISE EXCEPTION 'Archivo validado invalido';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.usuarios WHERE id = p_actor_id AND estado = 'activo')
+     OR NOT EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = p_storage_path) THEN
+    RAISE EXCEPTION 'Actor u objeto no disponible';
+  END IF;
+  INSERT INTO private.archivos_cargas (storage_path, tipo, entidad_id, actor_id, tipo_mime, tamano)
+  VALUES (p_storage_path, p_tipo, p_entidad_id, p_actor_id, p_mime, p_tamano);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_reservar_descarte(
+  p_tipo text,
+  p_entidad_id uuid,
+  p_actor_id uuid,
+  p_storage_path text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_carga private.archivos_cargas%ROWTYPE;
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  SELECT * INTO v_carga FROM private.archivos_cargas WHERE storage_path = p_storage_path FOR UPDATE;
+  IF NOT FOUND
+     OR v_carga.actor_id IS DISTINCT FROM p_actor_id
+     OR v_carga.tipo IS DISTINCT FROM p_tipo
+     OR v_carga.entidad_id IS DISTINCT FROM p_entidad_id
+     OR v_carga.estado NOT IN ('pendiente', 'descartando', 'descartado')
+     OR EXISTS (SELECT 1 FROM public.socios WHERE foto_storage_path = p_storage_path)
+     OR EXISTS (SELECT 1 FROM public.club WHERE logo_storage_path = p_storage_path)
+     OR EXISTS (SELECT 1 FROM public.gastos WHERE evidencia_storage_path = p_storage_path) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo se descarta la carga propia que no este asociada';
+  END IF;
+  UPDATE private.archivos_cargas
+  SET estado = 'descartando'
+  WHERE storage_path = p_storage_path AND estado <> 'descartado';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.archivo_finalizar_descarte(
+  p_actor_id uuid,
+  p_storage_path text
+)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Solo autoridad de archivos';
+  END IF;
+  IF EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = p_storage_path) THEN
+    RAISE EXCEPTION 'El objeto aun existe';
+  END IF;
+  UPDATE private.archivos_cargas
+  SET estado = 'descartado'
+  WHERE storage_path = p_storage_path
+    AND actor_id = p_actor_id
+    AND estado IN ('descartando', 'descartado');
+  IF NOT FOUND THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'La carga no pertenece a este descarte';
+  END IF;
+END;
+$$;
+--=================================================================================
 -- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
 -- Esta vista consolida los pagos (ingresos) y gastos (egresos) en un solo flujo de caja.
@@ -1641,10 +1820,10 @@ BEGIN
   v_dia_registro := (OLD.created_at AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
   v_operativos_cambiaron := ROW(
     NEW.fecha, NEW.categoria_id, NEW.concepto, NEW.monto, NEW.metodo_pago,
-    NEW.referencia_banco, NEW.descripcion, NEW.evidencia_url
+    NEW.referencia_banco, NEW.descripcion, NEW.evidencia_url, NEW.evidencia_storage_path
   ) IS DISTINCT FROM ROW(
     OLD.fecha, OLD.categoria_id, OLD.concepto, OLD.monto, OLD.metodo_pago,
-    OLD.referencia_banco, OLD.descripcion, OLD.evidencia_url
+    OLD.referencia_banco, OLD.descripcion, OLD.evidencia_url, OLD.evidencia_storage_path
   );
 
   IF NEW.estado = 'anulado' THEN
@@ -1953,6 +2132,70 @@ CREATE TRIGGER inscripciones_no_borrar BEFORE DELETE ON public.inscripciones
 FOR EACH ROW EXECUTE FUNCTION private.trg_impedir_borrado_historico();
 REVOKE ALL ON FUNCTION private.trg_impedir_borrado_historico()
 FROM PUBLIC, anon, authenticated, service_role;
+
+-- I2-05: validación de referencia de archivo validado al asociar en socios, club o gastos.
+CREATE OR REPLACE FUNCTION private.validar_archivo_asociado()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, private, pg_temp
+AS $$
+DECLARE
+  v_tipo text;
+  v_path text;
+  v_old text;
+  v_carga private.archivos_cargas%ROWTYPE;
+BEGIN
+  IF TG_TABLE_NAME = 'socios' THEN
+    v_tipo := 'socio-foto';
+    v_path := NEW.foto_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.foto_storage_path; END IF;
+  ELSIF TG_TABLE_NAME = 'club' THEN
+    v_tipo := 'club-logo';
+    v_path := NEW.logo_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.logo_storage_path; END IF;
+  ELSIF TG_TABLE_NAME = 'gastos' THEN
+    v_tipo := 'gasto-evidencia';
+    v_path := NEW.evidencia_storage_path;
+    IF TG_OP = 'UPDATE' THEN v_old := OLD.evidencia_storage_path; END IF;
+  END IF;
+
+  IF (TG_OP = 'UPDATE' AND v_path IS NOT DISTINCT FROM v_old) OR (TG_OP = 'INSERT' AND v_path IS NULL) THEN
+    RETURN NEW;
+  END IF;
+
+  PERFORM public.archivo_autorizar_carga(v_tipo, NEW.id);
+  -- Null removal is intentionally not part of I2-05; replacement never deletes an associated object.
+  IF v_path IS NULL THEN
+    RAISE EXCEPTION 'Para reemplazar el archivo, cargue otro archivo validado';
+  END IF;
+
+  SELECT * INTO v_carga FROM private.archivos_cargas WHERE storage_path = v_path FOR UPDATE;
+  IF NOT FOUND
+     OR v_carga.tipo IS DISTINCT FROM v_tipo
+     OR v_carga.entidad_id IS DISTINCT FROM NEW.id
+     OR v_carga.actor_id IS DISTINCT FROM auth.uid()
+     OR v_carga.estado NOT IN ('pendiente', 'asociado')
+     OR NOT EXISTS (SELECT 1 FROM storage.objects WHERE bucket_id = 'club-archivos' AND name = v_path) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'La referencia requiere una carga validada del actor para esta entidad';
+  END IF;
+
+  UPDATE private.archivos_cargas SET estado = 'asociado' WHERE storage_path = v_path;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER socios_archivo_asociado
+BEFORE INSERT OR UPDATE OF foto_storage_path ON public.socios
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+CREATE TRIGGER club_archivo_asociado
+BEFORE INSERT OR UPDATE OF logo_storage_path ON public.club
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+CREATE TRIGGER gastos_archivo_asociado
+BEFORE INSERT OR UPDATE OF evidencia_storage_path ON public.gastos
+FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
 -- Schema no expuesto a PostgREST: alberga helpers internos de RLS
 CREATE SCHEMA IF NOT EXISTS private;
 GRANT USAGE ON SCHEMA private TO authenticated, service_role;
@@ -2208,5 +2451,68 @@ ON public.club TO authenticated;
 
 GRANT EXECUTE ON FUNCTION public.fecha_actual_club() TO authenticated;
 
+-- I2-05: permisos de tabla, funciones y columnas de referencias de archivos privados.
+REVOKE ALL ON private.archivos_cargas FROM PUBLIC, anon, authenticated;
+GRANT ALL ON private.archivos_cargas TO service_role;
+
+REVOKE ALL ON FUNCTION private.archivo_prefijo(text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.validar_archivo_asociado() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_autorizar_carga(text, uuid) FROM PUBLIC, anon, service_role;
+REVOKE ALL ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_finalizar_descarte(uuid, text) FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.archivo_autorizar_carga(text, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_finalizar_descarte(uuid, text) TO service_role;
+
+GRANT UPDATE (foto_storage_path) ON public.socios TO authenticated;
+GRANT SELECT (logo_storage_path), UPDATE (logo_storage_path) ON public.club TO authenticated;
+GRANT UPDATE (evidencia_storage_path) ON public.gastos TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';
+-- I2-05: bucket privado club-archivos y políticas RESTRICTIVE sobre storage.objects.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('club-archivos', 'club-archivos', false, 10485760, ARRAY['image/jpeg', 'image/png', 'application/pdf'])
+ON CONFLICT (id) DO UPDATE
+SET public = false,
+    file_size_limit = EXCLUDED.file_size_limit,
+    allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- Restrictive policies remain effective even if another permissive bucket policy is later added.
+CREATE POLICY club_archivos_lectura_por_autoridad ON storage.objects AS RESTRICTIVE
+FOR SELECT TO authenticated, anon USING (bucket_id <> 'club-archivos');
+
+CREATE POLICY club_archivos_insert_por_autoridad ON storage.objects AS RESTRICTIVE
+FOR INSERT TO authenticated, anon WITH CHECK (bucket_id <> 'club-archivos');
+
+CREATE POLICY club_archivos_update_por_autoridad ON storage.objects AS RESTRICTIVE
+FOR UPDATE TO authenticated, anon USING (bucket_id <> 'club-archivos') WITH CHECK (bucket_id <> 'club-archivos');
+
+CREATE POLICY club_archivos_delete_por_autoridad ON storage.objects AS RESTRICTIVE
+FOR DELETE TO authenticated, anon USING (bucket_id <> 'club-archivos');
+-- I2-06: programador mensual de cuotas en pg_cron.
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+DO $scheduler$
+DECLARE
+  v_timezone text := current_setting('cron.timezone', true);
+BEGIN
+  IF v_timezone IS NULL OR v_timezone NOT IN ('GMT', 'UTC', 'Etc/UTC', 'Etc/GMT') THEN
+    RAISE EXCEPTION 'Se requiere cron.timezone UTC/GMT para esta programación local';
+  END IF;
+  IF current_setting('cron.database_name', true) IS DISTINCT FROM current_database() THEN
+    RAISE EXCEPTION 'pg_cron debe usar la base local actual';
+  END IF;
+  -- El worker de PostgreSQL usa la identidad técnica del propietario del job.
+  -- No envía JWT humano ni inventa usuario_id; el log mensual no tiene actor humano.
+  -- 03:00 UTC/GMT del día 1 = 00:00 America/Argentina/Buenos_Aires (-03).
+  PERFORM cron.schedule(
+    'sistema-club-los-andes-cuotas-mensuales',
+    '0 3 1 * *',
+    'SELECT public.generar_cuotas_mes_actual();'
+  );
+END;
+$scheduler$;
