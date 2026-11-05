@@ -2,24 +2,17 @@ import {
 	Alert,
 	Box,
 	Button,
-	Checkbox,
-	Chip,
 	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
-	Divider,
-	FormControlLabel,
 	Stack,
-	TextField,
 	Typography,
 } from '@mui/material';
 import { type FormEvent, useId, useState } from 'react';
-import type { SocioCreado } from '#entities/socio';
+import { type SocioCreado, SocioFields } from '#entities/socio';
 import {
-	edadSocio,
-	fechaBuenosAires,
 	formularioSocioInicial,
 	type SocioForm,
 	type SocioFormErrors,
@@ -67,27 +60,6 @@ export function CreateSocioDialog({
 		setErrors({});
 		void mutation.create(validation.payload);
 	};
-	const age = edadSocio(form.fecha_nacimiento);
-	const minor = (age ?? 18) < 18;
-	const field = (
-		name: Exclude<keyof SocioForm, 'acepta_comunicaciones'>,
-		label: string,
-		maximum?: number,
-		required = false,
-	) => (
-		<TextField
-			key={name}
-			label={label}
-			value={form[name]}
-			onChange={(event) => change(name, event.target.value)}
-			error={Boolean(errors[name])}
-			helperText={errors[name]}
-			required={required}
-			disabled={mutation.isPending}
-			fullWidth
-			slotProps={{ htmlInput: maximum ? { maxLength: maximum } : {} }}
-		/>
-	);
 	return (
 		<Dialog
 			open={open}
@@ -157,113 +129,12 @@ export function CreateSocioDialog({
 								)}
 							</Box>
 						)}
-						<Box component="section" aria-label="Datos personales">
-							<Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700 }}>
-								Datos personales
-							</Typography>
-							<Box
-								sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}
-							>
-								{field('dni', 'DNI / Documento', 20, true)}
-								<TextField
-									label="N.º de socio (matrícula)"
-									value="Se asigna al guardar"
-									disabled
-									fullWidth
-								/>
-								{field('nombre', 'Nombre', 100, true)}
-								{field('apellido', 'Apellido', 100, true)}
-								<TextField
-									label="Fecha de nacimiento"
-									type="date"
-									value={form.fecha_nacimiento}
-									onChange={(event) => change('fecha_nacimiento', event.target.value)}
-									required
-									fullWidth
-									disabled={mutation.isPending}
-									error={Boolean(errors.fecha_nacimiento)}
-									helperText={errors.fecha_nacimiento}
-									slotProps={{
-										inputLabel: { shrink: true },
-										htmlInput: { max: fechaBuenosAires() },
-									}}
-								/>
-								{age !== null && (
-									<Box sx={{ display: 'flex', alignItems: 'flex-start', pt: 0.75 }}>
-										<Chip
-											label={minor ? `Menor de edad · ${age} años` : `${age} años`}
-											color={minor ? 'primary' : 'default'}
-											variant="outlined"
-											size="small"
-										/>
-									</Box>
-								)}
-							</Box>
-						</Box>
-						<Divider />
-						<Box component="section" aria-label="Información de contacto y preferencias">
-							<Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700 }}>
-								Información de contacto y preferencias
-							</Typography>
-							<Box
-								sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}
-							>
-								{field('email', 'Correo electrónico (opcional)', 255)}
-								{field('telefono', 'Teléfono (opcional)', 50)}
-								<Box sx={{ gridColumn: '1 / -1' }}>
-									{field('direccion', 'Dirección / Domicilio (opcional)')}
-								</Box>
-							</Box>
-							<FormControlLabel
-								sx={{ mt: 1 }}
-								control={
-									<Checkbox
-										checked={form.acepta_comunicaciones}
-										onChange={(event) => change('acepta_comunicaciones', event.target.checked)}
-										disabled={mutation.isPending}
-									/>
-								}
-								label="Acepta comunicaciones del club"
-							/>
-						</Box>
-						<Box
-							component="section"
-							aria-label="Contacto de emergencia"
-							sx={{
-								p: 2,
-								border: '1px solid',
-								borderColor: minor ? 'primary.main' : 'divider',
-								borderRadius: 2,
-								bgcolor: 'action.hover',
-							}}
-						>
-							<Typography
-								variant="subtitle1"
-								color={minor ? 'primary.main' : 'text.primary'}
-								sx={{ fontWeight: 700 }}
-							>
-								Contacto de emergencia
-							</Typography>
-							<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2 }}>
-								{minor ? 'Obligatorio para menores de 18 años.' : 'Opcional para mayores de edad.'}
-							</Typography>
-							<Box
-								sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}
-							>
-								{field(
-									'contacto_emergencia_nombre',
-									'Nombre del contacto de emergencia',
-									150,
-									minor,
-								)}
-								{field(
-									'contacto_emergencia_telefono',
-									'Teléfono del contacto de emergencia',
-									50,
-									minor,
-								)}
-							</Box>
-						</Box>
+						<SocioFields
+							form={form}
+							errors={errors}
+							onChange={change}
+							disabled={mutation.isPending}
+						/>
 					</Stack>
 				</DialogContent>
 				<DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 2, gap: 1, flexWrap: 'wrap' }}>

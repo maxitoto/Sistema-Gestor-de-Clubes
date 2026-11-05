@@ -108,7 +108,14 @@ export function useInscribirSocio(options: Options) {
 		accessRef.current === attempt.scope &&
 		generationRef.current === attempt.generation;
 	const invalidate = () => {
-		for (const key of ['inscripciones', 'cuotas', 'socios', 'estado-socio']) {
+		for (const key of [
+			'inscripciones',
+			'cuotas',
+			'socios',
+			'estado-socio',
+			'socio',
+			'socio-deuda',
+		]) {
 			void client.invalidateQueries({ queryKey: [key, cacheScope], refetchType: 'none' });
 		}
 	};
