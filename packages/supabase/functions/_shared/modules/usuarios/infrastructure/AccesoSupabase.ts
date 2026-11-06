@@ -78,7 +78,7 @@ export async function ejecutarAcceso(value: unknown, peer: string) {
   }
   if (perfil?.estado === "activo") {
     const rawCallback = Deno.env.get("AUTH_REDIRECT_URL")?.trim() ||
-      "http://localhost:5173/establecer-contrasena";
+      "http://localhost:3000/establecer-contrasena";
     let callback: URL;
     try {
       callback = new URL(rawCallback);
