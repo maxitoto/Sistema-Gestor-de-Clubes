@@ -440,3 +440,20 @@ verify_jwt = true # JWT de usuario validado por el runtime; el rol admin se cheq
 [functions.archivos]
 enabled = true
 verify_jwt = true
+
+[functions.usuarios]
+enabled = true
+verify_jwt = false
+
+[functions.acceso]
+enabled = true
+verify_jwt = false
+
+[functions.configuracion]
+enabled = true
+verify_jwt = false
+
+[functions.credenciales]
+enabled = true
+verify_jwt = false
+
