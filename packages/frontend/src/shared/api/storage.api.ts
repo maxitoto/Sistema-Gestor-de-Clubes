@@ -4,6 +4,7 @@ export type TipoArchivo = 'socio-foto' | 'club-logo' | 'gasto-evidencia';
 export interface IdentidadArchivo {
 	tipo: TipoArchivo;
 	entidadId: string;
+	actorId?: string;
 }
 export interface ArchivoCargado {
 	storagePath: string;
@@ -15,13 +16,20 @@ export interface LecturaArchivo {
 	storagePath: string | null;
 	legacy: boolean;
 }
-async function request(path: string, options: RequestInit, signal?: AbortSignal): Promise<unknown> {
+async function request(
+	path: string,
+	options: RequestInit,
+	signal?: AbortSignal,
+	expectedActorId?: string,
+): Promise<unknown> {
 	const {
 		data: { session },
 		error,
 	} = await supabase.auth.getSession();
-	if (error || !session) {
-		throw new Error('Volvé a iniciar sesión para acceder a los archivos.');
+	if (error || !session || (expectedActorId !== undefined && session.user.id !== expectedActorId)) {
+		throw Object.assign(new Error('La sesión cambió. Volvé a abrir la operación de archivos.'), {
+			status: 401,
+		});
 	}
 	const controller = signal
 		? AbortSignal.any([signal, AbortSignal.timeout(30_000)])
@@ -63,7 +71,7 @@ export async function subirArchivo(
 	form.set('tipo', input.tipo);
 	form.set('entidadId', input.entidadId);
 	form.set('archivo', input.archivo);
-	const body = await request('subir', { method: 'POST', body: form }, signal);
+	const body = await request('subir', { method: 'POST', body: form }, signal, input.actorId);
 	if (
 		!isRecord(body) ||
 		typeof body.storagePath !== 'string' ||
@@ -85,9 +93,14 @@ export async function asociarArchivo(
 		{
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(input),
+			body: JSON.stringify({
+				tipo: input.tipo,
+				entidadId: input.entidadId,
+				storagePath: input.storagePath,
+			}),
 		},
 		signal,
+		input.actorId,
 	);
 	if (!isRecord(body) || body.storagePath !== input.storagePath) {
 		throw new Error('La asociación necesita una verificación adicional.');
@@ -98,7 +111,7 @@ export async function leerArchivo(
 	signal?: AbortSignal,
 ): Promise<LecturaArchivo> {
 	const query = new URLSearchParams({ tipo: input.tipo, entidadId: input.entidadId });
-	const body = await request(`leer?${query}`, { method: 'GET' }, signal);
+	const body = await request(`leer?${query}`, { method: 'GET' }, signal, input.actorId);
 	if (
 		!isRecord(body) ||
 		(body.url !== null && typeof body.url !== 'string') ||
@@ -124,9 +137,14 @@ export async function descartarArchivo(
 		{
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(input),
+			body: JSON.stringify({
+				tipo: input.tipo,
+				entidadId: input.entidadId,
+				storagePath: input.storagePath,
+			}),
 		},
 		signal,
+		input.actorId,
 	);
 	if (!isRecord(body) || body.descartado !== true) {
 		throw new Error('No se pudo verificar el descarte del archivo.');
