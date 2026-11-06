@@ -1,6 +1,5 @@
 import type { Tables, TablesUpdate } from './model';
 
-// El id se usa para localizar la fila y no forma parte del payload editable.
 export type ClubEditableFields =
 	| 'nombre'
 	| 'cuit'
@@ -8,6 +7,6 @@ export type ClubEditableFields =
 	| 'email_contacto'
 	| 'punto_venta'
 	| 'logo_url';
-export type ClubConfig = Pick<Tables<'club'>, 'id' | ClubEditableFields>;
-export type ClubUpdate = Pick<TablesUpdate<'club'>, ClubEditableFields>;
+export type ClubConfig = Pick<Tables<'club'>, 'id' | ClubEditableFields | 'logo_storage_path'>;
+export type ClubUpdate = Required<Pick<TablesUpdate<'club'>, ClubEditableFields>>;
 export type ClubUpdateUi = ClubUpdate;
