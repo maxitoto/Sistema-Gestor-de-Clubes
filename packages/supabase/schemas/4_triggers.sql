@@ -579,3 +579,32 @@ FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
 CREATE TRIGGER gastos_archivo_asociado
 BEFORE INSERT OR UPDATE OF evidencia_storage_path ON public.gastos
 FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+-- ---------------------------------------------------------------------------------
+-- Seguimiento de establecimiento de contraseña inicial sobre auth.users
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.usuarios_registrar_credencial_inicial()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  IF TG_OP='INSERT' THEN
+    -- Auth Admin aplica app_metadata después del INSERT. El UUID ya fue reservado
+    -- por el servicio autorizado y se pasa a createUser; no depende de metadata tardía.
+    UPDATE private.usuarios_operaciones SET identidad_creada=true,clave_establecida=false
+     WHERE tipo='crear' AND usuario_id=NEW.id AND estado='ejecutando' AND identidad_creada=false;
+  ELSE
+    -- Sólo compara NEW/OLD dentro del trigger; no copia hash, huella o contraseña.
+    UPDATE private.usuarios_operaciones SET clave_establecida=true
+     WHERE tipo='crear' AND usuario_id=NEW.id AND identidad_creada=true;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS usuarios_registrar_credencial_creada ON auth.users;
+CREATE TRIGGER usuarios_registrar_credencial_creada AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION private.usuarios_registrar_credencial_inicial();
+
+DROP TRIGGER IF EXISTS usuarios_registrar_credencial_establecida ON auth.users;
+CREATE TRIGGER usuarios_registrar_credencial_establecida AFTER UPDATE OF encrypted_password ON auth.users
+FOR EACH ROW WHEN (NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password)
+EXECUTE FUNCTION private.usuarios_registrar_credencial_inicial();

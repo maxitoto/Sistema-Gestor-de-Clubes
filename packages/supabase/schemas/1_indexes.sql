@@ -53,3 +53,7 @@ CREATE INDEX email_eventos_message_idx ON public.email_eventos(proveedor,provide
 CREATE INDEX email_destinatarios_cola_idx ON public.email_destinatarios(created_at,id)
   WHERE estado_envio='pendiente';
 CREATE INDEX email_destinatarios_reserva_idx ON public.email_destinatarios(reservado_en);
+
+-- indices para control de tasa de intentos de acceso y recuperacion
+CREATE INDEX IF NOT EXISTS acceso_intentos_busqueda ON private.acceso_intentos(tipo,ip_hash,creado_en);
+CREATE INDEX IF NOT EXISTS acceso_intentos_email ON private.acceso_intentos(tipo,email_hash,creado_en);

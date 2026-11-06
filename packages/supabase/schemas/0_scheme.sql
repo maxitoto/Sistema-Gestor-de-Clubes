@@ -340,3 +340,32 @@ CREATE TABLE private.archivos_cargas (
   estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'asociado', 'descartando', 'descartado')),
   creado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ---------------------------------------------------------------------------------
+-- Operaciones administrativas recuperables de usuarios y límites locales de acceso
+-- No almacena contraseñas, tokens de sesión ni enlaces de Auth.
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS private.usuarios_operaciones (
+  id uuid PRIMARY KEY,
+  actor_id uuid NOT NULL REFERENCES public.usuarios(id),
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL CHECK (tipo IN ('crear','editar','desactivar','reactivar','restablecer','reenviar')),
+  datos jsonb NOT NULL,
+  estado text NOT NULL DEFAULT 'ejecutando' CHECK (estado IN ('ejecutando','enviando','completo','enlace_pendiente','sesiones_pendientes','datos_pendientes','rechazado')),
+  lease uuid NOT NULL DEFAULT gen_random_uuid(),
+  lease_hasta timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '2 minutes'),
+  enlace_enviado_en timestamptz,
+  identidad_creada boolean NOT NULL DEFAULT false,
+  clave_establecida boolean NOT NULL DEFAULT false,
+  revocacion_pendiente boolean NOT NULL DEFAULT false,
+  actualizado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE IF NOT EXISTS private.acceso_intentos (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tipo text NOT NULL,
+  ip_hash text NOT NULL,
+  email_hash text NOT NULL,
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);

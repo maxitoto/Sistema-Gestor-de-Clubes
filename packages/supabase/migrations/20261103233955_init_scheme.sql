@@ -326,7 +326,7 @@ CREATE TABLE public.email_eventos (
 
 
 -- ---------------------------------------------------------------------------------
--- 17. Cargas validadas de archivos privados (Iteración 2 - I2-05)
+-- Cargas validadas de archivos privados
 -- ---------------------------------------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS private;
 
@@ -339,6 +339,35 @@ CREATE TABLE private.archivos_cargas (
   tamano BIGINT NOT NULL CHECK (tamano > 0 AND tamano <= 10485760),
   estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'asociado', 'descartando', 'descartado')),
   creado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------------
+-- Operaciones administrativas recuperables de usuarios y límites locales de acceso
+-- No almacena contraseñas, tokens de sesión ni enlaces de Auth.
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS private.usuarios_operaciones (
+  id uuid PRIMARY KEY,
+  actor_id uuid NOT NULL REFERENCES public.usuarios(id),
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL CHECK (tipo IN ('crear','editar','desactivar','reactivar','restablecer','reenviar')),
+  datos jsonb NOT NULL,
+  estado text NOT NULL DEFAULT 'ejecutando' CHECK (estado IN ('ejecutando','enviando','completo','enlace_pendiente','sesiones_pendientes','datos_pendientes','rechazado')),
+  lease uuid NOT NULL DEFAULT gen_random_uuid(),
+  lease_hasta timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '2 minutes'),
+  enlace_enviado_en timestamptz,
+  identidad_creada boolean NOT NULL DEFAULT false,
+  clave_establecida boolean NOT NULL DEFAULT false,
+  revocacion_pendiente boolean NOT NULL DEFAULT false,
+  actualizado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE IF NOT EXISTS private.acceso_intentos (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tipo text NOT NULL,
+  ip_hash text NOT NULL,
+  email_hash text NOT NULL,
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 --=================================================================================
 -- ÍNDICES DE RENDIMIENTO Y BÚSQUEDA
@@ -395,6 +424,10 @@ CREATE INDEX email_eventos_message_idx ON public.email_eventos(proveedor,provide
 CREATE INDEX email_destinatarios_cola_idx ON public.email_destinatarios(created_at,id)
   WHERE estado_envio='pendiente';
 CREATE INDEX email_destinatarios_reserva_idx ON public.email_destinatarios(reservado_en);
+
+-- indices para control de tasa de intentos de acceso y recuperacion
+CREATE INDEX IF NOT EXISTS acceso_intentos_busqueda ON private.acceso_intentos(tipo,ip_hash,creado_en);
+CREATE INDEX IF NOT EXISTS acceso_intentos_email ON private.acceso_intentos(tipo,email_hash,creado_en);
 CREATE SCHEMA IF NOT EXISTS private;
 CREATE OR REPLACE FUNCTION private.get_rol()
 RETURNS public.rol_usuario
@@ -1355,7 +1388,7 @@ BEGIN
 END;
 $$;
 
--- I2-05: autoridad y ciclo de vida de referencias de archivos privados.
+-- autoridad y ciclo de vida de referencias de archivos privados.
 CREATE OR REPLACE FUNCTION private.archivo_prefijo(p_tipo text, p_entidad_id uuid)
 RETURNS text
 LANGUAGE sql
@@ -1510,6 +1543,138 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'La carga no pertenece a este descarte';
   END IF;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------------
+-- Operaciones administrativas recuperables de usuarios y límites locales de acceso
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.usuarios_exigir_admin(p_actor uuid, p_destino uuid DEFAULT NULL)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.usuarios WHERE id=p_actor AND rol='admin' AND estado='activo') THEN
+    RAISE EXCEPTION 'Acceso denegado' USING ERRCODE='42501';
+  END IF;
+  IF p_actor = p_destino THEN
+    RAISE EXCEPTION 'Esta gestión no modifica la cuenta propia' USING ERRCODE='42501';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_reservar(
+ p_actor uuid,p_operacion_id uuid,p_tipo text,p_usuario_id uuid,p_datos jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v private.usuarios_operaciones; v_ejecutar boolean := false;
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF p_tipo NOT IN ('crear','editar','desactivar','reactivar','restablecer','reenviar') OR
+     (p_tipo='crear') <> (p_usuario_id IS NULL) OR jsonb_typeof(p_datos) <> 'object' THEN
+    RAISE EXCEPTION 'Operación inválida' USING ERRCODE='22023';
+  END IF;
+  IF p_tipo='reenviar' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('usuarios:reenviar:'||p_usuario_id::text,0));
+    IF NOT EXISTS(SELECT 1 FROM private.usuarios_operaciones WHERE id=p_operacion_id) AND
+       (SELECT count(*) FROM private.usuarios_operaciones WHERE tipo='reenviar' AND usuario_id=p_usuario_id AND creado_en>clock_timestamp()-interval '1 hour')>=3 THEN
+      RAISE EXCEPTION 'Límite de reenvíos alcanzado para esta cuenta' USING ERRCODE='54000';
+    END IF;
+  END IF;
+  INSERT INTO private.usuarios_operaciones(id,actor_id,usuario_id,tipo,datos)
+    VALUES(p_operacion_id,p_actor,coalesce(p_usuario_id,gen_random_uuid()),p_tipo,p_datos)
+    ON CONFLICT(id) DO NOTHING RETURNING * INTO v;
+  IF FOUND THEN v_ejecutar := true;
+  ELSE
+    SELECT * INTO STRICT v FROM private.usuarios_operaciones WHERE id=p_operacion_id FOR UPDATE;
+    IF v.actor_id<>p_actor OR v.tipo<>p_tipo OR v.datos<>p_datos OR
+       (p_tipo<>'crear' AND v.usuario_id<>p_usuario_id) THEN
+      RAISE EXCEPTION 'Identidad de operación reutilizada con otros datos' USING ERRCODE='23505';
+    END IF;
+    IF v.estado IN ('ejecutando','datos_pendientes','sesiones_pendientes') AND v.lease_hasta<=clock_timestamp() THEN
+      UPDATE private.usuarios_operaciones SET lease=gen_random_uuid(),lease_hasta=clock_timestamp()+interval '2 minutes',estado='ejecutando',actualizado_en=clock_timestamp()
+       WHERE id=v.id RETURNING * INTO v;
+      v_ejecutar := true;
+    END IF;
+  END IF;
+  RETURN to_jsonb(v) || jsonb_build_object('ejecutar',v_ejecutar);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_leer(p_actor uuid,p_operacion_id uuid DEFAULT NULL,p_usuario_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v private.usuarios_operaciones;
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF (p_operacion_id IS NULL) = (p_usuario_id IS NULL) THEN RAISE EXCEPTION 'Filtro inválido'; END IF;
+  SELECT * INTO v FROM private.usuarios_operaciones WHERE
+   (p_operacion_id IS NOT NULL AND id=p_operacion_id AND actor_id=p_actor) OR
+   (p_usuario_id IS NOT NULL AND usuario_id=p_usuario_id)
+   ORDER BY creado_en DESC,id DESC LIMIT 1;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  RETURN to_jsonb(v) - 'lease' - 'datos' - 'identidad_creada' - 'clave_establecida';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_guardar(
+ p_actor uuid,p_operacion_id uuid,p_lease uuid,p_estado text,p_revocacion_pendiente boolean DEFAULT false,p_enlace_enviado boolean DEFAULT false)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor);
+  IF p_estado NOT IN ('enviando','completo','enlace_pendiente','sesiones_pendientes','datos_pendientes','rechazado') THEN RAISE EXCEPTION 'Estado inválido'; END IF;
+  UPDATE private.usuarios_operaciones SET estado=p_estado,revocacion_pendiente=p_revocacion_pendiente,
+   enlace_enviado_en=CASE WHEN p_enlace_enviado THEN clock_timestamp() ELSE enlace_enviado_en END,
+   lease_hasta=CASE WHEN p_estado='enviando' THEN clock_timestamp()+interval '2 minutes' ELSE clock_timestamp() END,
+   actualizado_en=clock_timestamp()
+   WHERE id=p_operacion_id AND actor_id=p_actor AND lease=p_lease;
+  IF NOT FOUND THEN RAISE EXCEPTION 'La operación cambió; consulte su estado' USING ERRCODE='40001'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_revocar_sesiones(p_actor uuid,p_usuario_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=p_usuario_id) THEN RAISE EXCEPTION 'Usuario no disponible'; END IF;
+  -- Auth Admin signOut requiere el JWT del destinatario. Esta operación técnica local
+  -- elimina sus refresh tokens/sesiones por identidad; no necesita ni expone ese JWT.
+  DELETE FROM auth.refresh_tokens WHERE user_id::text=p_usuario_id::text;
+  DELETE FROM auth.sessions WHERE user_id=p_usuario_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_enlace_pendiente(p_actor uuid,p_usuario_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  RETURN EXISTS(
+    SELECT 1 FROM public.usuarios u JOIN auth.users a ON a.id=u.id
+    WHERE u.id=p_usuario_id AND u.estado='activo' AND (
+      -- Un alta inicial sin contraseña puede reenviar también después de expirar su enlace.
+      (EXISTS(
+        SELECT 1 FROM private.usuarios_operaciones inicial WHERE inicial.usuario_id=u.id AND inicial.tipo='crear' AND inicial.estado<>'rechazado'
+          AND inicial.identidad_creada=true AND inicial.clave_establecida=false))
+      OR (u.rol='responsable' AND EXISTS(
+        SELECT 1 FROM private.usuarios_operaciones o WHERE o.usuario_id=u.id
+        AND (o.estado='enlace_pendiente' OR (o.estado='enviando' AND o.lease_hasta<=clock_timestamp()))
+        AND NOT EXISTS(SELECT 1 FROM private.usuarios_operaciones posterior WHERE posterior.usuario_id=u.id
+          AND posterior.enlace_enviado_en>o.actualizado_en)))
+    )
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acceso_limitar(p_tipo text,p_ip_hash text,p_email_hash text)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v_hoy timestamptz:=clock_timestamp(); v_ip integer; v_email integer;
+BEGIN
+ IF p_tipo NOT IN ('login','recuperar') OR p_ip_hash !~ '^[a-f0-9]{64}$' OR p_email_hash !~ '^[a-f0-9]{64}$' THEN RAISE EXCEPTION 'Límite inválido'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('acceso:ip:'||p_tipo||p_ip_hash,0));
+ IF p_tipo='recuperar' THEN PERFORM pg_advisory_xact_lock(hashtextextended('acceso:email:'||p_email_hash,0)); END IF;
+ DELETE FROM private.acceso_intentos WHERE creado_en < v_hoy-interval '1 hour';
+ SELECT count(*) INTO v_ip FROM private.acceso_intentos WHERE tipo=p_tipo AND ip_hash=p_ip_hash
+   AND creado_en>v_hoy-CASE WHEN p_tipo='login' THEN interval '1 minute' ELSE interval '1 hour' END;
+ SELECT count(*) INTO v_email FROM private.acceso_intentos WHERE tipo='recuperar' AND email_hash=p_email_hash AND creado_en>v_hoy-interval '1 hour';
+ IF (p_tipo='login' AND v_ip>=5) OR (p_tipo='recuperar' AND (v_ip>=3 OR v_email>=3)) THEN RETURN false; END IF;
+ INSERT INTO private.acceso_intentos(tipo,ip_hash,email_hash) VALUES(p_tipo,p_ip_hash,p_email_hash);
+ RETURN true;
 END;
 $$;
 --=================================================================================
@@ -2133,7 +2298,7 @@ FOR EACH ROW EXECUTE FUNCTION private.trg_impedir_borrado_historico();
 REVOKE ALL ON FUNCTION private.trg_impedir_borrado_historico()
 FROM PUBLIC, anon, authenticated, service_role;
 
--- I2-05: validación de referencia de archivo validado al asociar en socios, club o gastos.
+-- validación de referencia de archivo validado al asociar en socios, club o gastos.
 CREATE OR REPLACE FUNCTION private.validar_archivo_asociado()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -2165,7 +2330,7 @@ BEGIN
   END IF;
 
   PERFORM public.archivo_autorizar_carga(v_tipo, NEW.id);
-  -- Null removal is intentionally not part of I2-05; replacement never deletes an associated object.
+  -- replacement never deletes an associated object.
   IF v_path IS NULL THEN
     RAISE EXCEPTION 'Para reemplazar el archivo, cargue otro archivo validado';
   END IF;
@@ -2196,6 +2361,35 @@ FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
 CREATE TRIGGER gastos_archivo_asociado
 BEFORE INSERT OR UPDATE OF evidencia_storage_path ON public.gastos
 FOR EACH ROW EXECUTE FUNCTION private.validar_archivo_asociado();
+
+-- ---------------------------------------------------------------------------------
+-- Seguimiento de establecimiento de contraseña inicial sobre auth.users
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.usuarios_registrar_credencial_inicial()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  IF TG_OP='INSERT' THEN
+    -- Auth Admin aplica app_metadata después del INSERT. El UUID ya fue reservado
+    -- por el servicio autorizado y se pasa a createUser; no depende de metadata tardía.
+    UPDATE private.usuarios_operaciones SET identidad_creada=true,clave_establecida=false
+     WHERE tipo='crear' AND usuario_id=NEW.id AND estado='ejecutando' AND identidad_creada=false;
+  ELSE
+    -- Sólo compara NEW/OLD dentro del trigger; no copia hash, huella o contraseña.
+    UPDATE private.usuarios_operaciones SET clave_establecida=true
+     WHERE tipo='crear' AND usuario_id=NEW.id AND identidad_creada=true;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS usuarios_registrar_credencial_creada ON auth.users;
+CREATE TRIGGER usuarios_registrar_credencial_creada AFTER INSERT ON auth.users
+FOR EACH ROW EXECUTE FUNCTION private.usuarios_registrar_credencial_inicial();
+
+DROP TRIGGER IF EXISTS usuarios_registrar_credencial_establecida ON auth.users;
+CREATE TRIGGER usuarios_registrar_credencial_establecida AFTER UPDATE OF encrypted_password ON auth.users
+FOR EACH ROW WHEN (NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password)
+EXECUTE FUNCTION private.usuarios_registrar_credencial_inicial();
 -- Schema no expuesto a PostgREST: alberga helpers internos de RLS
 CREATE SCHEMA IF NOT EXISTS private;
 GRANT USAGE ON SCHEMA private TO authenticated, service_role;
@@ -2451,7 +2645,7 @@ ON public.club TO authenticated;
 
 GRANT EXECUTE ON FUNCTION public.fecha_actual_club() TO authenticated;
 
--- I2-05: permisos de tabla, funciones y columnas de referencias de archivos privados.
+-- permisos de tabla, funciones y columnas de referencias de archivos privados.
 REVOKE ALL ON private.archivos_cargas FROM PUBLIC, anon, authenticated;
 GRANT ALL ON private.archivos_cargas TO service_role;
 
@@ -2471,9 +2665,33 @@ GRANT UPDATE (foto_storage_path) ON public.socios TO authenticated;
 GRANT SELECT (logo_storage_path), UPDATE (logo_storage_path) ON public.club TO authenticated;
 GRANT UPDATE (evidencia_storage_path) ON public.gastos TO authenticated;
 
+-- RLS y permisos de operaciones administrativas de usuarios y límites de acceso.
+ALTER TABLE private.usuarios_operaciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.usuarios_operaciones FROM PUBLIC, anon, authenticated, service_role;
+
+ALTER TABLE private.acceso_intentos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.acceso_intentos FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION private.usuarios_registrar_credencial_inicial() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION private.usuarios_exigir_admin(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.acceso_limitar(text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.acceso_limitar(text, text, text) TO service_role;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';
--- I2-05: bucket privado club-archivos y políticas RESTRICTIVE sobre storage.objects.
+-- bucket privado club-archivos y políticas RESTRICTIVE sobre storage.objects.
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('club-archivos', 'club-archivos', false, 10485760, ARRAY['image/jpeg', 'image/png', 'application/pdf'])
 ON CONFLICT (id) DO UPDATE
@@ -2493,7 +2711,7 @@ FOR UPDATE TO authenticated, anon USING (bucket_id <> 'club-archivos') WITH CHEC
 
 CREATE POLICY club_archivos_delete_por_autoridad ON storage.objects AS RESTRICTIVE
 FOR DELETE TO authenticated, anon USING (bucket_id <> 'club-archivos');
--- I2-06: programador mensual de cuotas en pg_cron.
+-- programador mensual de cuotas en pg_cron.
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
 DO $scheduler$

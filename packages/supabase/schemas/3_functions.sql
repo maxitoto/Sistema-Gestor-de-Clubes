@@ -1115,3 +1115,135 @@ BEGIN
   END IF;
 END;
 $$;
+
+-- ---------------------------------------------------------------------------------
+-- Operaciones administrativas recuperables de usuarios y límites locales de acceso
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.usuarios_exigir_admin(p_actor uuid, p_destino uuid DEFAULT NULL)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.usuarios WHERE id=p_actor AND rol='admin' AND estado='activo') THEN
+    RAISE EXCEPTION 'Acceso denegado' USING ERRCODE='42501';
+  END IF;
+  IF p_actor = p_destino THEN
+    RAISE EXCEPTION 'Esta gestión no modifica la cuenta propia' USING ERRCODE='42501';
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_reservar(
+ p_actor uuid,p_operacion_id uuid,p_tipo text,p_usuario_id uuid,p_datos jsonb)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v private.usuarios_operaciones; v_ejecutar boolean := false;
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF p_tipo NOT IN ('crear','editar','desactivar','reactivar','restablecer','reenviar') OR
+     (p_tipo='crear') <> (p_usuario_id IS NULL) OR jsonb_typeof(p_datos) <> 'object' THEN
+    RAISE EXCEPTION 'Operación inválida' USING ERRCODE='22023';
+  END IF;
+  IF p_tipo='reenviar' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('usuarios:reenviar:'||p_usuario_id::text,0));
+    IF NOT EXISTS(SELECT 1 FROM private.usuarios_operaciones WHERE id=p_operacion_id) AND
+       (SELECT count(*) FROM private.usuarios_operaciones WHERE tipo='reenviar' AND usuario_id=p_usuario_id AND creado_en>clock_timestamp()-interval '1 hour')>=3 THEN
+      RAISE EXCEPTION 'Límite de reenvíos alcanzado para esta cuenta' USING ERRCODE='54000';
+    END IF;
+  END IF;
+  INSERT INTO private.usuarios_operaciones(id,actor_id,usuario_id,tipo,datos)
+    VALUES(p_operacion_id,p_actor,coalesce(p_usuario_id,gen_random_uuid()),p_tipo,p_datos)
+    ON CONFLICT(id) DO NOTHING RETURNING * INTO v;
+  IF FOUND THEN v_ejecutar := true;
+  ELSE
+    SELECT * INTO STRICT v FROM private.usuarios_operaciones WHERE id=p_operacion_id FOR UPDATE;
+    IF v.actor_id<>p_actor OR v.tipo<>p_tipo OR v.datos<>p_datos OR
+       (p_tipo<>'crear' AND v.usuario_id<>p_usuario_id) THEN
+      RAISE EXCEPTION 'Identidad de operación reutilizada con otros datos' USING ERRCODE='23505';
+    END IF;
+    IF v.estado IN ('ejecutando','datos_pendientes','sesiones_pendientes') AND v.lease_hasta<=clock_timestamp() THEN
+      UPDATE private.usuarios_operaciones SET lease=gen_random_uuid(),lease_hasta=clock_timestamp()+interval '2 minutes',estado='ejecutando',actualizado_en=clock_timestamp()
+       WHERE id=v.id RETURNING * INTO v;
+      v_ejecutar := true;
+    END IF;
+  END IF;
+  RETURN to_jsonb(v) || jsonb_build_object('ejecutar',v_ejecutar);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_leer(p_actor uuid,p_operacion_id uuid DEFAULT NULL,p_usuario_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v private.usuarios_operaciones;
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF (p_operacion_id IS NULL) = (p_usuario_id IS NULL) THEN RAISE EXCEPTION 'Filtro inválido'; END IF;
+  SELECT * INTO v FROM private.usuarios_operaciones WHERE
+   (p_operacion_id IS NOT NULL AND id=p_operacion_id AND actor_id=p_actor) OR
+   (p_usuario_id IS NOT NULL AND usuario_id=p_usuario_id)
+   ORDER BY creado_en DESC,id DESC LIMIT 1;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  RETURN to_jsonb(v) - 'lease' - 'datos' - 'identidad_creada' - 'clave_establecida';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_operacion_guardar(
+ p_actor uuid,p_operacion_id uuid,p_lease uuid,p_estado text,p_revocacion_pendiente boolean DEFAULT false,p_enlace_enviado boolean DEFAULT false)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor);
+  IF p_estado NOT IN ('enviando','completo','enlace_pendiente','sesiones_pendientes','datos_pendientes','rechazado') THEN RAISE EXCEPTION 'Estado inválido'; END IF;
+  UPDATE private.usuarios_operaciones SET estado=p_estado,revocacion_pendiente=p_revocacion_pendiente,
+   enlace_enviado_en=CASE WHEN p_enlace_enviado THEN clock_timestamp() ELSE enlace_enviado_en END,
+   lease_hasta=CASE WHEN p_estado='enviando' THEN clock_timestamp()+interval '2 minutes' ELSE clock_timestamp() END,
+   actualizado_en=clock_timestamp()
+   WHERE id=p_operacion_id AND actor_id=p_actor AND lease=p_lease;
+  IF NOT FOUND THEN RAISE EXCEPTION 'La operación cambió; consulte su estado' USING ERRCODE='40001'; END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_revocar_sesiones(p_actor uuid,p_usuario_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  IF NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=p_usuario_id) THEN RAISE EXCEPTION 'Usuario no disponible'; END IF;
+  -- Auth Admin signOut requiere el JWT del destinatario. Esta operación técnica local
+  -- elimina sus refresh tokens/sesiones por identidad; no necesita ni expone ese JWT.
+  DELETE FROM auth.refresh_tokens WHERE user_id::text=p_usuario_id::text;
+  DELETE FROM auth.sessions WHERE user_id=p_usuario_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.usuarios_enlace_pendiente(p_actor uuid,p_usuario_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  PERFORM private.usuarios_exigir_admin(p_actor,p_usuario_id);
+  RETURN EXISTS(
+    SELECT 1 FROM public.usuarios u JOIN auth.users a ON a.id=u.id
+    WHERE u.id=p_usuario_id AND u.estado='activo' AND (
+      -- Un alta inicial sin contraseña puede reenviar también después de expirar su enlace.
+      (EXISTS(
+        SELECT 1 FROM private.usuarios_operaciones inicial WHERE inicial.usuario_id=u.id AND inicial.tipo='crear' AND inicial.estado<>'rechazado'
+          AND inicial.identidad_creada=true AND inicial.clave_establecida=false))
+      OR (u.rol='responsable' AND EXISTS(
+        SELECT 1 FROM private.usuarios_operaciones o WHERE o.usuario_id=u.id
+        AND (o.estado='enlace_pendiente' OR (o.estado='enviando' AND o.lease_hasta<=clock_timestamp()))
+        AND NOT EXISTS(SELECT 1 FROM private.usuarios_operaciones posterior WHERE posterior.usuario_id=u.id
+          AND posterior.enlace_enviado_en>o.actualizado_en)))
+    )
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.acceso_limitar(p_tipo text,p_ip_hash text,p_email_hash text)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v_hoy timestamptz:=clock_timestamp(); v_ip integer; v_email integer;
+BEGIN
+ IF p_tipo NOT IN ('login','recuperar') OR p_ip_hash !~ '^[a-f0-9]{64}$' OR p_email_hash !~ '^[a-f0-9]{64}$' THEN RAISE EXCEPTION 'Límite inválido'; END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended('acceso:ip:'||p_tipo||p_ip_hash,0));
+ IF p_tipo='recuperar' THEN PERFORM pg_advisory_xact_lock(hashtextextended('acceso:email:'||p_email_hash,0)); END IF;
+ DELETE FROM private.acceso_intentos WHERE creado_en < v_hoy-interval '1 hour';
+ SELECT count(*) INTO v_ip FROM private.acceso_intentos WHERE tipo=p_tipo AND ip_hash=p_ip_hash
+   AND creado_en>v_hoy-CASE WHEN p_tipo='login' THEN interval '1 minute' ELSE interval '1 hour' END;
+ SELECT count(*) INTO v_email FROM private.acceso_intentos WHERE tipo='recuperar' AND email_hash=p_email_hash AND creado_en>v_hoy-interval '1 hour';
+ IF (p_tipo='login' AND v_ip>=5) OR (p_tipo='recuperar' AND (v_ip>=3 OR v_email>=3)) THEN RETURN false; END IF;
+ INSERT INTO private.acceso_intentos(tipo,ip_hash,email_hash) VALUES(p_tipo,p_ip_hash,p_email_hash);
+ RETURN true;
+END;
+$$;

@@ -1047,6 +1047,10 @@ export type Database = {
 			};
 		};
 		Functions: {
+			acceso_limitar: {
+				Args: { p_email_hash: string; p_ip_hash: string; p_tipo: string };
+				Returns: boolean;
+			};
 			anular_gasto: { Args: { p_gasto_id: string; p_motivo: string }; Returns: undefined };
 			anular_pago: { Args: { p_motivo: string; p_pago_id: string }; Returns: string };
 			archivo_autorizar_carga: {
@@ -1201,6 +1205,39 @@ export type Database = {
 			tramo_proporcional: {
 				Args: { p_anio: number; p_fecha: string; p_mes: number };
 				Returns: number;
+			};
+			usuarios_enlace_pendiente: {
+				Args: { p_actor: string; p_usuario_id: string };
+				Returns: boolean;
+			};
+			usuarios_operacion_guardar: {
+				Args: {
+					p_actor: string;
+					p_enlace_enviado?: boolean;
+					p_estado: string;
+					p_lease: string;
+					p_operacion_id: string;
+					p_revocacion_pendiente?: boolean;
+				};
+				Returns: undefined;
+			};
+			usuarios_operacion_leer: {
+				Args: { p_actor: string; p_operacion_id?: string; p_usuario_id?: string };
+				Returns: Json;
+			};
+			usuarios_operacion_reservar: {
+				Args: {
+					p_actor: string;
+					p_datos: Json;
+					p_operacion_id: string;
+					p_tipo: string;
+					p_usuario_id: string;
+				};
+				Returns: Json;
+			};
+			usuarios_revocar_sesiones: {
+				Args: { p_actor: string; p_usuario_id: string };
+				Returns: undefined;
 			};
 		};
 		Enums: {

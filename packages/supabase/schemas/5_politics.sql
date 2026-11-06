@@ -273,5 +273,29 @@ GRANT UPDATE (foto_storage_path) ON public.socios TO authenticated;
 GRANT SELECT (logo_storage_path), UPDATE (logo_storage_path) ON public.club TO authenticated;
 GRANT UPDATE (evidencia_storage_path) ON public.gastos TO authenticated;
 
+-- RLS y permisos de operaciones administrativas de usuarios y límites de acceso.
+ALTER TABLE private.usuarios_operaciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.usuarios_operaciones FROM PUBLIC, anon, authenticated, service_role;
+
+ALTER TABLE private.acceso_intentos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.acceso_intentos FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION private.usuarios_registrar_credencial_inicial() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION private.usuarios_exigir_admin(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.acceso_limitar(text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.acceso_limitar(text, text, text) TO service_role;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';
