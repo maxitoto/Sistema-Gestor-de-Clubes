@@ -14,6 +14,7 @@ import {
 	Typography,
 } from '@mui/material';
 import { type FormEvent, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '#entities/session';
 
 export function LoginForm() {
@@ -33,7 +34,8 @@ export function LoginForm() {
 				setError(
 					authError.status === 400 || authError.status === 401
 						? 'Correo o contraseña incorrectos.'
-						: 'No pudimos conectar con el servicio de acceso. Vuelva a intentarlo.',
+						: authError.message ||
+								'No pudimos conectar con el servicio de acceso. Vuelva a intentarlo.',
 				);
 			}
 		} catch {
@@ -103,6 +105,9 @@ export function LoginForm() {
 				/>
 				<Button type="submit" fullWidth variant="contained" disabled={loading} size="large">
 					{loading ? 'Ingresando…' : 'Ingresar'}
+				</Button>
+				<Button component={Link} to="/recuperar-contrasena" disabled={loading}>
+					¿Olvidaste tu contraseña?
 				</Button>
 			</Stack>
 		</Paper>

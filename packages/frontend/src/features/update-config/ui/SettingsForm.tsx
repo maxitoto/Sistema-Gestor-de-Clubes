@@ -1,16 +1,14 @@
-import { Alert, Box, Button, Paper, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Paper, Stack, TextField, Typography } from '@mui/material';
 import { type FormEvent, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import type { ClubConfig } from '#shared/types';
 import { type ClubForm, toClubForm, toClubUpdate } from '../model/clubForm';
 import { useUpdateClubConfig } from '../model/useUpdateClubConfig';
 
 export function SettingsForm({ initialData }: { initialData: ClubConfig }) {
-	const navigate = useNavigate();
-	const mutation = useUpdateClubConfig();
 	const [formData, setFormData] = useState(() => toClubForm(initialData));
 	const [validationError, setValidationError] = useState<string | null>(null);
 	const [saved, setSaved] = useState(false);
+	const mutation = useUpdateClubConfig(() => setSaved(true));
 	const change = (name: keyof ClubForm, value: string) => {
 		setFormData((previous) => ({ ...previous, [name]: value }));
 		setSaved(false);
@@ -18,28 +16,31 @@ export function SettingsForm({ initialData }: { initialData: ClubConfig }) {
 	};
 	const save = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
-		setValidationError(null);
 		setSaved(false);
+		setValidationError(null);
 		try {
-			const payload = toClubUpdate(formData);
-			mutation.mutate({ id: initialData.id, payload }, { onSuccess: () => setSaved(true) });
+			void mutation.run({ id: initialData.id, payload: toClubUpdate(formData) });
 		} catch (error) {
 			setValidationError(error instanceof Error ? error.message : 'Revise los datos ingresados.');
 		}
 	};
+	const disabled = mutation.isPending || mutation.requiresCheck;
 	return (
-		<Paper sx={{ p: { xs: 2, sm: 4 }, maxWidth: 600, mx: 'auto', mt: 4 }}>
-			<Typography variant="h4" component="h1" gutterBottom>
-				Configuración del Club
+		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+			<Typography variant="h6" component="h2" sx={{ mb: 2 }}>
+				Datos institucionales
+			</Typography>
+			<Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+				El email de contacto es la dirección pública del club.
 			</Typography>
 			{validationError && (
 				<Alert severity="warning" sx={{ mb: 2 }}>
 					{validationError}
 				</Alert>
 			)}
-			{mutation.isError && (
-				<Alert severity="error" sx={{ mb: 2 }}>
-					No pudimos guardar la configuración. Revise su conexión y vuelva a intentarlo.
+			{mutation.feedback && (
+				<Alert severity="warning" sx={{ mb: 2 }}>
+					{mutation.feedback}
 				</Alert>
 			)}
 			{saved && (
@@ -47,64 +48,58 @@ export function SettingsForm({ initialData }: { initialData: ClubConfig }) {
 					Configuración guardada.
 				</Alert>
 			)}
-			<Box
-				component="form"
-				onSubmit={save}
-				sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}
-			>
-				<TextField
-					label="Nombre / Razón Social"
-					value={formData.nombre}
-					onChange={(e) => change('nombre', e.target.value)}
-					required
-					disabled={mutation.isPending}
-				/>
-				<TextField
-					label="CUIT"
-					value={formData.cuit}
-					onChange={(e) => change('cuit', e.target.value)}
-					required
-					disabled={mutation.isPending}
-				/>
-				<TextField
-					label="Domicilio Fiscal"
-					value={formData.domicilio_fiscal}
-					onChange={(e) => change('domicilio_fiscal', e.target.value)}
-					required
-					disabled={mutation.isPending}
-				/>
-				<TextField
-					label="Email de Contacto"
-					type="email"
-					value={formData.email_contacto}
-					onChange={(e) => change('email_contacto', e.target.value)}
-					required
-					disabled={mutation.isPending}
-				/>
-				<TextField
-					label="Punto de Venta"
-					type="number"
-					value={formData.punto_venta}
-					onChange={(e) => change('punto_venta', e.target.value)}
-					slotProps={{ htmlInput: { min: 1, max: 99999, step: 1 } }}
-					required
-					disabled={mutation.isPending}
-				/>
-				<TextField
-					label="URL del Logo (Opcional)"
-					type="url"
-					value={formData.logo_url}
-					onChange={(e) => change('logo_url', e.target.value)}
-					disabled={mutation.isPending}
-				/>
-				<Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-					<Button onClick={() => navigate(-1)} disabled={mutation.isPending}>
-						Volver
-					</Button>
-					<Button type="submit" variant="contained" disabled={mutation.isPending}>
-						{mutation.isPending ? 'Guardando...' : 'Guardar Cambios'}
-					</Button>
-				</Box>
+			<Box component="form" onSubmit={save}>
+				<Stack spacing={2.5}>
+					<TextField
+						label="Nombre / Razón social"
+						value={formData.nombre}
+						onChange={(e) => change('nombre', e.target.value)}
+						required
+						disabled={disabled}
+					/>
+					<TextField
+						label="CUIT"
+						helperText="Formato: XX-XXXXXXXX-X"
+						value={formData.cuit}
+						onChange={(e) => change('cuit', e.target.value)}
+						required
+						disabled={disabled}
+					/>
+					<TextField
+						label="Domicilio fiscal"
+						value={formData.domicilio_fiscal}
+						onChange={(e) => change('domicilio_fiscal', e.target.value)}
+						required
+						disabled={disabled}
+					/>
+					<TextField
+						label="Email de contacto"
+						type="email"
+						value={formData.email_contacto}
+						onChange={(e) => change('email_contacto', e.target.value)}
+						required
+						disabled={disabled}
+					/>
+					<TextField
+						label="Punto de venta"
+						type="number"
+						value={formData.punto_venta}
+						onChange={(e) => change('punto_venta', e.target.value)}
+						slotProps={{ htmlInput: { min: 1, max: 99999, step: 1 } }}
+						required
+						disabled={disabled}
+					/>
+					<Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+						{mutation.requiresCheck && (
+							<Button onClick={() => void mutation.reconcile()} disabled={mutation.isPending}>
+								Verificar resultado
+							</Button>
+						)}
+						<Button type="submit" variant="contained" disabled={disabled}>
+							{mutation.isPending ? 'Guardando…' : 'Guardar datos'}
+						</Button>
+					</Stack>
+				</Stack>
 			</Box>
 		</Paper>
 	);

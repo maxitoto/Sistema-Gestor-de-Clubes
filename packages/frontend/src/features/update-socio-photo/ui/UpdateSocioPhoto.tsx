@@ -24,9 +24,9 @@ export function UpdateSocioPhoto(props: UpdateSocioPhotoProps) {
 	return <PhotoEditor key={`${cacheScope}:${props.socioId}`} {...props} />;
 }
 function PhotoEditor({ socioId, onUpdated }: UpdateSocioPhotoProps) {
-	const { cacheScope, profileStatus, isSigningOut } = useAuth();
+	const { cacheScope, profileStatus, isSigningOut, perfil } = useAuth();
 	const enabled = profileStatus === 'ready' && !isSigningOut;
-	const identity = { tipo: 'socio-foto' as const, entidadId: socioId };
+	const identity = { tipo: 'socio-foto' as const, entidadId: socioId, actorId: perfil?.id ?? '' };
 	const queryClient = useQueryClient();
 	const photoKey = ['socio-foto', cacheScope, socioId];
 	const photo = useQuery({
