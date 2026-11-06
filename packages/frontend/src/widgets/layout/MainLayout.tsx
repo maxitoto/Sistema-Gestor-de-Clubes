@@ -3,6 +3,7 @@ import Brightness7Icon from '@mui/icons-material/Brightness7';
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import LogoutIcon from '@mui/icons-material/Logout';
+import ManageAccountsOutlinedIcon from '@mui/icons-material/ManageAccountsOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import SportsSoccerOutlinedIcon from '@mui/icons-material/SportsSoccerOutlined';
@@ -19,13 +20,15 @@ import {
 	ListItemButton,
 	ListItemIcon,
 	ListItemText,
+	Menu,
+	MenuItem,
 	Toolbar,
 	Tooltip,
 	Typography,
 } from '@mui/material';
 import { useContext, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { useClubConfig } from '#entities/club';
+import { useClubConfig, useClubLogo } from '#entities/club';
 import { useAuth } from '#entities/session';
 import { ThemeModeContext } from '#shared/config/styles';
 
@@ -36,7 +39,13 @@ export const MainLayout = () => {
 	const { pathname } = useLocation();
 	const { toggleColorMode, mode } = useContext(ThemeModeContext);
 	const [mobileOpen, setMobileOpen] = useState(false);
+	const [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null);
 	const { data: clubConfig } = useClubConfig({ cacheScope, enabled: profileStatus === 'ready' });
+	const { data: clubLogo } = useClubLogo({
+		clubId: clubConfig?.id,
+		cacheScope,
+		enabled: profileStatus === 'ready',
+	});
 	const roleLabel = perfil?.rol === 'admin' ? 'Administrador' : 'Responsable';
 	const navigation = [
 		{ to: '/dashboard', label: 'Dashboard', icon: <DashboardOutlinedIcon /> },
@@ -44,6 +53,7 @@ export const MainLayout = () => {
 		...(perfil?.rol === 'admin'
 			? [
 					{ to: '/deportes', label: 'Deportes', icon: <SportsSoccerOutlinedIcon /> },
+					{ to: '/usuarios', label: 'Usuarios', icon: <ManageAccountsOutlinedIcon /> },
 					{ to: '/settings', label: 'Configuración', icon: <SettingsOutlinedIcon /> },
 				]
 			: []),
@@ -63,12 +73,24 @@ export const MainLayout = () => {
 					justifyContent: 'center',
 				}}
 			>
-				<Typography sx={{ fontWeight: 800, fontSize: '0.9rem', lineHeight: 1.4 }}>
-					{clubConfig?.nombre || 'Club Social'}
-				</Typography>
-				<Typography variant="caption" color="text.secondary">
-					Gestión deportiva
-				</Typography>
+				<Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+					<Avatar
+						variant="rounded"
+						src={clubLogo?.url ?? undefined}
+						alt={clubConfig?.nombre ?? 'Club'}
+						sx={{ width: 36, height: 36, bgcolor: 'primary.main', color: 'primary.contrastText' }}
+					>
+						CS
+					</Avatar>
+					<Box>
+						<Typography sx={{ fontWeight: 800, fontSize: '0.9rem', lineHeight: 1.4 }}>
+							{clubConfig?.nombre || 'Club Social'}
+						</Typography>
+						<Typography variant="caption" color="text.secondary">
+							Gestión deportiva
+						</Typography>
+					</Box>
+				</Box>
 			</Box>
 			<Divider />
 			<List component="nav" aria-label="Navegación principal" sx={{ px: 1.25, py: 2 }}>
@@ -162,7 +184,16 @@ export const MainLayout = () => {
 							</IconButton>
 						</Tooltip>
 						<Box
+							component="button"
+							type="button"
+							aria-label="Abrir menú de mi cuenta"
+							aria-haspopup="menu"
+							aria-expanded={Boolean(accountAnchor)}
+							onClick={(event) => setAccountAnchor(event.currentTarget)}
 							sx={{
+								bgcolor: 'transparent',
+								color: 'inherit',
+								cursor: 'pointer',
 								display: 'flex',
 								alignItems: 'center',
 								gap: 1,
@@ -193,6 +224,28 @@ export const MainLayout = () => {
 								{roleLabel}
 							</Typography>
 						</Box>
+						<Menu
+							anchorEl={accountAnchor}
+							open={Boolean(accountAnchor)}
+							onClose={() => setAccountAnchor(null)}
+						>
+							<MenuItem
+								component={NavLink}
+								to="/cambiar-contrasena"
+								onClick={() => setAccountAnchor(null)}
+							>
+								Cambiar mi contraseña
+							</MenuItem>
+							<MenuItem
+								disabled={isSigningOut}
+								onClick={() => {
+									setAccountAnchor(null);
+									void logout();
+								}}
+							>
+								Cerrar sesión
+							</MenuItem>
+						</Menu>
 						<Button
 							color="inherit"
 							disabled={isSigningOut}
