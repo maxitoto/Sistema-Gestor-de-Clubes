@@ -297,5 +297,25 @@ GRANT EXECUTE ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, u
 REVOKE ALL ON FUNCTION public.acceso_limitar(text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.acceso_limitar(text, text, text) TO service_role;
 
+-- RLS, permisos de tablas/funciones y privilegios de columna (Cobranza, Caja y Gastos).
+ALTER TABLE private.gasto_altas ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.gasto_altas FROM PUBLIC,anon,authenticated,service_role;
+
+REVOKE ALL ON FUNCTION public.consultar_cobranza(text,jsonb) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.consultar_cobranza(text,jsonb) TO authenticated,service_role;
+
+REVOKE ALL ON FUNCTION public.consultar_caja(jsonb) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_caja(jsonb) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.registrar_gasto_idempotente(uuid,jsonb),public.consultar_alta_gasto(uuid)
+ FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.registrar_gasto_idempotente(uuid,jsonb),public.consultar_alta_gasto(uuid)TO authenticated;
+
+REVOKE ALL ON FUNCTION private.gastos_bloquear_categoria_activa() FROM PUBLIC,anon,authenticated,service_role;
+
+REVOKE INSERT,UPDATE,DELETE ON public.categorias_gasto FROM PUBLIC,anon,authenticated;
+GRANT INSERT(nombre,descripcion) ON public.categorias_gasto TO authenticated;
+GRANT UPDATE(nombre,descripcion,estado) ON public.categorias_gasto TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

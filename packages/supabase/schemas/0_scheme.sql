@@ -369,3 +369,21 @@ CREATE TABLE IF NOT EXISTS private.acceso_intentos (
   email_hash text NOT NULL,
   creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+
+-- ---------------------------------------------------------------------------------
+-- Registro idempotente de altas de gastos e invariantes de texto no vacío 
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS private.gasto_altas (
+ solicitud uuid PRIMARY KEY,
+ usuario_id uuid NOT NULL REFERENCES public.usuarios(id),
+ datos jsonb NOT NULL,
+ gasto_id uuid NOT NULL UNIQUE REFERENCES public.gastos(id),
+ creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+-- NOT VALID conserva legados sin iniciar una corrección masiva; sí protege toda escritura nueva.
+ALTER TABLE public.gastos ADD CONSTRAINT chk_gastos_concepto_no_vacio
+ CHECK (NULLIF(btrim(concepto),'') IS NOT NULL) NOT VALID;
+
+ALTER TABLE public.categorias_gasto ADD CONSTRAINT chk_categoria_gasto_nombre_no_vacio
+ CHECK(NULLIF(btrim(nombre),'') IS NOT NULL) NOT VALID;

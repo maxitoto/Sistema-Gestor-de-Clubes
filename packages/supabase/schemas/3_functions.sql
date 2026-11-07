@@ -1247,3 +1247,273 @@ BEGIN
  RETURN true;
 END;
 $$;
+
+-- =================================================================================
+-- CONSULTA PAGINADA Y FILTRADA DE COBRANZA (CU-05.1)
+-- =================================================================================
+CREATE OR REPLACE FUNCTION public.consultar_cobranza(p_vista text,p_criterios jsonb DEFAULT '{}'::jsonb)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY INVOKER SET search_path='' AS $$
+DECLARE
+ v_page integer;v_limit integer;v_search text;v_number text;v_from date;v_to date;
+ v_method text;v_receipt text;v_quota text;v_member text;v_sport uuid;v_category uuid;
+ v_socio uuid;v_cuota uuid;v_pago uuid;v_comprobante uuid;v_month integer;v_year integer;
+ v_sort text;v_direction text;v_view text;v_column text;v_result jsonb;
+BEGIN
+ PERFORM private.require_operador();
+ IF p_vista NOT IN ('cuotas','pagos') OR p_vista IS NULL OR jsonb_typeof(p_criterios) IS DISTINCT FROM 'object' THEN
+  RAISE EXCEPTION 'Consulta de cobranza inválida' USING ERRCODE='22023';
+ END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_object_keys(p_criterios)k WHERE k NOT IN
+ ('pagina','limite','buscar','comprobante','desde','hasta','medio','estado_recibo','estado_cuota','estado_socio',
+ 'deporte_id','categoria_id','socio_id','cuota_id','pago_id','comprobante_id','periodo_mes','periodo_anio','orden','direccion')) THEN
+  RAISE EXCEPTION 'Filtro no permitido' USING ERRCODE='22023';
+ END IF;
+ v_page:=coalesce((p_criterios->>'pagina')::integer,0);v_limit:=coalesce((p_criterios->>'limite')::integer,20);
+ v_search:=btrim(coalesce(p_criterios->>'buscar',''));v_number:=btrim(coalesce(p_criterios->>'comprobante',''));
+ v_from:=nullif(p_criterios->>'desde','')::date;v_to:=nullif(p_criterios->>'hasta','')::date;
+ v_method:=coalesce(p_criterios->>'medio','todos');v_receipt:=coalesce(p_criterios->>'estado_recibo','todos');
+ v_quota:=coalesce(p_criterios->>'estado_cuota','todos');v_member:=coalesce(p_criterios->>'estado_socio','todos');
+ v_sport:=nullif(p_criterios->>'deporte_id','')::uuid;v_category:=nullif(p_criterios->>'categoria_id','')::uuid;
+ v_socio:=nullif(p_criterios->>'socio_id','')::uuid;v_cuota:=nullif(p_criterios->>'cuota_id','')::uuid;
+ v_pago:=nullif(p_criterios->>'pago_id','')::uuid;v_comprobante:=nullif(p_criterios->>'comprobante_id','')::uuid;
+ v_month:=(p_criterios->>'periodo_mes')::integer;v_year:=(p_criterios->>'periodo_anio')::integer;
+ v_sort:=coalesce(p_criterios->>'orden','fecha');v_direction:=coalesce(p_criterios->>'direccion','desc');
+ IF v_page<0 OR v_page>100000 OR v_limit NOT IN(20,50,100) OR length(v_search)>100 OR length(v_number)>100
+  OR (v_from IS NOT NULL AND v_to IS NOT NULL AND v_from>v_to)
+  OR v_method NOT IN('todos','efectivo','transferencia')
+  OR v_receipt NOT IN('todos','activo','pendiente_cae','fallido','anulado')
+  OR v_quota NOT IN('todos','pendiente','pagada') OR v_member NOT IN('todos','activo','inactivo')
+  OR v_month NOT BETWEEN 1 AND 12 OR v_year NOT BETWEEN 2001 AND 9999
+  OR v_direction NOT IN('asc','desc') OR v_sort NOT IN('fecha','socio','periodo','monto','medio','numero','estado') THEN
+   RAISE EXCEPTION 'Criterios de cobranza inválidos' USING ERRCODE='22023';
+ END IF;
+ v_search:='%'||replace(replace(replace(v_search,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%';
+ v_number:='%'||replace(replace(replace(v_number,E'\\',E'\\\\'),'%',E'\\%'),'_',E'\\_')||'%';
+ v_view:=CASE p_vista WHEN 'cuotas' THEN 'v_cuotas_cobranza' ELSE 'v_pagos_cobranza' END;
+ v_column:=CASE v_sort WHEN 'socio' THEN 'lower(socio_apellido || '' '' || socio_nombre)' WHEN 'periodo' THEN '(periodo_anio*12+periodo_mes)'
+  WHEN 'numero' THEN 'numero_comprobante' WHEN 'estado' THEN 'coalesce(etiqueta_recibo,estado_cuota)' ELSE v_sort END;
+ EXECUTE format($query$
+ WITH filtradas AS MATERIALIZED(
+  SELECT * FROM public.%I
+  WHERE ($1='%%%%' OR socio_dni ILIKE $1 ESCAPE E'\\' OR socio_numero::text ILIKE $1 ESCAPE E'\\'
+   OR socio_nombre ILIKE $1 ESCAPE E'\\' OR socio_apellido ILIKE $1 ESCAPE E'\\'
+   OR (socio_apellido||' '||socio_nombre) ILIKE $1 ESCAPE E'\\')
+  AND ($2='%%%%' OR numero_comprobante ILIKE $2 ESCAPE E'\\')
+  AND ($3 IS NULL OR fecha>=($3::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'))
+  AND ($4 IS NULL OR fecha<(($4+1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'))
+  AND ($5='todos' OR medio=$5) AND ($6='todos' OR etiqueta_recibo=$6)
+  AND ($7='todos' OR estado_cuota=$7) AND ($8='todos' OR socio_estado=$8)
+  AND ($9 IS NULL OR deporte_id=$9) AND ($10 IS NULL OR categoria_id=$10)
+  AND ($11 IS NULL OR socio_id=$11) AND ($12 IS NULL OR cuota_id=$12)
+  AND ($13 IS NULL OR pago_id=$13) AND ($14 IS NULL OR comprobante_id=$14)
+  AND ($15 IS NULL OR periodo_mes=$15) AND ($16 IS NULL OR periodo_anio=$16)
+ ),pagina AS(
+  SELECT f.*,row_number()OVER(ORDER BY %s %s NULLS LAST,id ASC)AS _pos
+  FROM filtradas f ORDER BY %s %s NULLS LAST,id ASC LIMIT $17 OFFSET $18
+ )
+ SELECT jsonb_build_object('filas',coalesce((SELECT jsonb_agg(to_jsonb(p)-'_pos' ORDER BY _pos)FROM pagina p),'[]'::jsonb),
+  'total',(SELECT count(*)FROM filtradas),
+  'deuda_filtrada',(SELECT coalesce(sum(monto)FILTER(WHERE $19 AND estado_cuota='pendiente'),0)::numeric::text FROM filtradas))
+ $query$,v_view,v_column,v_direction,v_column,v_direction)
+ INTO v_result USING v_search,v_number,v_from,v_to,v_method,v_receipt,v_quota,v_member,v_sport,v_category,
+  v_socio,v_cuota,v_pago,v_comprobante,v_month,v_year,v_limit,v_page*v_limit,p_vista='cuotas';
+ RETURN v_result;
+END;
+$$;
+
+-- =================================================================================
+-- CONSULTA DE MOVIMIENTOS DE CAJA CONTINUA (CU-06.6, RN-01, RN-13, ND-6)
+-- =================================================================================
+CREATE OR REPLACE FUNCTION public.consultar_caja(p_criterios jsonb DEFAULT '{}'::jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = ''
+AS $$
+DECLARE
+  v_rol text := private.get_rol();
+  v_desde date; v_hasta date;
+  v_desde_instante timestamptz; v_hasta_instante timestamptz;
+  v_pagina integer := 0; v_limite integer := 20;
+  v_tipo text := coalesce(p_criterios->>'tipo','todos');
+  v_metodo text := coalesce(p_criterios->>'metodo','todos');
+  v_origen text := coalesce(p_criterios->>'origen','todos');
+  v_reversos text := coalesce(p_criterios->>'reversos','todos');
+  v_estado text := coalesce(p_criterios->>'estado','todos');
+  v_texto text := coalesce(btrim(p_criterios->>'texto'),'');
+  v_orden text := coalesce(p_criterios->>'orden','fecha');
+  v_direccion text := coalesce(p_criterios->>'direccion','desc');
+  v_resultado jsonb;
+BEGIN
+  IF auth.uid() IS NULL OR v_rol IS NULL OR v_rol NOT IN ('admin','responsable') THEN
+    RAISE EXCEPTION 'Se requiere una cuenta activa para consultar movimientos' USING ERRCODE='42501';
+  END IF;
+  IF p_criterios IS NULL OR jsonb_typeof(p_criterios)<>'object'
+     OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_criterios) k WHERE k NOT IN
+       ('desde','hasta','pagina','limite','tipo','metodo','origen','reversos','estado','texto','orden','direccion'))
+     OR EXISTS(SELECT 1 FROM jsonb_each(p_criterios) x WHERE x.key NOT IN ('pagina','limite') AND jsonb_typeof(x.value)<>'string') THEN
+    RAISE EXCEPTION 'Filtros de movimientos no permitidos' USING ERRCODE='22023';
+  END IF;
+  IF p_criterios ? 'pagina' THEN
+    IF jsonb_typeof(p_criterios->'pagina')<>'number' OR p_criterios->>'pagina' !~ '^(0|[1-9][0-9]{0,6})$' THEN
+      RAISE EXCEPTION 'Página inválida' USING ERRCODE='22023';
+    END IF;
+    v_pagina := (p_criterios->>'pagina')::integer;
+  END IF;
+  IF p_criterios ? 'limite' THEN
+    IF jsonb_typeof(p_criterios->'limite')<>'number' OR p_criterios->>'limite' NOT IN ('20','50','100') THEN
+      RAISE EXCEPTION 'Seleccione 20, 50 o 100 movimientos por página' USING ERRCODE='22023';
+    END IF;
+    v_limite := (p_criterios->>'limite')::integer;
+  END IF;
+  IF v_tipo NOT IN ('todos','ingreso','egreso') OR v_metodo NOT IN ('todos','efectivo','transferencia')
+     OR v_origen NOT IN ('todos','cobro','gasto') OR v_reversos NOT IN ('todos','originales','reversos')
+     OR v_estado NOT IN ('todos','vigente','anulado') OR char_length(v_texto)>255
+     OR v_orden NOT IN ('fecha','monto','concepto','tipo','metodo','estado') OR v_direccion NOT IN ('asc','desc') THEN
+    RAISE EXCEPTION 'Filtros de movimientos inválidos' USING ERRCODE='22023';
+  END IF;
+  IF coalesce(p_criterios->>'desde','')<>'' THEN
+    IF p_criterios->>'desde' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+      RAISE EXCEPTION 'Fecha inicial inválida' USING ERRCODE='22023';
+    END IF;
+    v_desde := (p_criterios->>'desde')::date;
+    v_desde_instante := v_desde::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires';
+  END IF;
+  IF coalesce(p_criterios->>'hasta','')<>'' THEN
+    IF p_criterios->>'hasta' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+      RAISE EXCEPTION 'Fecha final inválida' USING ERRCODE='22023';
+    END IF;
+    v_hasta := (p_criterios->>'hasta')::date;
+    v_hasta_instante := (v_hasta+1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires';
+  END IF;
+  IF v_desde IS NOT NULL AND v_hasta IS NOT NULL AND v_desde>v_hasta THEN
+    RAISE EXCEPTION 'La fecha inicial no puede ser posterior a la final' USING ERRCODE='22023';
+  END IF;
+
+  -- Una única consulta: página, conteo y totales comparten el mismo conjunto y snapshot.
+  -- La proyección de nombre/apellido del autor es exclusiva del hecho financiero:
+  -- no amplía SELECT de usuarios ni expone correo, Auth o identidad administrativa.
+  WITH filtrados AS MATERIALIZED (
+    SELECT f.tipo_movimiento, f.movimiento_id, f.fecha, f.monto, f.metodo,
+      f.referencia, f.concepto, f.estado, f.es_reverso,
+      CASE WHEN (f.tipo_movimiento='ingreso')<>f.es_reverso THEN 'cobro' ELSE 'gasto' END AS origen,
+      coalesce(nullif(btrim(concat_ws(' ',u.nombre,u.apellido)),''),'Usuario del club') AS autor,
+      coalesce(p.created_at,g.created_at) AS cargado_en,
+      g.fecha AS fecha_negocio
+    FROM public.flujo_caja f
+    LEFT JOIN public.usuarios u ON u.id=f.usuario_id
+    LEFT JOIN public.pagos p ON p.id=f.movimiento_id AND ((f.tipo_movimiento='ingreso')<>f.es_reverso)
+    LEFT JOIN public.gastos g ON g.id=f.movimiento_id AND NOT ((f.tipo_movimiento='ingreso')<>f.es_reverso)
+    WHERE (v_desde_instante IS NULL OR f.fecha>=v_desde_instante)
+      AND (v_hasta_instante IS NULL OR f.fecha<v_hasta_instante)
+      AND (v_tipo='todos' OR f.tipo_movimiento=v_tipo)
+      AND (v_metodo='todos' OR f.metodo::text=v_metodo)
+      AND (v_origen='todos' OR CASE WHEN (f.tipo_movimiento='ingreso')<>f.es_reverso THEN 'cobro' ELSE 'gasto' END=v_origen)
+      AND (v_reversos='todos' OR f.es_reverso=(v_reversos='reversos'))
+      AND (v_estado='todos' OR (v_estado='anulado' AND f.estado='anulado') OR (v_estado='vigente' AND f.estado IN ('activo','completado')))
+      AND (v_texto='' OR strpos(lower(f.concepto),lower(v_texto))>0 OR strpos(lower(coalesce(f.referencia,'')),lower(v_texto))>0)
+  ), ordenados AS (
+    SELECT f.*,row_number() OVER(ORDER BY
+      CASE WHEN v_orden='fecha' AND v_direccion='asc' THEN f.fecha END ASC NULLS LAST,
+      CASE WHEN v_orden='fecha' AND v_direccion='desc' THEN f.fecha END DESC NULLS LAST,
+      CASE WHEN v_orden='monto' AND v_direccion='asc' THEN f.monto END ASC NULLS LAST,
+      CASE WHEN v_orden='monto' AND v_direccion='desc' THEN f.monto END DESC NULLS LAST,
+      CASE WHEN v_orden='concepto' AND v_direccion='asc' THEN f.concepto END ASC NULLS LAST,
+      CASE WHEN v_orden='concepto' AND v_direccion='desc' THEN f.concepto END DESC NULLS LAST,
+      CASE WHEN v_orden='tipo' AND v_direccion='asc' THEN f.tipo_movimiento END ASC NULLS LAST,
+      CASE WHEN v_orden='tipo' AND v_direccion='desc' THEN f.tipo_movimiento END DESC NULLS LAST,
+      CASE WHEN v_orden='metodo' AND v_direccion='asc' THEN f.metodo END ASC NULLS LAST,
+      CASE WHEN v_orden='metodo' AND v_direccion='desc' THEN f.metodo END DESC NULLS LAST,
+      CASE WHEN v_orden='estado' AND v_direccion='asc' THEN f.estado END ASC NULLS LAST,
+      CASE WHEN v_orden='estado' AND v_direccion='desc' THEN f.estado END DESC NULLS LAST,
+      f.tipo_movimiento,f.movimiento_id,f.es_reverso) AS posicion
+    FROM filtrados f
+  ), pagina AS (
+    SELECT * FROM ordenados WHERE posicion>v_pagina::bigint*v_limite AND posicion<=(v_pagina::bigint+1)*v_limite
+  ), totales AS (
+    SELECT count(*) AS cantidad,
+      coalesce(sum(monto)FILTER(WHERE tipo_movimiento='ingreso'),0)::numeric(24,2)::text AS ingresos,
+      coalesce(sum(monto)FILTER(WHERE tipo_movimiento='egreso'),0)::numeric(24,2)::text AS egresos,
+      coalesce(sum(CASE WHEN tipo_movimiento='ingreso' THEN monto ELSE -monto END),0)::numeric(24,2)::text AS neto
+    FROM filtrados
+  )
+  SELECT jsonb_build_object('version',1,'total',t.cantidad,'pagina',v_pagina,'limite',v_limite,
+    'totales',CASE WHEN v_rol='admin' THEN jsonb_build_object('ingresos',t.ingresos,'egresos',t.egresos,'neto',t.neto) ELSE NULL END,
+    'filas',coalesce((SELECT jsonb_agg(jsonb_build_object(
+      'tipo',p.tipo_movimiento,'movimientoId',p.movimiento_id,'fecha',p.fecha,
+      'monto',p.monto::text,'metodo',p.metodo,'referencia',p.referencia,'concepto',p.concepto,
+      'estado',p.estado,'autor',p.autor,'esReverso',p.es_reverso,'origen',p.origen,
+      'origenId',p.movimiento_id,'cargadoEn',p.cargado_en,'fechaNegocio',p.fecha_negocio
+    ) ORDER BY p.posicion)FROM pagina p),'[]'::jsonb)
+  ) INTO v_resultado FROM totales t;
+  RETURN v_resultado;
+END;
+$$;
+
+ALTER FUNCTION public.consultar_caja(jsonb) OWNER TO postgres;
+
+-- =================================================================================
+-- ALTA IDEMPOTENTE Y CONCILIACIÓN DE GASTOS (CU-06.3, RN-15, RN-17)
+-- =================================================================================
+CREATE OR REPLACE FUNCTION public.registrar_gasto_idempotente(p_solicitud uuid,p_datos jsonb)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE
+ v_actor uuid:=auth.uid(); v_existente private.gasto_altas; v_datos jsonb;
+ v_categoria uuid; v_fecha date; v_concepto text; v_monto numeric;
+ v_metodo public.medio_pago; v_referencia text; v_descripcion text; v_id uuid;
+BEGIN
+ PERFORM private.require_operador();
+ IF p_solicitud IS NULL OR jsonb_typeof(p_datos)<>'object' OR
+   (SELECT array_agg(key ORDER BY key) FROM jsonb_object_keys(p_datos) key)
+     IS DISTINCT FROM ARRAY['categoria_id','concepto','descripcion','fecha','metodo_pago','monto','referencia_banco']::text[] THEN
+   RAISE EXCEPTION 'Campos de gasto no permitidos' USING ERRCODE='22023';
+ END IF;
+ IF jsonb_typeof(p_datos->'categoria_id')<>'string' OR
+    jsonb_typeof(p_datos->'fecha')<>'string' OR (p_datos->>'fecha')!~'^\d{4}-\d{2}-\d{2}$' OR
+    jsonb_typeof(p_datos->'concepto')<>'string' OR
+    jsonb_typeof(p_datos->'monto')<>'number' OR
+    jsonb_typeof(p_datos->'metodo_pago')<>'string' OR
+    jsonb_typeof(p_datos->'referencia_banco') NOT IN ('null','string') OR
+    jsonb_typeof(p_datos->'descripcion') NOT IN ('null','string') THEN
+   RAISE EXCEPTION 'Datos de gasto inválidos' USING ERRCODE='22023';
+ END IF;
+ v_categoria:=(p_datos->>'categoria_id')::uuid; v_fecha:=(p_datos->>'fecha')::date;
+ v_concepto:=btrim(p_datos->>'concepto');v_monto:=(p_datos->>'monto')::numeric;
+ v_referencia:=NULLIF(btrim(p_datos->>'referencia_banco'),'');
+ v_descripcion:=NULLIF(btrim(p_datos->>'descripcion'),'');
+ IF v_concepto='' OR length(v_concepto)>255 OR v_monto<=0 OR v_monto>99999999.99 OR scale(v_monto)>2 OR
+    length(v_referencia)>255 OR (p_datos->>'metodo_pago') NOT IN ('efectivo','transferencia') THEN
+   RAISE EXCEPTION 'Revisá concepto, importe, medio o referencia del gasto' USING ERRCODE='22023';
+ END IF;
+ v_metodo:=(p_datos->>'metodo_pago')::public.medio_pago;
+ IF v_metodo='transferencia' AND v_referencia IS NULL THEN
+   RAISE EXCEPTION 'La transferencia requiere referencia o banco' USING ERRCODE='23514';
+ END IF;
+ v_datos:=jsonb_build_object('categoria_id',v_categoria,'fecha',v_fecha,'concepto',v_concepto,
+   'monto',v_monto,'metodo_pago',v_metodo,'referencia_banco',v_referencia,'descripcion',v_descripcion);
+ -- La identidad se serializa antes de consultar/insertar. El gasto y la reserva confirman juntos.
+ PERFORM pg_advisory_xact_lock(hashtextextended('gasto-alta:'||p_solicitud::text,0));
+ SELECT * INTO v_existente FROM private.gasto_altas WHERE solicitud=p_solicitud;
+ IF FOUND THEN
+   IF v_existente.usuario_id<>v_actor OR v_existente.datos<>v_datos THEN
+     RAISE EXCEPTION 'La identidad del intento pertenece a otros datos' USING ERRCODE='23505';
+   END IF;
+   RETURN v_existente.gasto_id;
+ END IF;
+ -- El bloqueo de categoría coordina altas con una baja concurrente. El trigger vuelve a validar.
+ PERFORM 1 FROM public.categorias_gasto WHERE id=v_categoria AND estado='activo' FOR SHARE;
+ IF NOT FOUND THEN RAISE EXCEPTION 'La categoría debe estar activa' USING ERRCODE='23514'; END IF;
+ INSERT INTO public.gastos(categoria_id,fecha,concepto,monto,metodo_pago,referencia_banco,descripcion)
+ VALUES(v_categoria,v_fecha,v_concepto,v_monto,v_metodo,v_referencia,v_descripcion) RETURNING id INTO v_id;
+ INSERT INTO private.gasto_altas(solicitud,usuario_id,datos,gasto_id)VALUES(p_solicitud,v_actor,v_datos,v_id);
+ RETURN v_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.consultar_alta_gasto(p_solicitud uuid)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE v_id uuid;
+BEGIN
+ PERFORM private.require_operador();
+ SELECT gasto_id INTO v_id FROM private.gasto_altas WHERE solicitud=p_solicitud AND usuario_id=auth.uid();
+ RETURN v_id;
+END;
+$$;

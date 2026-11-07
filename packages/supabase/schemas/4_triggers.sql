@@ -608,3 +608,22 @@ DROP TRIGGER IF EXISTS usuarios_registrar_credencial_establecida ON auth.users;
 CREATE TRIGGER usuarios_registrar_credencial_establecida AFTER UPDATE OF encrypted_password ON auth.users
 FOR EACH ROW WHEN (NEW.encrypted_password IS DISTINCT FROM OLD.encrypted_password)
 EXECUTE FUNCTION private.usuarios_registrar_credencial_inicial();
+
+-- ---------------------------------------------------------------------------------
+-- Bloqueo compartido de categoría activa al insertar o recategorizar un gasto
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.gastos_bloquear_categoria_activa()
+RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF TG_OP='INSERT' OR NEW.categoria_id IS DISTINCT FROM OLD.categoria_id THEN
+   PERFORM private.require_operador();
+   PERFORM 1 FROM public.categorias_gasto WHERE id=NEW.categoria_id AND estado='activo' FOR SHARE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'La categoría debe estar activa' USING ERRCODE='23514';END IF;
+ END IF;
+ RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS gastos_categoria_activa_lock ON public.gastos;
+CREATE TRIGGER gastos_categoria_activa_lock BEFORE INSERT OR UPDATE OF categoria_id ON public.gastos
+FOR EACH ROW EXECUTE FUNCTION private.gastos_bloquear_categoria_activa();
