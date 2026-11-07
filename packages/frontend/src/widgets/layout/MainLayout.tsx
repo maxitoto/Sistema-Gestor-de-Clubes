@@ -1,3 +1,4 @@
+import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalanceWalletOutlined';
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
@@ -5,6 +6,7 @@ import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ManageAccountsOutlinedIcon from '@mui/icons-material/ManageAccountsOutlined';
 import MenuIcon from '@mui/icons-material/Menu';
+import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined';
 import SportsSoccerOutlinedIcon from '@mui/icons-material/SportsSoccerOutlined';
 import {
@@ -48,8 +50,12 @@ export const MainLayout = () => {
 	});
 	const roleLabel = perfil?.rol === 'admin' ? 'Administrador' : 'Responsable';
 	const navigation = [
-		{ to: '/dashboard', label: 'Dashboard', icon: <DashboardOutlinedIcon /> },
+		...(perfil?.rol === 'admin'
+			? [{ to: '/dashboard', label: 'Dashboard', icon: <DashboardOutlinedIcon /> }]
+			: []),
 		{ to: '/socios', label: 'Socios', icon: <GroupsOutlinedIcon /> },
+		{ to: '/pagos', label: 'Cobranza', icon: <PaymentsOutlinedIcon /> },
+		{ to: '/gastos', label: 'Gastos e ingresos', icon: <AccountBalanceWalletOutlinedIcon /> },
 		...(perfil?.rol === 'admin'
 			? [
 					{ to: '/deportes', label: 'Deportes', icon: <SportsSoccerOutlinedIcon /> },

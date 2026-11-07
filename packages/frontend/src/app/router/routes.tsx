@@ -2,7 +2,9 @@ import { createBrowserRouter, Navigate } from 'react-router-dom';
 import {
 	DashboardPage,
 	DeportesPage,
+	GastosPage,
 	LoginPage,
+	PagosPage,
 	RecoverPasswordPage,
 	SetPasswordPage,
 	SettingsPage,
@@ -30,13 +32,15 @@ export const routerConfig = createBrowserRouter([
 				element: <MainLayout />,
 				children: [
 					{ path: '/', element: <Navigate to="/dashboard" replace /> },
-					{ path: '/dashboard', element: <DashboardPage /> },
 					{ path: '/socios', element: <SociosPage /> },
+					{ path: '/pagos', element: <PagosPage /> },
+					{ path: '/gastos', element: <GastosPage /> },
 					{ path: '/socios/:socioId', element: <SocioPage /> },
 					{ path: '/cambiar-contrasena', element: <SetPasswordPage change /> },
 					{
 						element: <RequireRole roles={['admin']} />,
 						children: [
+							{ path: '/dashboard', element: <DashboardPage /> },
 							{ path: '/settings', element: <SettingsPage /> },
 							{ path: '/deportes', element: <DeportesPage /> },
 							{ path: '/usuarios', element: <UsuariosPage /> },

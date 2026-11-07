@@ -149,6 +149,9 @@ function SocioView({ socioId }: { socioId: string }) {
 					>
 						Editar datos
 					</Button>
+					<Button component={Link} to={`/pagos?socioId=${socio.id}`} variant="outlined">
+						Ver cuotas y cobros
+					</Button>
 					<Button
 						color={socio.estado === 'activo' ? 'error' : 'primary'}
 						onClick={() => setStatusOpen(true)}
