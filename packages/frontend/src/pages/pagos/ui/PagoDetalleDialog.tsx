@@ -9,21 +9,38 @@ import {
 	Stack,
 	Typography,
 } from '@mui/material';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getPagoCobranza } from '#entities/pago';
 import { useAuth } from '#entities/session';
+import { FiscalComprobantePanel } from '#features/comprobante-fiscal';
 import {
-	estadoFiscalCobranza,
+	estadoFiscalDocumento,
 	esUuidCobranza,
 	fechaCobranza,
 	monedaCobranza,
 	periodoCobranza,
 } from '#shared/types/cobranza';
+import {
+	actualizarLecturasCobroFiscal,
+	observarEstadoFiscalDelCobro,
+} from '../model/sincronizacionFiscalPago';
 
-export function PagoDetalleDialog({ pagoId, onClose }: { pagoId: string; onClose: () => void }) {
-	const { perfil, cacheScope, profileStatus } = useAuth();
+export function PagoDetalleDialog({
+	pagoId,
+	onClose,
+	onUpdated,
+	autoEmitir = false,
+}: {
+	pagoId: string;
+	onClose: () => void;
+	onUpdated?: () => void;
+	autoEmitir?: boolean;
+}) {
+	const { perfil, cacheScope, profileStatus, isSigningOut } = useAuth();
 	const actorId = perfil?.id ?? '';
+	const queryClient = useQueryClient();
 	const query = useQuery({
 		queryKey: ['pagos', cacheScope, 'detalle', pagoId],
 		queryFn: ({ signal }) => getPagoCobranza(pagoId, actorId, signal),
@@ -31,6 +48,12 @@ export function PagoDetalleDialog({ pagoId, onClose }: { pagoId: string; onClose
 		retry: 1,
 	});
 	const pago = query.data;
+	useEffect(() => {
+		if (profileStatus !== 'ready' || isSigningOut || !pago?.comprobante_id) {
+			return;
+		}
+		return observarEstadoFiscalDelCobro(queryClient, cacheScope, pagoId, pago.comprobante_id);
+	}, [queryClient, cacheScope, pagoId, pago?.comprobante_id, profileStatus, isSigningOut]);
 	return (
 		<Dialog open fullWidth maxWidth="sm" onClose={onClose}>
 			<DialogTitle>Detalle del cobro</DialogTitle>
@@ -69,7 +92,7 @@ export function PagoDetalleDialog({ pagoId, onClose }: { pagoId: string; onClose
 									label={pago.estado_pago === 'anulado' ? 'Cobro anulado' : 'Cobro confirmado'}
 									color={pago.estado_pago === 'anulado' ? 'default' : 'success'}
 								/>
-								<Chip variant="outlined" label={estadoFiscalCobranza(pago)} />
+								<Chip variant="outlined" label={estadoFiscalDocumento(pago.estado_fiscal)} />
 							</Stack>
 							<Typography>Fecha del cobro: {fechaCobranza(pago.fecha_pago)}</Typography>
 							<Typography>
@@ -86,9 +109,21 @@ export function PagoDetalleDialog({ pagoId, onClose }: { pagoId: string; onClose
 								Deuda pendiente total del socio: {monedaCobranza(pago.deuda_pendiente)}
 							</Typography>
 							<Alert severity="info">
-								El estado fiscal del documento se consulta por separado. Un documento pendiente o
-								fallido no vuelve a cobrar una cuota pagada.
+								Las operaciones fiscales no modifican pago, cuota ni caja.
+								{pago.estado_pago === 'anulado' &&
+									' La cuota puede conservar un recobro posterior a esta anulación.'}
 							</Alert>
+							{pago.comprobante_id && (
+								<FiscalComprobantePanel
+									key={`${cacheScope}:${pago.comprobante_id}`}
+									comprobanteId={pago.comprobante_id}
+									autoEmitir={autoEmitir}
+									onUpdated={() => {
+										void actualizarLecturasCobroFiscal(queryClient, cacheScope, pagoId);
+										onUpdated?.();
+									}}
+								/>
+							)}
 							<Button component={Link} to={`/socios/${pago.socio_id}`} onClick={onClose}>
 								Ver ficha del socio
 							</Button>

@@ -137,6 +137,7 @@ function PagosPanel({
 	const saved = (result: CobroConfirmado) => {
 		setCuotaId(null);
 		setConfirmed(result);
+		setPagoId(result.pago.pago_id);
 		void list.refetch();
 	};
 	const sort = (field: CriteriosCobranza['orden']) =>
@@ -186,7 +187,7 @@ function PagosPanel({
 						: confirmed.origen === 'recuperado'
 							? 'Resultado del cobro recuperado.'
 							: 'La cuota ya tiene un cobro confirmado; no se registró otro.'}{' '}
-					{estadoFiscalCobranza(confirmed.pago)}.
+					El cobro permanece confirmado; su documentación se consulta en el detalle.
 				</Alert>
 			)}
 			{invalidSocio && (
@@ -600,7 +601,13 @@ function PagosPanel({
 				/>
 			)}{' '}
 			{pagoId && (
-				<PagoDetalleDialog key={`${scope}:${pagoId}`} pagoId={pagoId} onClose={closeDetail} />
+				<PagoDetalleDialog
+					key={`${scope}:${pagoId}`}
+					pagoId={pagoId}
+					autoEmitir={confirmed?.origen === 'registrado' && confirmed.pago.pago_id === pagoId}
+					onClose={closeDetail}
+					onUpdated={() => void list.refetch()}
+				/>
 			)}
 		</Stack>
 	);

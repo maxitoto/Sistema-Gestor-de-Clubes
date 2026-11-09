@@ -1,6 +1,7 @@
 import { Alert, Box, Button, CircularProgress, Stack, Typography } from '@mui/material';
 import { useClubConfig } from '#entities/club';
 import { useAuth } from '#entities/session';
+import { DiagnosticoFiscal } from '#features/comprobante-fiscal';
 import { UpdateClubLogo } from '#features/update-club-logo';
 import { SettingsForm } from '#features/update-config';
 import { UpdateFiscalCredentials } from '#features/update-fiscal-credentials';
@@ -51,6 +52,7 @@ export function SettingsPage() {
 				</Stack>
 				<Stack spacing={3}>
 					<UpdateFiscalCredentials />
+					<DiagnosticoFiscal key={`${cacheScope}|${query.data.cuit}|${query.data.punto_venta}`} />
 				</Stack>
 			</Box>
 		</Stack>
