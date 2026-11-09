@@ -140,3 +140,42 @@ VALUES ('c9999999-9999-9999-9999-999999999999',
         'Error de configuracion (fixture de prueba)',
         NOW() - interval '30 hours')
 ON CONFLICT DO NOTHING;
+
+--=================================================================================
+-- 10. CONFIGURACIÓN FISCAL Y RECEPTORES DE PRUEBA (HOMOLOGACIÓN)
+--=================================================================================
+INSERT INTO private.fiscal_configuracion (
+    club_id, ambiente, tipo_factura, concepto, moneda, cotizacion, perfil_importes, usar_periodo_cuota, vencimiento_pago, confirmado
+) VALUES (
+    '00000000-0000-0000-0000-000000000000',
+    'homologacion',
+    11,
+    2,
+    'PES',
+    1.000000,
+    '{"modo": "neto_sin_iva"}',
+    true,
+    'fecha_comprobante',
+    true
+) ON CONFLICT (club_id) DO UPDATE SET
+    ambiente = EXCLUDED.ambiente,
+    tipo_factura = EXCLUDED.tipo_factura,
+    concepto = EXCLUDED.concepto,
+    moneda = EXCLUDED.moneda,
+    cotizacion = EXCLUDED.cotizacion,
+    perfil_importes = EXCLUDED.perfil_importes,
+    usar_periodo_cuota = EXCLUDED.usar_periodo_cuota,
+    vencimiento_pago = EXCLUDED.vencimiento_pago,
+    confirmado = EXCLUDED.confirmado;
+
+INSERT INTO private.fiscal_receptores (socio_id, doc_tipo, doc_numero, condicion_iva_id, confirmado) VALUES
+('a1111111-1111-1111-1111-111111111111', 96, '29111222', 5, true),
+('a2222222-2222-2222-2222-222222222222', 96, '25333444', 5, true),
+('a3333333-3333-3333-3333-333333333333', 96, '18555666', 5, true),
+('a4444444-4444-4444-4444-444444444444', 96, '40111222', 5, true),
+('a5555555-5555-5555-5555-555555555555', 96, '35222111', 5, true)
+ON CONFLICT (socio_id) DO UPDATE SET
+    doc_tipo = EXCLUDED.doc_tipo,
+    doc_numero = EXCLUDED.doc_numero,
+    condicion_iva_id = EXCLUDED.condicion_iva_id,
+    confirmado = EXCLUDED.confirmado;
