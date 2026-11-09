@@ -3232,6 +3232,26 @@ BEGIN
  RETURN NEW;
 END;$$;
 CREATE TRIGGER comprobante_snapshot_fiscal_inmutable BEFORE UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.fiscal_preservar_snapshot();
+
+-- ---------------------------------------------------------------------------------
+-- Auto-aprovisionamiento de receptor fiscal para socios (Consumidor Final)
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.trg_socios_auto_receptor_fiscal()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  INSERT INTO private.fiscal_receptores (socio_id, doc_tipo, doc_numero, condicion_iva_id, confirmado, updated_at)
+  VALUES (NEW.id, 96, NEW.dni, 5, true, clock_timestamp())
+  ON CONFLICT (socio_id) DO UPDATE SET
+    doc_numero = EXCLUDED.doc_numero,
+    updated_at = clock_timestamp();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS socios_auto_receptor_fiscal ON public.socios;
+CREATE TRIGGER socios_auto_receptor_fiscal
+AFTER INSERT OR UPDATE OF dni ON public.socios
+FOR EACH ROW EXECUTE FUNCTION private.trg_socios_auto_receptor_fiscal();
 -- Schema no expuesto a PostgREST: alberga helpers internos de RLS
 CREATE SCHEMA IF NOT EXISTS private;
 GRANT USAGE ON SCHEMA private TO authenticated, service_role;
@@ -3559,7 +3579,7 @@ ALTER TABLE private.fiscal_ejecuciones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE private.wsaa_tickets ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON private.fiscal_configuracion,private.fiscal_receptores,private.fiscal_series,private.fiscal_ejecuciones,private.wsaa_tickets FROM PUBLIC,anon,authenticated;
 GRANT ALL ON private.fiscal_configuracion,private.fiscal_receptores,private.fiscal_series,private.fiscal_ejecuciones,private.wsaa_tickets TO service_role;
-REVOKE ALL ON FUNCTION private.fiscal_objeto_cerrado(jsonb,text[],text[]),private.fiscal_fecha_valida(text,boolean),private.fiscal_perfil_valido(jsonb),private.fiscal_ejecucion_json(uuid),private.fiscal_bloquear_ejecucion(uuid,bigint,boolean),private.fiscal_solicitud_valida(jsonb),private.fiscal_codigos_validos(jsonb),private.fiscal_preservar_snapshot() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION private.fiscal_objeto_cerrado(jsonb,text[],text[]),private.fiscal_fecha_valida(text,boolean),private.fiscal_perfil_valido(jsonb),private.fiscal_ejecucion_json(uuid),private.fiscal_bloquear_ejecucion(uuid,bigint,boolean),private.fiscal_solicitud_valida(jsonb),private.fiscal_codigos_validos(jsonb),private.fiscal_preservar_snapshot(),private.trg_socios_auto_receptor_fiscal() FROM PUBLIC,anon,authenticated;
 REVOKE ALL ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_contexto_fiscal(uuid),public.iniciar_ejecucion_fiscal(uuid,text,uuid),public.preparar_solicitud_fiscal(uuid,bigint,text,jsonb),public.marcar_envio_fiscal(uuid,bigint),public.confirmar_resultado_fiscal(uuid,bigint,jsonb),public.registrar_incidencia_fiscal(uuid,bigint,text),public.adquirir_ticket_wsaa(text,uuid),public.guardar_ticket_wsaa(text,uuid,integer,text,timestamptz),public.registrar_pdf_comprobante(uuid,text,text,jsonb) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_contexto_fiscal(uuid),public.iniciar_ejecucion_fiscal(uuid,text,uuid),public.preparar_solicitud_fiscal(uuid,bigint,text,jsonb),public.marcar_envio_fiscal(uuid,bigint),public.confirmar_resultado_fiscal(uuid,bigint,jsonb),public.registrar_incidencia_fiscal(uuid,bigint,text),public.adquirir_ticket_wsaa(text,uuid),public.guardar_ticket_wsaa(text,uuid,integer,text,timestamptz),public.registrar_pdf_comprobante(uuid,text,text,jsonb) TO service_role;
 

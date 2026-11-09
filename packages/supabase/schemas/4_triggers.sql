@@ -641,3 +641,23 @@ BEGIN
  RETURN NEW;
 END;$$;
 CREATE TRIGGER comprobante_snapshot_fiscal_inmutable BEFORE UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.fiscal_preservar_snapshot();
+
+-- ---------------------------------------------------------------------------------
+-- Auto-aprovisionamiento de receptor fiscal para socios (Consumidor Final)
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.trg_socios_auto_receptor_fiscal()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+  INSERT INTO private.fiscal_receptores (socio_id, doc_tipo, doc_numero, condicion_iva_id, confirmado, updated_at)
+  VALUES (NEW.id, 96, NEW.dni, 5, true, clock_timestamp())
+  ON CONFLICT (socio_id) DO UPDATE SET
+    doc_numero = EXCLUDED.doc_numero,
+    updated_at = clock_timestamp();
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS socios_auto_receptor_fiscal ON public.socios;
+CREATE TRIGGER socios_auto_receptor_fiscal
+AFTER INSERT OR UPDATE OF dni ON public.socios
+FOR EACH ROW EXECUTE FUNCTION private.trg_socios_auto_receptor_fiscal();
