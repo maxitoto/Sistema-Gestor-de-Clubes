@@ -22,7 +22,9 @@
     "lint:functionsfix": "bun run format:functions",
     "lint:fix": "bun run format:functions && bun run lint",
     "lint": "bun run lint:functions && bun run lint:arch",
-    "test": "bun test"
+    "fiscal:perfil": "bun run scripts/configurar-perfil-fiscal-local.ts",
+    "test": "bun test",
+    "test:deno": "bunx --bun deno test --allow-all --config functions/deno.json tests/*.deno.ts"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

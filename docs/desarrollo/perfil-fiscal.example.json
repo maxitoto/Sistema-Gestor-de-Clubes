@@ -1,0 +1,24 @@
+{
+  "configuracion": {
+    "ambiente": "homologacion",
+    "tipo_factura": 0,
+    "concepto": 0,
+    "moneda": "PES",
+    "cotizacion": "1.000000",
+    "perfil_importes": {
+      "modo": "PENDIENTE_DECISION"
+    },
+    "usar_periodo_cuota": false,
+    "vencimiento_pago": "fecha_comprobante",
+    "confirmado": false
+  },
+  "receptores": [
+    {
+      "socio_id": "REEMPLAZAR_POR_SOCIO_DE_PRUEBA",
+      "doc_tipo": 0,
+      "doc_numero": "",
+      "condicion_iva_id": 0,
+      "confirmado": false
+    }
+  ]
+}

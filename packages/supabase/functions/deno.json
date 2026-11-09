@@ -6,6 +6,9 @@
     "nodemailer": "https://esm.sh/nodemailer@10.0.10",
     "pdf-lib": "npm:pdf-lib@1.17.1",
     "jpeg-js": "npm:jpeg-js@0.4.4",
-    "pngjs": "npm:pngjs@7.0.0"
+    "pngjs": "npm:pngjs@7.0.0",
+    "node-forge": "npm:node-forge@1.4.0",
+    "fast-xml-parser": "npm:fast-xml-parser@5.11.2",
+    "qrcode-generator": "npm:qrcode-generator@1.4.4"
   }
 }
