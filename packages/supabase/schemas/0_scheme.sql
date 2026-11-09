@@ -387,3 +387,81 @@ ALTER TABLE public.gastos ADD CONSTRAINT chk_gastos_concepto_no_vacio
 
 ALTER TABLE public.categorias_gasto ADD CONSTRAINT chk_categoria_gasto_nombre_no_vacio
  CHECK(NULLIF(btrim(nombre),'') IS NOT NULL) NOT VALID;
+
+-- ---------------------------------------------------------------------------------
+-- Coordinación fiscal durable, series, receptores y caché cifrada de tickets WSAA
+-- ---------------------------------------------------------------------------------
+CREATE TABLE private.fiscal_configuracion(
+ club_id uuid PRIMARY KEY REFERENCES public.club(id) ON DELETE RESTRICT,
+ ambiente text NOT NULL CHECK(ambiente='homologacion'),
+ tipo_factura integer NOT NULL CHECK(tipo_factura BETWEEN 1 AND 999),
+ concepto integer NOT NULL CHECK(concepto BETWEEN 1 AND 3),
+ moneda text NOT NULL CHECK(moneda='PES'),
+ cotizacion numeric(18,6) NOT NULL CHECK(cotizacion=1.000000),
+ perfil_importes jsonb NOT NULL,
+ usar_periodo_cuota boolean NOT NULL,
+ vencimiento_pago text NOT NULL CHECK(vencimiento_pago IN('fecha_comprobante','fin_periodo')),
+ confirmado boolean NOT NULL DEFAULT false,
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK((concepto=1 AND NOT usar_periodo_cuota) OR (concepto IN(2,3) AND usar_periodo_cuota))
+);
+
+CREATE TABLE private.fiscal_receptores(
+ socio_id uuid PRIMARY KEY REFERENCES public.socios(id) ON DELETE RESTRICT,
+ doc_tipo integer NOT NULL CHECK(doc_tipo BETWEEN 1 AND 999),
+ doc_numero text NOT NULL CHECK(doc_numero~'^(0|[1-9]\d{0,19})$'),
+ condicion_iva_id integer NOT NULL CHECK(condicion_iva_id BETWEEN 1 AND 99),
+ confirmado boolean NOT NULL DEFAULT false,
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE private.fiscal_series(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ cuit text NOT NULL CHECK(cuit~'^\d{11}$'),
+ ambiente text NOT NULL CHECK(ambiente='homologacion'),
+ punto_venta integer NOT NULL CHECK(punto_venta BETWEEN 1 AND 99999),
+ tipo_comprobante integer NOT NULL CHECK(tipo_comprobante BETWEEN 1 AND 999),
+ version bigint NOT NULL DEFAULT 0 CHECK(version>=0),
+ ejecucion_activa uuid,
+ ultimo_autorizado numeric(12,0),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(cuit,ambiente,punto_venta,tipo_comprobante)
+);
+
+CREATE TABLE private.fiscal_ejecuciones(
+ id uuid PRIMARY KEY,
+ comprobante_id uuid NOT NULL REFERENCES public.comprobantes(id) ON DELETE RESTRICT,
+ serie_id uuid NOT NULL REFERENCES private.fiscal_series(id) ON DELETE RESTRICT,
+ version bigint NOT NULL CHECK(version>0),
+ clase text NOT NULL CHECK(clase IN('inicial','conciliacion')),
+ estado text NOT NULL CHECK(estado IN('adquirida','preparada','posible_envio','desconocido','autorizado','rechazado','transitorio','incidencia')),
+ numero text CHECK(numero~'^[1-9]\d{0,11}$'),
+ solicitud jsonb,
+ posible_envio boolean NOT NULL DEFAULT false,
+ resultado jsonb,
+ iniciado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ cerrado_en timestamptz,
+ actualizado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ recuperaciones integer NOT NULL DEFAULT 0 CHECK(recuperaciones>=0),
+ CHECK((numero IS NULL)=(solicitud IS NULL)),
+ CHECK(NOT posible_envio OR solicitud IS NOT NULL)
+);
+
+ALTER TABLE private.fiscal_series ADD CONSTRAINT fiscal_serie_ejecucion_fk FOREIGN KEY(ejecucion_activa)
+ REFERENCES private.fiscal_ejecuciones(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+-- El índice original sólo distinguía el enum local factura/NC, no la serie fiscal.
+ALTER TABLE public.comprobantes ADD COLUMN emisor_cuit text,
+ ADD COLUMN ambiente_fiscal text,ADD COLUMN tipo_fiscal integer;
+ALTER TABLE public.comprobantes ADD CONSTRAINT comprobante_identidad_fiscal_completa CHECK(
+ (emisor_cuit IS NULL AND ambiente_fiscal IS NULL AND tipo_fiscal IS NULL) OR
+ (emisor_cuit IS NOT NULL AND ambiente_fiscal IS NOT NULL AND tipo_fiscal IS NOT NULL AND emisor_cuit~'^\d{11}$' AND ambiente_fiscal='homologacion' AND tipo_fiscal BETWEEN 1 AND 999));
+ALTER TABLE public.comprobantes DROP CONSTRAINT unique_comprobante_pv_tipo_num;
+
+-- Cache compartida: únicamente sobres cifrados, nunca token/sign en texto plano.
+CREATE TABLE private.wsaa_tickets(
+ clave text PRIMARY KEY CHECK(clave~'^[0-9a-f]{64}$'),
+ sobre text,vence_en timestamptz,
+ propietario uuid,version integer NOT NULL DEFAULT 0 CHECK(version>=0),lease_hasta timestamptz,
+ CHECK((sobre IS NULL)=(vence_en IS NULL)),CHECK((propietario IS NULL)=(lease_hasta IS NULL))
+);

@@ -627,3 +627,17 @@ $$;
 DROP TRIGGER IF EXISTS gastos_categoria_activa_lock ON public.gastos;
 CREATE TRIGGER gastos_categoria_activa_lock BEFORE INSERT OR UPDATE OF categoria_id ON public.gastos
 FOR EACH ROW EXECUTE FUNCTION private.gastos_bloquear_categoria_activa();
+
+-- ---------------------------------------------------------------------------------
+-- Inmutabilidad del snapshot fiscal preparado y de la identidad de serie
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.fiscal_preservar_snapshot()
+RETURNS trigger LANGUAGE plpgsql SET search_path='' AS $$
+DECLARE ex private.fiscal_ejecuciones%ROWTYPE;
+BEGIN
+ IF OLD.emisor_cuit IS NOT NULL AND (NEW.emisor_cuit,NEW.ambiente_fiscal,NEW.tipo_fiscal) IS DISTINCT FROM (OLD.emisor_cuit,OLD.ambiente_fiscal,OLD.tipo_fiscal) THEN RAISE EXCEPTION 'La identidad fiscal es inmutable';END IF;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=OLD.id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ IF FOUND AND ex.posible_envio AND (NEW.numero_solicitado IS DISTINCT FROM ex.numero OR NEW.solicitud_fiscal IS DISTINCT FROM ex.solicitud) THEN RAISE EXCEPTION 'La solicitud posiblemente enviada es inmutable';END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER comprobante_snapshot_fiscal_inmutable BEFORE UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.fiscal_preservar_snapshot();

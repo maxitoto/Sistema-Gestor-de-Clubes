@@ -57,3 +57,11 @@ CREATE INDEX email_destinatarios_reserva_idx ON public.email_destinatarios(reser
 -- indices para control de tasa de intentos de acceso y recuperacion
 CREATE INDEX IF NOT EXISTS acceso_intentos_busqueda ON private.acceso_intentos(tipo,ip_hash,creado_en);
 CREATE INDEX IF NOT EXISTS acceso_intentos_email ON private.acceso_intentos(tipo,email_hash,creado_en);
+
+-- índices de exclusión de ejecución fiscal e identidad de numeración por serie
+CREATE UNIQUE INDEX fiscal_ejecucion_activa_comprobante ON private.fiscal_ejecuciones(comprobante_id)
+ WHERE estado IN('adquirida','preparada','posible_envio','desconocido','incidencia');
+CREATE UNIQUE INDEX comprobante_numero_identidad_fiscal ON public.comprobantes(emisor_cuit,ambiente_fiscal,punto_venta,tipo_fiscal,numero_comprobante)
+ WHERE tipo_fiscal IS NOT NULL AND numero_comprobante IS NOT NULL;
+CREATE UNIQUE INDEX comprobante_numero_identidad_legada ON public.comprobantes(punto_venta,tipo,numero_comprobante)
+ WHERE tipo_fiscal IS NULL AND numero_comprobante IS NOT NULL;
