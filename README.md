@@ -1,6 +1,6 @@
 # Sistema de Gestión de Clubes
 
-Monorepo con frontend React/MUI servido y compilado con Bun, y backend Supabase local. La base contiene reglas de negocio, funciones RPC y políticas de acceso. Las Edge Functions cubren comunicaciones y monitoreo; ARCA conserva un punto de entrada pendiente de integración. La existencia de tablas y RPC no significa que todos los módulos tengan ya una pantalla y un circuito completo.
+Monorepo con frontend React/MUI servido y compilado con Bun, y backend Supabase local. La base contiene reglas de negocio, funciones RPC, triggers y políticas de acceso. Las Edge Functions cubren autenticación y credenciales, administración de usuarios, custodia de configuración e imágenes/archivos privados, facturación electrónica ante ARCA (WSAA/WSFEv1 en homologación y generación de PDF A4 con QR), comunicaciones y monitoreo.
 
 ## Preparación
 
@@ -14,7 +14,7 @@ Preparar también el runtime de Deno que usa el lint del backend. `deno-bin` est
 
 Completar los entornos locales, conservando cualquier configuración existente:
 
-- Backend: crear `packages/supabase/functions/.env` tomando como base `.env.example` de esa misma carpeta. Completar dos secretos aleatorios distintos para el correo. Ver [configuración del backend](packages/supabase/README.md).
+- Backend: crear `packages/supabase/functions/.env` tomando como base `.env.example` de esa misma carpeta. Completar dos secretos aleatorios distintos para el correo (`MAIL_UNSUBSCRIBE_SECRET` y `MAIL_WORKER_SECRET`), la clave maestra en Base64 de 32 bytes para la custodia criptográfica fiscal (`FISCAL_MASTER_KEY`) y las variables de homologación ARCA (`ARCA_ENVIRONMENT=homologacion` y `ARCA_EXTERNAL_ENABLED`). Ver [configuración del backend](packages/supabase/README.md).
 - Frontend: configurar `packages/frontend/.env` con `PUBLIC_SUPABASE_URL` y `PUBLIC_SUPABASE_ANON_KEY` del proyecto local. Usar la clave pública; los secretos del backend no corresponden a este archivo. Ver [configuración del frontend](packages/frontend/README.md).
 
 ## Preparar la base local
@@ -74,35 +74,39 @@ El botón de correo registra destinatarios en la cola; la terminal del procesado
 
 El código está en `packages/frontend/src`. La separación de capas sigue estas responsabilidades:
 
-| Capa       | Responsabilidad                                         | Elementos presentes                                                    |
-| ---------- | ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `app`      | Inicialización, proveedores globales y rutas protegidas | `App`, proveedores de sesión/tema/router, `RequireAuth`, `RequireRole` |
-| `pages`    | Composición de pantallas                                | Login, dashboard, configuración y socios                               |
-| `widgets`  | Bloques que coordinan componentes y acciones            | `dashboard-panel`, `layout`                                            |
-| `features` | Interacciones del usuario                               | `login-by-email`, `update-config`, `send-email`                        |
-| `entities` | Datos y estado del dominio                              | `club`, `session`, `socio`                                             |
-| `shared`   | Infraestructura común                                   | Cliente Supabase, temas, utilidades y tipos generados                  |
+| Capa       | Responsabilidad                                         | Elementos presentes                                                                                                                                   |
+| ---------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`      | Inicialización, proveedores globales y rutas protegidas | `App`, proveedores de sesión/tema/router, `RequireAuth`, `RequireRole`                                                                                |
+| `pages`    | Composición de pantallas                                | Login, recuperación/establecimiento de clave, dashboard, socios, ficha de socio, deportes, cobranza (`/pagos`), gastos (`/gastos`), usuarios y configuración |
+| `widgets`  | Bloques que coordinan componentes y acciones            | `dashboard-panel`, `layout`, `socios-panel`, `deportes-panel`, `gastos-panel`, `caja-panel`                                                            |
+| `features` | Interacciones del usuario                               | Autenticación, padrón e inscripciones, catálogo deportivo, cobranza, emisión y diagnóstico de comprobante fiscal ARCA, gastos con evidencia, usuarios, configuración y correo |
+| `entities` | Datos y estado del dominio                              | `club`, `session`, `usuario`, `socio`, `deporte`, `categoria`, `inscripcion`, `job-cuotas`, `cuota`, `pago`, `comprobante`, `categoria-gasto`, `gasto`, `movimiento-caja` |
+| `shared`   | Infraestructura común                                   | Clientes Supabase y HTTP verificados, mutaciones idempotentes, temas, utilidades y tipos generados                                                    |
 
 Las dependencias bajan de `app` hacia `shared`: una capa puede importar las inferiores, pero no las superiores. `shared` no importa `entities`, `features`, `widgets`, `pages` ni `app`. Los límites que comprueba el repositorio se validan con `bun run lint:arch`; no se crean carpetas de módulos sin una implementación que las necesite.
 
 ## Organización del backend
 
-| Directorio                                 | Responsabilidad actual                                                                  |
-| ------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `packages/supabase/schemas`                | Fuente declarativa de tablas, índices, funciones SQL, vistas, triggers y permisos       |
-| `packages/supabase/migrations`             | Historial SQL aplicado a la base; se conserva para reproducir su evolución              |
-| `packages/supabase/seeds`                  | Datos de prueba definidos por el proyecto                                               |
-| `functions/comunicaciones`                 | Entrada HTTP de avisos, plantillas, historial, cola, eventos y baja de comunicaciones   |
-| `functions/monitoreo`                      | Entrada HTTP de monitoreo con validación de acceso                                      |
-| `functions/arca`                           | Entrada pendiente de integración fiscal; no representa una emisión fiscal terminada     |
-| `functions/_shared/core`                   | Autenticación, clientes Supabase, errores, transporte de correo y firmas                |
-| `functions/_shared/modules/comunicaciones` | Dominio, caso de uso de aviso y repositorio de comunicaciones                           |
-| `scripts`                                  | Herramientas locales de arranque y procesamiento de cola de correo                      |
+| Directorio                                  | Responsabilidad actual                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `packages/supabase/schemas`                 | Fuente declarativa de tablas, índices, funciones SQL, vistas, triggers, permisos, Storage y tareas cron      |
+| `packages/supabase/migrations`              | Historial SQL aplicado a la base; se conserva para reproducir su evolución                                   |
+| `packages/supabase/seeds`                   | Datos de prueba definidos por el proyecto (incluyendo configuración fiscal y receptores por defecto)         |
+| `functions/acceso` y `credenciales`         | Inicio de sesión con límite de intentos, recuperación y establecimiento/cambio de contraseña                 |
+| `functions/usuarios`                        | Administración recuperable de cuentas internas (`admin` y `responsable`)                                     |
+| `functions/configuracion`                   | Custodia criptográfica (`AES-256-GCM`) y validación de certificados X.509 y claves privadas RSA de ARCA      |
+| `functions/archivos`                        | Validación binaria real (PNG/JPEG/PDF), carga autorizada y entrega de URLs firmadas sobre `club-archivos`    |
+| `functions/arca`                            | Emisión electrónica de 4 fases, conciliación, diagnóstico WSAA/WSFEv1, consulta de serie y PDF A4 con QR     |
+| `functions/comunicaciones`                  | Entrada HTTP de avisos, plantillas, historial, cola, eventos y baja de comunicaciones                        |
+| `functions/monitoreo`                       | Entrada HTTP de monitoreo con validación de acceso                                                           |
+| `functions/_shared/core`                    | Autenticación, clientes Supabase, errores, transporte de correo y firmas                                     |
+| `functions/_shared/modules/*`               | Módulos hexagonales (`usuarios`, `credenciales`, `configuracion`, `archivos`, `fiscal`, `comunicaciones`)    |
+| `scripts`                                   | Herramientas locales de arranque, procesamiento de cola de correo y configuración de perfil fiscal           |
 
-En comunicaciones, `domain` concentra validaciones/formato sin acceso a red; `application` coordina el caso de uso y `infrastructure` implementa acceso a datos. Algunas rutas HTTP coordinan directamente RPC y adaptadores compartidos, por lo que esta estructura no debe presentarse como una separación completa de todos los módulos del sistema.
+En los módulos bajo `_shared/modules`, `domain` concentra validaciones y reglas puras sin acceso a red; `application` coordina los casos de uso sobre puertos explícitos e `infrastructure` implementa los adaptadores de base de datos, Storage, criptografía y servicios SOAP externos.
 
 ## Verificación de cambios
 
-Desde el frontend, ejecutar `bun run build` y `bun run lint`. Desde el backend, ejecutar `bun run lint` y `bun run typecheck:functions`: el primero comprueba Deno lint y arquitectura sin formatear; el segundo comprueba tipos de los tres entrypoints y sus dependencias. También pueden ejecutarse por separado `bun run lint:functions` y `bun run lint:arch`. El control de arquitectura resuelve los alias locales de Deno y considera imports de tipos. Para aplicar formato explícitamente, usar `bun run format:functions` o `bun run lint:fix`.
+Desde el frontend, ejecutar `bun run build`, `bun run lint` y `bun test`. Desde el backend, ejecutar `bun run lint`, `bun run typecheck:functions`, `bun test` y `bun run test:deno`: el primero comprueba Deno lint y arquitectura sin formatear; el segundo comprueba tipos de los ocho entrypoints y sus dependencias; los dos últimos ejecutan las suites unitarias y de adaptadores en Bun y Deno. También pueden ejecutarse por separado `bun run lint:functions` y `bun run lint:arch`. El control de arquitectura resuelve los alias locales de Deno y considera imports de tipos. Para aplicar formato explícitamente, usar `bun run format:functions` o `bun run lint:fix`.
 
-Además de los controles estáticos, probar inicio y cierre de sesión, edición de configuración autorizada, búsqueda/selección de socios y recorrido de un aviso hasta Mailpit. Una compilación correcta no demuestra por sí sola que los permisos de la base o el envío de correo estén bien conectados.
+Además de los controles estáticos y pruebas automatizadas, probar inicio y cierre de sesión, edición de configuración autorizada, alta de socio (que aprovisiona automáticamente su receptor fiscal como Consumidor Final), cobro de cuota con emisión de comprobante electrónico en homologación y recorrido de un aviso hasta Mailpit.
