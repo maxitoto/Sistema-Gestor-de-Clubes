@@ -11,6 +11,7 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
 	type DocumentoComprobante,
 	emitirComprobante,
@@ -172,6 +173,9 @@ export function FiscalComprobantePanel({
 										: 'Solicitar autorización'}
 							</Button>
 						)}
+						<Button component={Link} to="/monitoreo-fiscal">
+							Monitoreo fiscal
+						</Button>
 						{mostrarRelaciones && data.notaCreditoId && (
 							<Button variant="outlined" onClick={() => setRelatedId(data.notaCreditoId ?? null)}>
 								Ver Nota de Crédito
