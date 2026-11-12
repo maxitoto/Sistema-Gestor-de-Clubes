@@ -2,6 +2,7 @@
   "configuracion": {
     "ambiente": "homologacion",
     "tipo_factura": 0,
+    "tipo_nota_credito": null,
     "concepto": 0,
     "moneda": "PES",
     "cotizacion": "1.000000",

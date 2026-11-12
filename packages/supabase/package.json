@@ -17,7 +17,7 @@
     "newEdge": "bunx supabase functions new --workdir ..",
     "lint:arch": "bunx --bun depcruise functions",
     "lint:functions": "bunx --bun deno lint functions/",
-    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts functions/archivos/index.ts functions/acceso/index.ts functions/usuarios/index.ts functions/configuracion/index.ts functions/credenciales/index.ts",
+    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts functions/archivos/index.ts functions/acceso/index.ts functions/usuarios/index.ts functions/configuracion/index.ts functions/credenciales/index.ts functions/fiscal-worker/index.ts",
     "format:functions": "bunx --bun deno fmt functions/",
     "lint:functionsfix": "bun run format:functions",
     "lint:fix": "bun run format:functions && bun run lint",

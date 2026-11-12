@@ -40,3 +40,8 @@ export type {
   ConsultaSerieFiscalPublica,
 } from "./application/ConsultarSerieFiscalUseCase.ts";
 export type { PuertoArca } from "./application/PuertoArca.ts";
+export { RegularizarComprobanteUseCase } from "./application/RegularizarComprobanteUseCase.ts";
+export { ProcesarPendientesFiscalesUseCase } from "./application/ProcesarPendientesFiscalesUseCase.ts";
+export { ReabrirRegularizacionVerificadaUseCase } from "./application/ReabrirRegularizacionVerificadaUseCase.ts";
+export { ResolverAnulacionUseCase } from "./application/ResolverAnulacionUseCase.ts";
+export { RepositorioRegularizacionFiscalSupabase } from "./infrastructure/RepositorioRegularizacionFiscalSupabase.ts";

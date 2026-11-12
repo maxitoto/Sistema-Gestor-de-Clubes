@@ -164,9 +164,9 @@ async function main() {
 		process.env.SUPABASE_DB_CONTAINER || "supabase_db_sistema-club-los-andes";
 	const sql = `BEGIN;
  SET LOCAL lock_timeout='10s';
- INSERT INTO private.fiscal_configuracion(club_id,ambiente,tipo_factura,concepto,moneda,cotizacion,perfil_importes,usar_periodo_cuota,vencimiento_pago,confirmado)
- SELECT '00000000-0000-0000-0000-000000000000'::uuid,j->>'ambiente',(j->>'tipo_factura')::integer,(j->>'concepto')::integer,j->>'moneda',(j->>'cotizacion')::numeric,j->'perfil_importes',(j->>'usar_periodo_cuota')::boolean,j->>'vencimiento_pago',(j->>'confirmado')::boolean FROM (SELECT (:'perfil')::jsonb->'configuracion' j)t
- ON CONFLICT(club_id) DO UPDATE SET ambiente=excluded.ambiente,tipo_factura=excluded.tipo_factura,concepto=excluded.concepto,moneda=excluded.moneda,cotizacion=excluded.cotizacion,perfil_importes=excluded.perfil_importes,usar_periodo_cuota=excluded.usar_periodo_cuota,vencimiento_pago=excluded.vencimiento_pago,confirmado=excluded.confirmado,updated_at=clock_timestamp();
+ INSERT INTO private.fiscal_configuracion(club_id,ambiente,tipo_factura,tipo_nota_credito,concepto,moneda,cotizacion,perfil_importes,usar_periodo_cuota,vencimiento_pago,confirmado)
+ SELECT '00000000-0000-0000-0000-000000000000'::uuid,j->>'ambiente',(j->>'tipo_factura')::integer,(j->>'tipo_nota_credito')::integer,(j->>'concepto')::integer,j->>'moneda',(j->>'cotizacion')::numeric,j->'perfil_importes',(j->>'usar_periodo_cuota')::boolean,j->>'vencimiento_pago',(j->>'confirmado')::boolean FROM (SELECT (:'perfil')::jsonb->'configuracion' j)t
+ ON CONFLICT(club_id) DO UPDATE SET ambiente=excluded.ambiente,tipo_factura=excluded.tipo_factura,tipo_nota_credito=excluded.tipo_nota_credito,concepto=excluded.concepto,moneda=excluded.moneda,cotizacion=excluded.cotizacion,perfil_importes=excluded.perfil_importes,usar_periodo_cuota=excluded.usar_periodo_cuota,vencimiento_pago=excluded.vencimiento_pago,confirmado=excluded.confirmado,updated_at=clock_timestamp();
  INSERT INTO private.fiscal_receptores(socio_id,doc_tipo,doc_numero,condicion_iva_id,confirmado)
  SELECT (j->>'socio_id')::uuid,(j->>'doc_tipo')::integer,j->>'doc_numero',(j->>'condicion_iva_id')::integer,(j->>'confirmado')::boolean FROM jsonb_array_elements((:'perfil')::jsonb->'receptores')j
  ON CONFLICT(socio_id) DO UPDATE SET doc_tipo=excluded.doc_tipo,doc_numero=excluded.doc_numero,condicion_iva_id=excluded.condicion_iva_id,confirmado=excluded.confirmado,updated_at=clock_timestamp();
