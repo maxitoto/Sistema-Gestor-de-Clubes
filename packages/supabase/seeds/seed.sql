@@ -145,11 +145,12 @@ ON CONFLICT DO NOTHING;
 -- 10. CONFIGURACIÓN FISCAL Y RECEPTORES DE PRUEBA (HOMOLOGACIÓN)
 --=================================================================================
 INSERT INTO private.fiscal_configuracion (
-    club_id, ambiente, tipo_factura, concepto, moneda, cotizacion, perfil_importes, usar_periodo_cuota, vencimiento_pago, confirmado
+    club_id, ambiente, tipo_factura, tipo_nota_credito, concepto, moneda, cotizacion, perfil_importes, usar_periodo_cuota, vencimiento_pago, confirmado
 ) VALUES (
     '00000000-0000-0000-0000-000000000000',
     'homologacion',
     11,
+    13,
     2,
     'PES',
     1.000000,
@@ -160,6 +161,7 @@ INSERT INTO private.fiscal_configuracion (
 ) ON CONFLICT (club_id) DO UPDATE SET
     ambiente = EXCLUDED.ambiente,
     tipo_factura = EXCLUDED.tipo_factura,
+    tipo_nota_credito = EXCLUDED.tipo_nota_credito,
     concepto = EXCLUDED.concepto,
     moneda = EXCLUDED.moneda,
     cotizacion = EXCLUDED.cotizacion,

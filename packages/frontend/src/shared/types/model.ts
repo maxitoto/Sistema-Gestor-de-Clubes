@@ -1390,6 +1390,18 @@ export type Database = {
 			consultar_caja: { Args: { p_criterios?: Json }; Returns: Json };
 			consultar_cobranza: { Args: { p_criterios?: Json; p_vista: string }; Returns: Json };
 			consultar_ejecucion_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			consultar_monitoreo_fiscal: {
+				Args: {
+					p_busqueda?: string;
+					p_desde?: string;
+					p_estado?: string;
+					p_hasta?: string;
+					p_page?: number;
+					p_page_size?: number;
+					p_tipo?: string;
+				};
+				Returns: Json;
+			};
 			crear_comunicacion: { Args: { p_solicitud: Json }; Returns: string };
 			cuit_valido: { Args: { p_cuit: string }; Returns: boolean };
 			cuota_proporcional: {
@@ -1413,6 +1425,7 @@ export type Database = {
 			};
 			desuscribir_correo: { Args: { p_destinatario: string }; Returns: undefined };
 			es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean };
+			expirar_comprobante_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
 			fecha_actual_club: { Args: Record<PropertyKey, never>; Returns: string };
 			finalizar_correo: {
 				Args: {
@@ -1440,7 +1453,17 @@ export type Database = {
 				Args: { p_comprobante_id: string; p_ejecucion_id: string; p_modo: string };
 				Returns: Json;
 			};
+			iniciar_ejecucion_fiscal_administrativa: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_modo: string;
+				};
+				Returns: Json;
+			};
 			leer_contexto_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			listar_candidatos_fiscales: { Args: { p_limite?: number }; Returns: Json };
 			marcar_envio_fiscal: { Args: { p_ejecucion_id: string; p_version: number }; Returns: Json };
 			preparar_solicitud_fiscal: {
 				Args: { p_ejecucion_id: string; p_numero: string; p_solicitud: Json; p_version: number };
@@ -1458,7 +1481,35 @@ export type Database = {
 				}[];
 			};
 			reabrir_regularizacion_fiscal: { Args: { p_comprobante_id: string }; Returns: undefined };
+			reabrir_sin_envio_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
+			};
+			reabrir_verificado_fiscal: {
+				Args: {
+					p_actor_id?: string;
+					p_comprobante_id: string;
+					p_ejecucion_id?: string;
+					p_version?: number;
+				};
+				Returns: Json;
+			};
 			reactivar_socio: { Args: { p_socio_id: string }; Returns: undefined };
+			registrar_autorizacion_verificada_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_resultado: Json;
+					p_version: number;
+				};
+				Returns: Json;
+			};
 			registrar_evento_correo: {
 				Args: {
 					p_bounce_tipo?: string;
@@ -1512,6 +1563,28 @@ export type Database = {
 					isOneToOne: false;
 					isSetofReturn: true;
 				};
+			};
+			resolver_anulacion_fiscal: {
+				Args: { p_actor_id?: string; p_ejecucion_id: string; p_resultado: Json; p_version: number };
+				Returns: Json;
+			};
+			resolver_anulacion_sin_envio_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
+			};
+			resolver_rechazo_anulado_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
 			};
 			tramo_proporcional: {
 				Args: { p_anio: number; p_fecha: string; p_mes: number };

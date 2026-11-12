@@ -255,78 +255,16 @@ $$;
 
 --=================================================================================
 -- REAPERTURA DE REGULARIZACIÓN FISCAL (CU-05.7)
+-- El nombre legacy no puede saltarse la comprobación durable nueva.
 --=================================================================================
-CREATE OR REPLACE FUNCTION reabrir_regularizacion_fiscal(p_comprobante_id uuid)
-RETURNS void
-LANGUAGE plpgsql SET search_path = public
-AS $$
-DECLARE
-v_ref    comprobantes%ROWTYPE;
-v_comp   comprobantes%ROWTYPE;
-v_pago   pagos%ROWTYPE;
-v_origen comprobantes%ROWTYPE;
+CREATE OR REPLACE FUNCTION public.reabrir_regularizacion_fiscal(p_comprobante_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ex private.fiscal_ejecuciones%ROWTYPE; result jsonb;
 BEGIN
--- Lectura orientativa, sin bloqueo; no autoriza ni confirma cambios.
-SELECT * INTO v_ref FROM comprobantes WHERE id = p_comprobante_id;
-IF NOT FOUND THEN
-  RAISE EXCEPTION 'El comprobante no existe';
-END IF;
-
--- Orden comun de bloqueos: pago -> factura original -> NC, cuando corresponda.
-SELECT * INTO v_pago FROM pagos WHERE id = v_ref.pago_id FOR UPDATE;
-IF NOT FOUND THEN
-  RAISE EXCEPTION 'El pago no existe';
-END IF;
-
-SELECT * INTO v_origen FROM comprobantes
-WHERE id = CASE
-             WHEN v_ref.tipo = 'factura' THEN v_ref.id
-             ELSE v_ref.comprobante_origen_id
-           END
-  AND pago_id = v_pago.id
-  AND tipo = 'factura'
-FOR UPDATE;
-IF NOT FOUND THEN
-  RAISE EXCEPTION 'La factura original no corresponde al pago';
-END IF;
-
-IF v_ref.tipo = 'factura' THEN
-  v_comp := v_origen;
-ELSE
-  SELECT * INTO v_comp FROM comprobantes
-  WHERE id = p_comprobante_id
-    AND tipo = 'nota_credito'
-    AND pago_id = v_pago.id
-    AND comprobante_origen_id = v_origen.id
-  FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'La nota de credito cambio o no corresponde al origen';
-  END IF;
-END IF;
-
-IF v_comp.estado_fiscal <> 'fallido' THEN
-  RAISE EXCEPTION 'El comprobante no esta en estado fallido';
-END IF;
-
-IF v_comp.tipo = 'factura' THEN
-  IF v_pago.estado <> 'completado' THEN
-    RAISE EXCEPTION 'No se reabre una factura de pago anulado';
-  END IF;
-ELSE
-  IF v_pago.estado <> 'anulado'
-     OR v_origen.estado_fiscal <> 'anulacion_pendiente'
-     OR v_origen.cae IS NULL THEN
-    RAISE EXCEPTION 'La nota de credito no tiene una anulacion fiscal elegible';
-  END IF;
-END IF;
-
-UPDATE comprobantes
-   SET estado_fiscal = 'pendiente_cae',
-       intentos_reintento = 0,
-       ventana_regularizacion_iniciada_en = NOW(),
-       proximo_reintento_en = NOW() + interval '10 min'
- WHERE id = p_comprobante_id;
-END; $$;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=p_comprobante_id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ result:=public.reabrir_verificado_fiscal(p_comprobante_id,ex.id,ex.version,NULL);
+ IF NOT(result->>'reabierto')::boolean THEN RAISE EXCEPTION 'El comprobante no es elegible para reapertura' USING ERRCODE='40001';END IF;
+END;$$;
 
 --=================================================================================
 -- ANULACIÓN DE PAGO (CU-05.3): transacción local ÚNICA y atómica
@@ -1562,19 +1500,49 @@ RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT private.fiscal_ejecucion_json(e.id) FROM private.fiscal_ejecuciones e
  WHERE e.comprobante_id=p_comprobante_id ORDER BY e.iniciado_en DESC,e.id DESC LIMIT 1
 $$;
+CREATE OR REPLACE FUNCTION private.fiscal_proximo(p_inicio timestamptz,p_ahora timestamptz)
+RETURNS timestamptz LANGUAGE sql IMMUTABLE SET search_path='' AS $$
+ SELECT min(p_inicio+make_interval(mins=>m)) FROM unnest(ARRAY[10,30,120,360,720,1380])m
+ WHERE p_inicio+make_interval(mins=>m)>p_ahora AND p_ahora<p_inicio+interval '24 hours'
+$$;
+CREATE OR REPLACE FUNCTION private.fiscal_elegible(p_cb public.comprobantes,p_pago public.pagos)
+RETURNS boolean LANGUAGE sql STABLE SET search_path='' AS $$
+ SELECT (p_cb.tipo='factura' AND p_pago.estado='completado') OR
+ (p_cb.tipo='nota_credito' AND p_pago.estado='anulado' AND EXISTS(
+ SELECT 1 FROM public.comprobantes o WHERE o.id=p_cb.comprobante_origen_id AND o.pago_id=p_pago.id AND o.tipo='factura'
+ AND o.estado_fiscal='anulacion_pendiente' AND o.cae IS NOT NULL AND o.numero_comprobante IS NOT NULL AND o.solicitud_fiscal IS NOT NULL))
+$$;
+CREATE OR REPLACE FUNCTION private.fiscal_actor_admin(p_actor uuid)
+RETURNS void LANGUAGE plpgsql SET search_path='' AS $$
+BEGIN
+ IF p_actor IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=p_actor AND rol='admin' AND estado='activo') THEN RAISE EXCEPTION 'Se requiere administrador activo' USING ERRCODE='42501';END IF;
+END;$$;
+CREATE OR REPLACE FUNCTION private.fiscal_crear_nc(p_origen public.comprobantes)
+RETURNS uuid LANGUAGE plpgsql SET search_path='' AS $$
+DECLARE result uuid;
+BEGIN
+ SELECT id INTO result FROM public.comprobantes WHERE comprobante_origen_id=p_origen.id AND tipo='nota_credito';
+ IF result IS NOT NULL THEN RETURN result;END IF;
+ IF p_origen.tipo<>'factura' OR p_origen.estado_fiscal<>'anulacion_pendiente' OR p_origen.cae IS NULL THEN RAISE EXCEPTION 'El original no habilita nota de crédito';END IF;
+ INSERT INTO public.comprobantes(pago_id,tipo,comprobante_origen_id,punto_venta,estado_fiscal,motivo_anulacion,proximo_reintento_en)
+ VALUES(p_origen.pago_id,'nota_credito',p_origen.id,p_origen.punto_venta,'pendiente_cae',p_origen.motivo_anulacion,clock_timestamp()+interval '10 minutes') RETURNING id INTO result;
+ RETURN result;
+END;$$;
 CREATE OR REPLACE FUNCTION public.leer_contexto_fiscal(p_comprobante_id uuid)
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
  SELECT jsonb_build_object(
  'comprobante',jsonb_build_object('id',c.id,'pago_id',c.pago_id,'tipo',c.tipo,'punto_venta',c.punto_venta,'estado_fiscal',c.estado_fiscal,
  'numero_comprobante',c.numero_comprobante,'cae',c.cae,'cae_vencimiento',c.cae_vencimiento,'numero_solicitado',c.numero_solicitado,
- 'solicitud_fiscal',c.solicitud_fiscal,'pdf_url',c.pdf_url,'created_at',c.created_at,'updated_at',c.updated_at),
+ 'solicitud_fiscal',c.solicitud_fiscal,'pdf_url',c.pdf_url,'created_at',c.created_at,'updated_at',c.updated_at,'comprobante_origen_id',c.comprobante_origen_id,'ventana_regularizacion_iniciada_en',c.ventana_regularizacion_iniciada_en,'intentos_reintento',c.intentos_reintento,'proximo_reintento_en',c.proximo_reintento_en,'detalle_error_fiscal',c.detalle_error_fiscal),
  'pago',jsonb_build_object('id',p.id,'cuota_id',p.cuota_id,'usuario_id',p.usuario_id,'monto',p.monto::text,'fecha_pago',p.fecha_pago,'estado',p.estado,'medio_pago',p.medio_pago,'referencia_pago',p.referencia_pago),
  'cuota',jsonb_build_object('id',q.id,'socio_id',q.socio_id,'categoria_id',q.categoria_id,'periodo_mes',q.periodo_mes,'periodo_anio',q.periodo_anio),
  'socio',jsonb_build_object('id',s.id,'nombre',s.nombre,'apellido',s.apellido,'dni',s.dni,'direccion',s.direccion),
  'club',jsonb_build_object('id',cl.id,'nombre',cl.nombre,'cuit',cl.cuit,'domicilio_fiscal',cl.domicilio_fiscal,'punto_venta',cl.punto_venta,'email_contacto',cl.email_contacto,'logo_storage_path',cl.logo_storage_path),
- 'configuracion',CASE WHEN cf.club_id IS NULL THEN NULL ELSE jsonb_build_object('ambiente',cf.ambiente,'tipo_factura',cf.tipo_factura,'concepto',cf.concepto,'moneda',cf.moneda,'cotizacion',cf.cotizacion::text,'perfil_importes',cf.perfil_importes,'usar_periodo_cuota',cf.usar_periodo_cuota,'vencimiento_pago',cf.vencimiento_pago,'confirmado',cf.confirmado) END,
+ 'configuracion',CASE WHEN cf.club_id IS NULL THEN NULL ELSE jsonb_build_object('ambiente',cf.ambiente,'tipo_factura',cf.tipo_factura,'tipo_nota_credito',cf.tipo_nota_credito,'concepto',cf.concepto,'moneda',cf.moneda,'cotizacion',cf.cotizacion::text,'perfil_importes',cf.perfil_importes,'usar_periodo_cuota',cf.usar_periodo_cuota,'vencimiento_pago',cf.vencimiento_pago,'confirmado',cf.confirmado) END,
  'receptor',CASE WHEN rf.socio_id IS NULL THEN NULL ELSE jsonb_build_object('doc_tipo',rf.doc_tipo,'doc_numero',rf.doc_numero,'condicion_iva_id',rf.condicion_iva_id,'confirmado',rf.confirmado) END,
- 'ejecucion',public.consultar_ejecucion_fiscal(c.id))
+ 'ejecucion',public.consultar_ejecucion_fiscal(c.id),
+ 'notaCreditoId',(SELECT n.id FROM public.comprobantes n WHERE n.comprobante_origen_id=c.id AND n.tipo='nota_credito'),
+ 'origen',(SELECT jsonb_build_object('id',o.id,'pago_id',o.pago_id,'tipo',o.tipo,'estado_fiscal',o.estado_fiscal,'emisor_cuit',o.emisor_cuit,'ambiente_fiscal',o.ambiente_fiscal,'tipo_fiscal',o.tipo_fiscal,'punto_venta',o.punto_venta,'numero_comprobante',o.numero_comprobante,'cae',o.cae,'cae_vencimiento',o.cae_vencimiento,'solicitud_fiscal',o.solicitud_fiscal) FROM public.comprobantes o WHERE o.id=c.comprobante_origen_id))
  FROM public.comprobantes c JOIN public.pagos p ON p.id=c.pago_id JOIN public.cuotas q ON q.id=p.cuota_id
  JOIN public.socios s ON s.id=q.socio_id CROSS JOIN public.club cl
  LEFT JOIN private.fiscal_configuracion cf ON cf.club_id=cl.id LEFT JOIN private.fiscal_receptores rf ON rf.socio_id=s.id
@@ -1583,12 +1551,11 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.iniciar_ejecucion_fiscal(p_comprobante_id uuid,p_modo text,p_ejecucion_id uuid)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
-DECLARE ref public.comprobantes%ROWTYPE; cb public.comprobantes%ROWTYPE; pg public.pagos%ROWTYPE;
- cl public.club%ROWTYPE; cf private.fiscal_configuracion%ROWTYPE; rf private.fiscal_receptores%ROWTYPE;
- se private.fiscal_series%ROWTYPE; ex private.fiscal_ejecuciones%ROWTYPE; v_socio uuid; v_cuit text; v_id uuid; v_estado text;
+DECLARE ref public.comprobantes%ROWTYPE;cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;o public.comprobantes%ROWTYPE;
+ cl public.club%ROWTYPE;cf private.fiscal_configuracion%ROWTYPE;rf private.fiscal_receptores%ROWTYPE;se private.fiscal_series%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;
+ socio uuid;vcuit text;vtipo integer;vamb text;vpv integer;hoy timestamptz;activo boolean;
 BEGIN
- IF p_modo IS NULL OR p_modo NOT IN('inicial','conciliacion','manual','automatico') OR p_ejecucion_id IS NULL THEN RAISE EXCEPTION 'Modo o identidad de ejecución inválidos' USING ERRCODE='22023';END IF;
- IF p_modo IN('manual','automatico') THEN RETURN jsonb_build_object('estado','no_elegible','motivo','reintentos_no_habilitados','ejecucion',NULL);END IF;
+ IF p_modo IS NULL OR p_modo NOT IN('inicial','conciliacion','manual','automatico') OR p_ejecucion_id IS NULL THEN RAISE EXCEPTION 'Modo o identidad inválidos' USING ERRCODE='22023';END IF;
  SELECT * INTO ref FROM public.comprobantes WHERE id=p_comprobante_id;
  IF NOT FOUND THEN RETURN jsonb_build_object('estado','no_elegible','motivo','comprobante_inexistente','ejecucion',NULL);END IF;
  SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=ref.id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
@@ -1597,40 +1564,55 @@ BEGIN
  ELSE
   SELECT * INTO cl FROM public.club WHERE id='00000000-0000-0000-0000-000000000000';
   SELECT * INTO cf FROM private.fiscal_configuracion WHERE club_id=cl.id;
-  SELECT q.socio_id INTO v_socio FROM public.pagos p JOIN public.cuotas q ON q.id=p.cuota_id WHERE p.id=ref.pago_id;
-  SELECT * INTO rf FROM private.fiscal_receptores WHERE socio_id=v_socio;
-  IF cf.club_id IS NULL OR NOT cf.confirmado OR rf.socio_id IS NULL OR NOT rf.confirmado THEN
-   RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','perfil_fiscal_o_receptor_sin_confirmar','ejecucion',NULL);
+  SELECT q.socio_id INTO socio FROM public.pagos p JOIN public.cuotas q ON q.id=p.cuota_id WHERE p.id=ref.pago_id;
+  SELECT * INTO rf FROM private.fiscal_receptores WHERE socio_id=socio;
+  IF ref.tipo='nota_credito' THEN
+   SELECT * INTO o FROM public.comprobantes WHERE id=ref.comprobante_origen_id;
+   vcuit:=o.emisor_cuit;vamb:=o.ambiente_fiscal;vpv:=o.punto_venta;vtipo:=cf.tipo_nota_credito;
+   IF cf.club_id IS NULL OR NOT cf.confirmado OR vtipo IS NULL OR o.solicitud_fiscal IS NULL OR o.cae IS NULL OR o.numero_comprobante IS NULL OR vcuit IS NULL THEN
+    RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','tipo_nc_o_snapshot_original_sin_confirmar','ejecucion',NULL);END IF;
+  ELSE
+   IF cf.club_id IS NULL OR NOT cf.confirmado OR rf.socio_id IS NULL OR NOT rf.confirmado THEN RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','perfil_fiscal_o_receptor_sin_confirmar','ejecucion',NULL);END IF;
+   vcuit:=regexp_replace(cl.cuit,'[^0-9]','','g');vamb:=cf.ambiente;vpv:=cl.punto_venta;vtipo:=cf.tipo_factura;
+   IF cl.id IS NULL OR NOT public.cuit_valido(cl.cuit) OR cl.punto_venta<>ref.punto_venta THEN RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','identidad_club_no_coincide_con_cobro','ejecucion',NULL);END IF;
   END IF;
-  v_cuit:=regexp_replace(cl.cuit,'[^0-9]','','g');
-  IF cl.id IS NULL OR NOT public.cuit_valido(cl.cuit) OR cl.punto_venta<>ref.punto_venta THEN
-   RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','identidad_club_no_coincide_con_cobro','ejecucion',NULL);
-  END IF;
-  INSERT INTO private.fiscal_series(cuit,ambiente,punto_venta,tipo_comprobante) VALUES(v_cuit,cf.ambiente,cl.punto_venta,cf.tipo_factura) ON CONFLICT DO NOTHING;
-  SELECT * INTO se FROM private.fiscal_series WHERE cuit=v_cuit AND ambiente=cf.ambiente AND punto_venta=cl.punto_venta AND tipo_comprobante=cf.tipo_factura FOR UPDATE;
+  IF vamb IS DISTINCT FROM 'homologacion' THEN RETURN jsonb_build_object('estado','pendiente_configuracion','motivo','ambiente_no_habilitado','ejecucion',NULL);END IF;
+  INSERT INTO private.fiscal_series(cuit,ambiente,punto_venta,tipo_comprobante) VALUES(vcuit,vamb,vpv,vtipo) ON CONFLICT DO NOTHING;
+  SELECT * INTO se FROM private.fiscal_series WHERE cuit=vcuit AND ambiente=vamb AND punto_venta=vpv AND tipo_comprobante=vtipo FOR UPDATE;
  END IF;
- -- Revalidar después de la exclusión de serie y en orden financiero común.
  SELECT * INTO pg FROM public.pagos WHERE id=ref.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN ref.tipo='factura' THEN ref.id ELSE ref.comprobante_origen_id END FOR UPDATE;
  SELECT * INTO cb FROM public.comprobantes WHERE id=ref.id FOR UPDATE;
  SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=ref.id ORDER BY iniciado_en DESC,id DESC LIMIT 1 FOR UPDATE;
- IF FOUND THEN
-  IF ex.serie_id<>se.id THEN RAISE EXCEPTION 'La serie cambió, consultar nuevamente' USING ERRCODE='40001';END IF;
-  IF ex.estado IN('autorizado','rechazado','transitorio','incidencia') THEN
-   RETURN jsonb_build_object('estado','finalizada','motivo',CASE WHEN ex.estado='incidencia' THEN 'resolucion_requiere_regularizacion' ELSE NULL END,'ejecucion',private.fiscal_ejecucion_json(ex.id));
-  END IF;
-  IF se.ejecucion_activa IS DISTINCT FROM ex.id THEN RAISE EXCEPTION 'La adquisición no es vigente' USING ERRCODE='40001';END IF;
-  IF p_modo='inicial' OR p_ejecucion_id<>ex.id THEN RETURN jsonb_build_object('estado','en_curso','motivo','consultar_ejecucion_existente','ejecucion',private.fiscal_ejecucion_json(ex.id));END IF;
+ activo:=FOUND AND ex.estado IN('adquirida','preparada','posible_envio','desconocido','incidencia');
+ IF activo THEN
+  IF ex.serie_id<>se.id OR se.ejecucion_activa IS DISTINCT FROM ex.id THEN RAISE EXCEPTION 'La adquisición cambió, consultar' USING ERRCODE='40001';END IF;
+  IF p_ejecucion_id<>ex.id OR p_modo='inicial' THEN RETURN jsonb_build_object('estado','en_curso','motivo','consultar_ejecucion_existente','ejecucion',private.fiscal_ejecucion_json(ex.id));END IF;
   UPDATE private.fiscal_series SET version=version+1 WHERE id=se.id RETURNING * INTO se;
   UPDATE private.fiscal_ejecuciones SET version=se.version,recuperaciones=recuperaciones+1,actualizado_en=clock_timestamp() WHERE id=ex.id RETURNING * INTO ex;
-  v_estado:=CASE WHEN ex.posible_envio THEN 'conciliacion' ELSE 'adquirida' END;
-  RETURN jsonb_build_object('estado',v_estado,'motivo',CASE WHEN ex.posible_envio THEN 'solo_consulta_no_reenvio' ELSE NULL END,'ejecucion',private.fiscal_ejecucion_json(ex.id));
+  RETURN jsonb_build_object('estado',CASE WHEN ex.posible_envio OR ex.estado='incidencia' THEN 'conciliacion' ELSE 'adquirida' END,'motivo',CASE WHEN ex.posible_envio THEN 'solo_consulta_no_reenvio' ELSE NULL END,'ejecucion',private.fiscal_ejecucion_json(ex.id));
  END IF;
- IF p_modo<>'inicial' OR cb.tipo<>'factura' OR cb.estado_fiscal<>'pendiente_cae' OR pg.estado<>'completado' OR cb.cae IS NOT NULL OR cb.numero_comprobante IS NOT NULL THEN RETURN jsonb_build_object('estado','no_elegible','motivo','estado_no_elegible','ejecucion',NULL);END IF;
- IF cb.numero_solicitado IS NOT NULL OR cb.solicitud_fiscal IS NOT NULL THEN RETURN jsonb_build_object('estado','no_elegible','motivo','legado_requiere_conciliacion','ejecucion',NULL);END IF;
+ IF cb.estado_fiscal<>'pendiente_cae' OR NOT private.fiscal_elegible(cb,pg) OR cb.cae IS NOT NULL OR cb.numero_comprobante IS NOT NULL THEN RETURN jsonb_build_object('estado','no_elegible','motivo','estado_no_elegible','ejecucion',CASE WHEN ex.id IS NULL THEN NULL ELSE private.fiscal_ejecucion_json(ex.id) END);END IF;
+ IF p_modo='conciliacion' OR (p_modo='inicial' AND ex.id IS NOT NULL) THEN RETURN jsonb_build_object('estado','finalizada','motivo','usar_regularizacion','ejecucion',CASE WHEN ex.id IS NULL THEN NULL ELSE private.fiscal_ejecucion_json(ex.id) END);END IF;
+ IF ex.id IS NULL AND (cb.numero_solicitado IS NOT NULL OR cb.solicitud_fiscal IS NOT NULL) THEN RETURN jsonb_build_object('estado','no_elegible','motivo','legado_requiere_conciliacion','ejecucion',NULL);END IF;
+ IF ex.id IS NOT NULL AND ex.posible_envio AND ex.estado<>'rechazado' THEN RETURN jsonb_build_object('estado','no_elegible','motivo','incertidumbre_no_resuelta','ejecucion',private.fiscal_ejecucion_json(ex.id));END IF;
  IF se.ejecucion_activa IS NOT NULL THEN RETURN jsonb_build_object('estado','en_curso','motivo','serie_ocupada','ejecucion',NULL);END IF;
- IF EXISTS(SELECT 1 FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id) THEN RAISE EXCEPTION 'UUID de ejecución ya utilizado' USING ERRCODE='22023';END IF;
+ hoy:=clock_timestamp();
+ IF hoy>=cb.ventana_regularizacion_iniciada_en+interval '24 hours' THEN
+  UPDATE public.comprobantes SET estado_fiscal='fallido',proximo_reintento_en=NULL WHERE id=cb.id;
+  RETURN jsonb_build_object('estado','no_elegible','motivo','ventana_o_presupuesto_agotados','ejecucion',NULL);
+ END IF;
+ IF p_modo IN('manual','automatico') THEN
+  IF hoy>=cb.ventana_regularizacion_iniciada_en+interval '24 hours' OR cb.intentos_reintento>=6 THEN
+   UPDATE public.comprobantes SET estado_fiscal='fallido',proximo_reintento_en=NULL WHERE id=cb.id;
+   RETURN jsonb_build_object('estado','no_elegible','motivo','ventana_o_presupuesto_agotados','ejecucion',NULL);
+  END IF;
+  IF p_modo='automatico' AND (cb.proximo_reintento_en IS NULL OR cb.proximo_reintento_en>hoy) THEN RETURN jsonb_build_object('estado','no_elegible','motivo','aun_no_programado','ejecucion',NULL);END IF;
+  UPDATE public.comprobantes SET intentos_reintento=intentos_reintento+1,proximo_reintento_en=NULL WHERE id=cb.id;
+ END IF;
+ IF EXISTS(SELECT 1 FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id) THEN RAISE EXCEPTION 'Identidad de ejecución reutilizada' USING ERRCODE='22023';END IF;
  UPDATE private.fiscal_series SET version=version+1 WHERE id=se.id RETURNING * INTO se;
- INSERT INTO private.fiscal_ejecuciones(id,comprobante_id,serie_id,version,clase,estado) VALUES(p_ejecucion_id,cb.id,se.id,se.version,'inicial','adquirida');
+ INSERT INTO private.fiscal_ejecuciones(id,comprobante_id,serie_id,version,clase,estado) VALUES(p_ejecucion_id,cb.id,se.id,se.version,p_modo,'adquirida');
  UPDATE private.fiscal_series SET ejecucion_activa=p_ejecucion_id WHERE id=se.id;
  UPDATE public.comprobantes SET emisor_cuit=se.cuit,ambiente_fiscal=se.ambiente,tipo_fiscal=se.tipo_comprobante WHERE id=cb.id;
  RETURN jsonb_build_object('estado','adquirida','motivo',NULL,'ejecucion',private.fiscal_ejecucion_json(p_ejecucion_id));
@@ -1645,6 +1627,7 @@ BEGIN
  SELECT * INTO se FROM private.fiscal_series WHERE id=ref.serie_id FOR UPDATE;
  SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id;
  PERFORM 1 FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
  PERFORM 1 FROM public.comprobantes WHERE id=cb.id FOR UPDATE;
  SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE id=ref.id FOR UPDATE;
  IF p_version IS NULL OR ex.version<>p_version THEN RAISE EXCEPTION 'La versión de ejecución ya no es vigente' USING ERRCODE='40001';END IF;
@@ -1701,7 +1684,7 @@ EXCEPTION WHEN OTHERS THEN RETURN false;END;$$;
 CREATE OR REPLACE FUNCTION public.preparar_solicitud_fiscal(p_ejecucion_id uuid,p_version bigint,p_numero text,p_solicitud jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE ex private.fiscal_ejecuciones%ROWTYPE; se private.fiscal_series%ROWTYPE; pg public.pagos%ROWTYPE; cb public.comprobantes%ROWTYPE;
- cl public.club%ROWTYPE; cf private.fiscal_configuracion%ROWTYPE; rf private.fiscal_receptores%ROWTYPE; so public.socios%ROWTYPE; qu public.cuotas%ROWTYPE; d jsonb; v_total numeric; v_neto numeric; v_iva numeric; v_modo text;
+ cl public.club%ROWTYPE; cf private.fiscal_configuracion%ROWTYPE; rf private.fiscal_receptores%ROWTYPE; so public.socios%ROWTYPE; qu public.cuotas%ROWTYPE; d jsonb; v_total numeric; v_neto numeric; v_iva numeric; v_modo text;origen public.comprobantes%ROWTYPE;expected jsonb;
 BEGIN
  ex:=private.fiscal_bloquear_ejecucion(p_ejecucion_id,p_version);
  IF ex.posible_envio THEN RAISE EXCEPTION 'No se cambia una solicitud posiblemente enviada' USING ERRCODE='40001';END IF;
@@ -1714,7 +1697,23 @@ BEGIN
  SELECT * INTO se FROM private.fiscal_series WHERE id=ex.serie_id;
  SELECT * INTO cb FROM public.comprobantes WHERE id=ex.comprobante_id;
  SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id;
- IF pg.estado<>'completado' OR cb.tipo<>'factura' OR cb.estado_fiscal<>'pendiente_cae' THEN RAISE EXCEPTION 'Estado financiero o fiscal no elegible' USING ERRCODE='40001';END IF;
+ IF NOT private.fiscal_elegible(cb,pg) OR cb.estado_fiscal<>'pendiente_cae' THEN RAISE EXCEPTION 'Estado financiero o fiscal no elegible' USING ERRCODE='40001';END IF;
+
+ IF cb.tipo='nota_credito' THEN
+  SELECT * INTO origen FROM public.comprobantes WHERE id=cb.comprobante_origen_id;
+  SELECT * INTO cf FROM private.fiscal_configuracion WHERE club_id='00000000-0000-0000-0000-000000000000';
+  IF cf.tipo_nota_credito IS DISTINCT FROM se.tipo_comprobante OR NOT cf.confirmado OR NOT private.fiscal_solicitud_valida(origen.solicitud_fiscal) THEN RAISE EXCEPTION 'Tipo NC y origen requieren confirmación' USING ERRCODE='22023';END IF;
+  expected:=origen.solicitud_fiscal;
+  expected:=jsonb_set(expected,'{identidad}',jsonb_build_object('cuit',se.cuit,'ambiente',se.ambiente,'puntoVenta',se.punto_venta,'tipoComprobante',se.tipo_comprobante));
+  expected:=jsonb_set(expected,'{detalle,CbteDesde}',to_jsonb(p_numero));expected:=jsonb_set(expected,'{detalle,CbteHasta}',to_jsonb(p_numero));
+  expected:=jsonb_set(expected,'{detalle,CbteFch}',to_jsonb(to_char(clock_timestamp() AT TIME ZONE 'America/Argentina/Buenos_Aires','YYYYMMDD')));
+  IF expected#>>'{detalle,Concepto}' IN('2','3') THEN expected:=jsonb_set(expected,'{detalle,FchVtoPago}',to_jsonb(greatest(expected#>>'{detalle,FchVtoPago}',expected#>>'{detalle,CbteFch}')));END IF;
+  expected:=jsonb_set(expected,'{detalle,CbtesAsoc}',jsonb_build_array(jsonb_build_object('Tipo',origen.tipo_fiscal,'PtoVta',origen.punto_venta,'Nro',origen.numero_comprobante,'Cuit',origen.emisor_cuit,'CbteFch',origen.solicitud_fiscal#>>'{detalle,CbteFch}')));
+  IF p_solicitud IS DISTINCT FROM expected OR se.cuit IS DISTINCT FROM origen.emisor_cuit OR se.ambiente IS DISTINCT FROM origen.ambiente_fiscal OR se.punto_venta<>origen.punto_venta THEN RAISE EXCEPTION 'La NC no coincide con factura original y asociación exactas' USING ERRCODE='22023';END IF;
+  UPDATE private.fiscal_ejecuciones SET numero=p_numero,solicitud=p_solicitud,estado='preparada',actualizado_en=clock_timestamp() WHERE id=ex.id;
+  UPDATE public.comprobantes SET numero_solicitado=p_numero,solicitud_fiscal=p_solicitud WHERE id=cb.id;
+  RETURN private.fiscal_ejecucion_json(ex.id);
+ END IF;
  SELECT * INTO qu FROM public.cuotas WHERE id=pg.cuota_id;
  SELECT * INTO so FROM public.socios WHERE id=qu.socio_id;
  SELECT * INTO cl FROM public.club WHERE id='00000000-0000-0000-0000-000000000000';
@@ -1752,7 +1751,7 @@ BEGIN
  ex:=private.fiscal_bloquear_ejecucion(p_ejecucion_id,p_version);
  IF ex.estado<>'preparada' OR ex.posible_envio OR ex.solicitud IS NULL THEN RAISE EXCEPTION 'No se autoriza un segundo envío de la ejecución' USING ERRCODE='40001';END IF;
  SELECT * INTO cb FROM public.comprobantes WHERE id=ex.comprobante_id;SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id;
- IF cb.estado_fiscal<>'pendiente_cae' OR pg.estado<>'completado' THEN RAISE EXCEPTION 'La operación cambió antes de enviar' USING ERRCODE='40001';END IF;
+ IF cb.estado_fiscal<>'pendiente_cae' OR NOT private.fiscal_elegible(cb,pg) THEN RAISE EXCEPTION 'La operación cambió antes de enviar' USING ERRCODE='40001';END IF;
  UPDATE private.fiscal_ejecuciones SET posible_envio=true,estado='posible_envio',actualizado_en=clock_timestamp() WHERE id=ex.id;
  RETURN private.fiscal_ejecucion_json(ex.id);
 END;$$;
@@ -1769,7 +1768,7 @@ EXCEPTION WHEN OTHERS THEN RETURN false;END;$$;
 
 CREATE OR REPLACE FUNCTION public.confirmar_resultado_fiscal(p_ejecucion_id uuid,p_version bigint,p_resultado jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
-DECLARE ex private.fiscal_ejecuciones%ROWTYPE; cb public.comprobantes%ROWTYPE; pg public.pagos%ROWTYPE; a jsonb; d jsonb; k text; v_tipo text; v_detalle text;
+DECLARE ex private.fiscal_ejecuciones%ROWTYPE; cb public.comprobantes%ROWTYPE; pg public.pagos%ROWTYPE; a jsonb; d jsonb; k text; v_tipo text; v_detalle text;origen public.comprobantes%ROWTYPE;hoy timestamptz:=clock_timestamp();
 BEGIN
  ex:=private.fiscal_bloquear_ejecucion(p_ejecucion_id,p_version,true);
  v_tipo:=p_resultado->>'tipo';
@@ -1798,9 +1797,25 @@ BEGIN
    RAISE EXCEPTION 'La autorización no coincide con el snapshot exacto' USING ERRCODE='22023';
   END IF;
  END IF;
- -- Una respuesta tardía se conserva como incidencia; jamás vuelve a completar el pago.
- IF pg.estado<>'completado' OR cb.tipo<>'factura' OR cb.estado_fiscal IN('anulado','anulacion_pendiente') THEN
-  UPDATE private.fiscal_ejecuciones SET estado='incidencia',resultado=p_resultado,actualizado_en=clock_timestamp() WHERE id=ex.id;
+
+ -- Una respuesta sobre factura financieramente anulada resuelve sólo documentos.
+ IF cb.tipo='factura' AND pg.estado='anulado' AND cb.estado_fiscal='anulacion_pendiente' THEN
+  IF v_tipo='autorizado' THEN
+   UPDATE private.fiscal_ejecuciones SET estado='autorizado',resultado=p_resultado,cerrado_en=hoy,actualizado_en=hoy WHERE id=ex.id;
+   UPDATE public.comprobantes SET numero_comprobante=ex.numero,cae=a->>'cae',cae_vencimiento=(a->>'vencimiento')::date,detalle_error_fiscal=NULL,proximo_reintento_en=NULL WHERE id=cb.id RETURNING * INTO cb;
+   PERFORM private.fiscal_crear_nc(cb);
+   UPDATE private.fiscal_series SET ejecucion_activa=NULL,ultimo_autorizado=greatest(coalesce(ultimo_autorizado,0),ex.numero::numeric) WHERE id=ex.serie_id;
+  ELSIF v_tipo='rechazado' THEN
+   UPDATE private.fiscal_ejecuciones SET estado='rechazado',resultado=p_resultado,cerrado_en=hoy,actualizado_en=hoy WHERE id=ex.id;
+   UPDATE public.comprobantes SET estado_fiscal='anulado',proximo_reintento_en=NULL,detalle_error_fiscal=NULL WHERE id=cb.id;
+   UPDATE private.fiscal_series SET ejecucion_activa=NULL WHERE id=ex.serie_id;
+  ELSE
+   UPDATE private.fiscal_ejecuciones SET estado='desconocido',resultado=p_resultado,actualizado_en=hoy WHERE id=ex.id;
+  END IF;
+  RETURN private.fiscal_ejecucion_json(ex.id);
+ END IF;
+ IF NOT private.fiscal_elegible(cb,pg) OR cb.estado_fiscal IN('anulado','anulacion_pendiente') THEN
+  UPDATE private.fiscal_ejecuciones SET estado='incidencia',resultado=p_resultado,actualizado_en=hoy WHERE id=ex.id;
   RETURN private.fiscal_ejecucion_json(ex.id);
  END IF;
  IF v_tipo='desconocido' THEN
@@ -1808,13 +1823,14 @@ BEGIN
   UPDATE public.comprobantes SET detalle_error_fiscal='Resultado de emisión desconocido; consultar la misma identidad antes de continuar',proximo_reintento_en=NULL WHERE id=cb.id;
  ELSIF v_tipo='autorizado' THEN
   UPDATE private.fiscal_ejecuciones SET estado='autorizado',resultado=p_resultado,cerrado_en=clock_timestamp(),actualizado_en=clock_timestamp() WHERE id=ex.id;
-  UPDATE public.comprobantes SET estado_fiscal='valido',numero_comprobante=ex.numero,cae=a->>'cae',cae_vencimiento=(a->>'vencimiento')::date,detalle_error_fiscal=NULL,proximo_reintento_en=NULL WHERE id=cb.id;
+  UPDATE public.comprobantes SET estado_fiscal=CASE WHEN cb.tipo='nota_credito' THEN 'anulado'::public.estado_fiscal ELSE 'valido'::public.estado_fiscal END,numero_comprobante=ex.numero,cae=a->>'cae',cae_vencimiento=(a->>'vencimiento')::date,detalle_error_fiscal=NULL,proximo_reintento_en=NULL WHERE id=cb.id;
+  IF cb.tipo='nota_credito' THEN UPDATE public.comprobantes SET estado_fiscal='anulado',proximo_reintento_en=NULL,detalle_error_fiscal=NULL WHERE id=cb.comprobante_origen_id;END IF;
   UPDATE private.fiscal_series SET ejecucion_activa=NULL,ultimo_autorizado=greatest(coalesce(ultimo_autorizado,0),ex.numero::numeric) WHERE id=ex.serie_id;
  ELSE
   SELECT string_agg((x->>'codigo')||': '||(x->>'mensaje'),E'\n') INTO v_detalle FROM jsonb_array_elements(p_resultado->'codigos')x;
   UPDATE private.fiscal_ejecuciones SET estado=v_tipo,resultado=p_resultado,cerrado_en=clock_timestamp(),actualizado_en=clock_timestamp() WHERE id=ex.id;
-  UPDATE public.comprobantes SET estado_fiscal=CASE WHEN v_tipo='rechazado' THEN 'fallido'::public.estado_fiscal ELSE 'pendiente_cae'::public.estado_fiscal END,
-   detalle_error_fiscal=coalesce(v_detalle,'Resultado fiscal sin detalle público'),proximo_reintento_en=CASE WHEN v_tipo='transitorio' THEN clock_timestamp()+interval '10 minutes' ELSE NULL END WHERE id=cb.id;
+  UPDATE public.comprobantes SET estado_fiscal=CASE WHEN v_tipo='rechazado' OR cb.intentos_reintento>=6 OR hoy>=cb.ventana_regularizacion_iniciada_en+interval '24 hours' THEN 'fallido'::public.estado_fiscal ELSE 'pendiente_cae'::public.estado_fiscal END,
+   detalle_error_fiscal=coalesce(v_detalle,'Resultado fiscal sin detalle público'),proximo_reintento_en=CASE WHEN v_tipo='transitorio' AND cb.intentos_reintento<6 THEN private.fiscal_proximo(cb.ventana_regularizacion_iniciada_en,hoy) ELSE NULL END WHERE id=cb.id;
   UPDATE private.fiscal_series SET ejecucion_activa=NULL WHERE id=ex.serie_id;
  END IF;
  RETURN private.fiscal_ejecucion_json(ex.id);
@@ -1863,6 +1879,8 @@ CREATE OR REPLACE FUNCTION public.registrar_pdf_comprobante(
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public AS $$
 DECLARE
  c public.comprobantes%ROWTYPE;
+ ref public.comprobantes%ROWTYPE;
+ origen public.comprobantes%ROWTYPE;
  p public.pagos%ROWTYPE;
  v_pago_id uuid;
  v_keys text[];
@@ -1881,9 +1899,14 @@ BEGIN
  SELECT pago_id INTO v_pago_id FROM public.comprobantes WHERE id=p_comprobante_id;
  IF v_pago_id IS NULL THEN RAISE EXCEPTION 'Documento no disponible' USING ERRCODE='P0001'; END IF;
  SELECT * INTO p FROM public.pagos WHERE id=v_pago_id FOR UPDATE;
+ SELECT * INTO ref FROM public.comprobantes WHERE id=p_comprobante_id;
+ IF ref.tipo='nota_credito' THEN SELECT * INTO origen FROM public.comprobantes WHERE id=ref.comprobante_origen_id FOR UPDATE;END IF;
  SELECT * INTO c FROM public.comprobantes WHERE id=p_comprobante_id FOR UPDATE;
- IF c.pago_id IS DISTINCT FROM v_pago_id OR c.tipo<>'factura' OR p.estado<>'completado' THEN
-  RAISE EXCEPTION 'El estado financiero requiere otro recorrido documental' USING ERRCODE='P0001';
+ IF c.pago_id IS DISTINCT FROM v_pago_id OR c.comprobante_origen_id IS DISTINCT FROM ref.comprobante_origen_id
+ OR NOT ((c.tipo='factura' AND (p.estado='completado' OR(p.estado='anulado' AND c.estado_fiscal IN('anulacion_pendiente','anulado'))))
+ OR(c.tipo='nota_credito' AND p.estado='anulado' AND origen.id IS NOT NULL AND origen.tipo='factura' AND origen.pago_id=p.id
+ AND origen.cae IS NOT NULL AND origen.numero_comprobante IS NOT NULL AND origen.solicitud_fiscal IS NOT NULL)) THEN
+  RAISE EXCEPTION 'El estado financiero o la relación original requiere revisión' USING ERRCODE='P0001';
  END IF;
  IF p_fuente_esperada->>'pago_id' IS DISTINCT FROM c.pago_id::text
  OR p_fuente_esperada->>'pago_estado' IS DISTINCT FROM p.estado::text
@@ -1895,10 +1918,10 @@ BEGIN
  OR p_fuente_esperada->'solicitud_fiscal' IS DISTINCT FROM coalesce(c.solicitud_fiscal,'null'::jsonb) THEN
   RAISE EXCEPTION 'El comprobante cambió durante la generación' USING ERRCODE='P0001';
  END IF;
- IF p_tipo_version='provisional' AND (c.estado_fiscal NOT IN ('pendiente_cae','fallido') OR c.cae IS NOT NULL OR c.numero_comprobante IS NOT NULL) THEN
+ IF p_tipo_version='provisional' AND (NOT(c.estado_fiscal IN ('pendiente_cae','fallido') OR(c.tipo='factura' AND p.estado='anulado' AND c.estado_fiscal IN('anulacion_pendiente','anulado'))) OR c.cae IS NOT NULL OR c.numero_comprobante IS NOT NULL) THEN
   RAISE EXCEPTION 'No corresponde la versión provisional' USING ERRCODE='P0001';
  END IF;
- IF p_tipo_version='autorizado' AND (c.estado_fiscal<>'valido' OR c.cae IS NULL OR c.numero_comprobante IS NULL OR c.cae !~ '^[0-9]{14}$' OR c.numero_comprobante !~ '^[1-9][0-9]{0,7}$' OR c.cae_vencimiento IS NULL OR c.solicitud_fiscal IS NULL) THEN
+ IF p_tipo_version='autorizado' AND (NOT((c.tipo='factura' AND c.estado_fiscal IN('valido','anulacion_pendiente','anulado')) OR(c.tipo='nota_credito' AND c.estado_fiscal='anulado')) OR c.cae IS NULL OR c.numero_comprobante IS NULL OR (c.cae !~ '^[0-9]{14}$' OR c.cae ~ '^0+$') OR c.numero_comprobante !~ '^[1-9][0-9]{0,7}$' OR c.cae_vencimiento IS NULL OR c.solicitud_fiscal IS NULL) THEN
   RAISE EXCEPTION 'Falta una autorización fiscal persistida' USING ERRCODE='P0001';
  END IF;
  -- A retried publication of the same immutable version is harmless even if its
@@ -1914,3 +1937,251 @@ BEGIN
  RETURN jsonb_build_object('storagePath',p_storage_path,'version',p_tipo_version);
 END;
 $$;
+
+CREATE OR REPLACE FUNCTION public.expirar_comprobante_fiscal(p_comprobante_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE cb public.comprobantes%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;pg public.pagos%ROWTYPE;
+BEGIN
+ SELECT * INTO cb FROM public.comprobantes WHERE id=p_comprobante_id;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=p_comprobante_id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ IF ex.id IS NOT NULL THEN PERFORM 1 FROM private.fiscal_series WHERE id=ex.serie_id FOR UPDATE;END IF;
+ SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=p_comprobante_id FOR UPDATE;
+ IF cb.id IS NULL OR cb.estado_fiscal<>'pendiente_cae' OR NOT private.fiscal_elegible(cb,pg) THEN RETURN jsonb_build_object('expirado',false);END IF;
+ -- Un inicio anterior a la frontera conserva el derecho a terminar y guardar CAE.
+ IF ex.id IS NOT NULL AND ex.estado IN('adquirida','preparada','posible_envio') THEN RETURN jsonb_build_object('expirado',false);END IF;
+ IF cb.intentos_reintento>=6 OR clock_timestamp()>=cb.ventana_regularizacion_iniciada_en+interval '24 hours' THEN
+  UPDATE public.comprobantes SET estado_fiscal='fallido',proximo_reintento_en=NULL WHERE id=cb.id;
+  RETURN jsonb_build_object('expirado',true);
+ END IF;
+ RETURN jsonb_build_object('expirado',false);
+END;$$;
+CREATE OR REPLACE FUNCTION public.listar_candidatos_fiscales(p_limite integer DEFAULT 10)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ IF p_limite IS NULL OR p_limite NOT BETWEEN 1 AND 10 THEN RAISE EXCEPTION 'Límite inválido' USING ERRCODE='22023';END IF;
+ WITH candidatos AS(
+ SELECT c.id,coalesce(c.proximo_reintento_en,c.ventana_regularizacion_iniciada_en+interval '24 hours')fecha,
+  (ex.estado IN('adquirida','preparada','posible_envio','desconocido','incidencia'))recuperable
+ FROM public.comprobantes c JOIN public.pagos p ON p.id=c.pago_id
+ LEFT JOIN LATERAL(SELECT e.estado FROM private.fiscal_ejecuciones e WHERE e.comprobante_id=c.id ORDER BY e.iniciado_en DESC,e.id DESC LIMIT 1)ex ON true
+ WHERE c.estado_fiscal IN('pendiente_cae','fallido') AND private.fiscal_elegible(c,p)
+ AND ((c.estado_fiscal='pendiente_cae' AND(c.proximo_reintento_en<=now() OR c.ventana_regularizacion_iniciada_en+interval '24 hours'<=now() OR c.intentos_reintento>=6)) OR ex.estado IN('adquirida','preparada','posible_envio','desconocido','incidencia'))
+ ),lote AS(SELECT * FROM candidatos ORDER BY fecha,id LIMIT p_limite)
+ SELECT jsonb_build_object('candidatos',coalesce(jsonb_agg(jsonb_build_object('comprobanteId',id,'recuperable',coalesce(recuperable,false),'fechaElegible',fecha) ORDER BY fecha,id),'[]'::jsonb),'hayMas',(SELECT count(*)>p_limite FROM candidatos)) INTO result FROM lote;
+ RETURN result;
+END;$$;
+CREATE OR REPLACE FUNCTION public.resolver_anulacion_fiscal(p_ejecucion_id uuid,p_version bigint,p_resultado jsonb,p_actor_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;ex private.fiscal_ejecuciones%ROWTYPE;cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;
+BEGIN
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ ex:=private.fiscal_bloquear_ejecucion(p_ejecucion_id,p_version,true);
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ex.comprobante_id;SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id;
+ IF cb.tipo<>'factura' OR pg.estado<>'anulado' OR cb.estado_fiscal NOT IN('anulacion_pendiente','anulado') THEN RAISE EXCEPTION 'No hay anulación pendiente elegible' USING ERRCODE='40001';END IF;
+ result:=public.confirmar_resultado_fiscal(p_ejecucion_id,p_version,p_resultado);
+ INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'resolver_anulacion',ex.id);
+ RETURN result;
+END;$$;
+CREATE OR REPLACE FUNCTION public.reabrir_verificado_fiscal(p_comprobante_id uuid,p_ejecucion_id uuid DEFAULT NULL,p_version bigint DEFAULT NULL,p_actor_id uuid DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ref public.comprobantes%ROWTYPE;cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;ahora timestamptz;
+BEGIN
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ SELECT * INTO ref FROM public.comprobantes WHERE id=p_comprobante_id;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=ref.id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ IF ex.id IS NOT NULL THEN PERFORM 1 FROM private.fiscal_series WHERE id=ex.serie_id FOR UPDATE;END IF;
+ SELECT * INTO pg FROM public.pagos WHERE id=ref.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN ref.tipo='factura' THEN ref.id ELSE ref.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.id FOR UPDATE;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=ref.id ORDER BY iniciado_en DESC,id DESC LIMIT 1 FOR UPDATE;
+ IF cb.id IS NULL OR cb.estado_fiscal<>'fallido' OR NOT private.fiscal_elegible(cb,pg) THEN RETURN jsonb_build_object('reabierto',false);END IF;
+ IF ex.id IS DISTINCT FROM p_ejecucion_id OR ex.version IS DISTINCT FROM p_version THEN RAISE EXCEPTION 'La ejecución cambió, consultar de nuevo' USING ERRCODE='40001';END IF;
+ IF ex.id IS NULL AND(cb.numero_solicitado IS NOT NULL OR cb.solicitud_fiscal IS NOT NULL) THEN RAISE EXCEPTION 'Legado sin evidencia de ausencia: no se reabre' USING ERRCODE='40001';END IF;
+ IF ex.id IS NOT NULL AND(ex.estado IN('adquirida','preparada','posible_envio','desconocido','incidencia') OR (ex.posible_envio AND ex.estado<>'rechazado')) THEN RAISE EXCEPTION 'Incertidumbre pendiente: no se reinicia la ventana' USING ERRCODE='40001';END IF;
+ ahora:=clock_timestamp();
+ UPDATE public.comprobantes SET estado_fiscal='pendiente_cae',intentos_reintento=0,ventana_regularizacion_iniciada_en=ahora,proximo_reintento_en=ahora+interval '10 minutes',detalle_error_fiscal=NULL WHERE id=cb.id;
+ INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'reabrir',ex.id);
+ RETURN jsonb_build_object('reabierto',true);
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.consultar_monitoreo_fiscal(p_page integer DEFAULT 1,p_page_size integer DEFAULT 20,p_estado text DEFAULT NULL,p_tipo text DEFAULT NULL,p_busqueda text DEFAULT NULL,p_desde date DEFAULT NULL,p_hasta date DEFAULT NULL)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE rol public.rol_usuario;result jsonb;
+BEGIN
+ rol:=private.require_operador();
+ IF p_page IS NULL OR p_page<1 OR p_page_size IS NULL OR p_page_size NOT IN(20,50,100) OR p_estado IS NOT NULL AND p_estado NOT IN('pendiente_cae','fallido','anulacion_pendiente') OR p_tipo IS NOT NULL AND p_tipo NOT IN('factura','nota_credito') OR length(coalesce(p_busqueda,''))>100 OR p_desde>p_hasta THEN RAISE EXCEPTION 'Filtros fiscales inválidos' USING ERRCODE='22023';END IF;
+ WITH filas AS(
+ SELECT c.*,p.fecha_pago,p.monto,p.estado pago_estado,s.id socio_id,s.nombre,s.apellido,s.dni,s.numero_socio,
+ ex.estado operacion,
+ (SELECT n.id FROM public.comprobantes n WHERE n.comprobante_origen_id=c.id AND n.tipo='nota_credito')nc_id
+ FROM public.comprobantes c JOIN public.pagos p ON p.id=c.pago_id JOIN public.cuotas q ON q.id=p.cuota_id JOIN public.socios s ON s.id=q.socio_id
+ LEFT JOIN LATERAL(SELECT e.estado FROM private.fiscal_ejecuciones e WHERE e.comprobante_id=c.id ORDER BY e.iniciado_en DESC,e.id DESC LIMIT 1)ex ON true
+ WHERE c.estado_fiscal IN('pendiente_cae','fallido','anulacion_pendiente') AND(p_estado IS NULL OR c.estado_fiscal::text=p_estado) AND(p_tipo IS NULL OR c.tipo::text=p_tipo)
+ AND(nullif(btrim(p_busqueda),'')IS NULL OR s.nombre ILIKE '%'||p_busqueda||'%' OR s.apellido ILIKE '%'||p_busqueda||'%' OR s.dni ILIKE '%'||p_busqueda||'%' OR s.numero_socio::text=p_busqueda)
+ AND(p_desde IS NULL OR p.fecha_pago>=p_desde::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+ AND(p_hasta IS NULL OR p.fecha_pago<(p_hasta+1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+ ),pagina AS(SELECT * FROM filas ORDER BY fecha_pago DESC,id DESC LIMIT p_page_size OFFSET (p_page-1)::bigint*p_page_size)
+ SELECT jsonb_build_object('items',coalesce(jsonb_agg(jsonb_build_object(
+ 'comprobanteId',id,'pagoId',pago_id,'socio',jsonb_build_object('id',socio_id,'nombre',nombre,'apellido',apellido,'dni',dni,'nroSocio',numero_socio),
+ 'tipo',tipo,'estadoFiscal',estado_fiscal,'fechaCobro',fecha_pago,'monto',monto::text,'intentos',intentos_reintento,'ventanaInicio',ventana_regularizacion_iniciada_en,'ventanaFin',ventana_regularizacion_iniciada_en+interval '24 hours','proximoReintento',proximo_reintento_en,'numero',numero_comprobante,'cae',cae,'vencimiento',cae_vencimiento,'detalleError',detalle_error_fiscal,'origenId',comprobante_origen_id,'ncId',nc_id,'pagoEstado',pago_estado,'operacion',operacion,
+ 'acciones',jsonb_build_object('registrarExterno',rol='admin' AND numero_solicitado IS NOT NULL AND solicitud_fiscal IS NOT NULL AND estado_fiscal IN('fallido','anulacion_pendiente'),'forzar',rol='admin' AND estado_fiscal='pendiente_cae' AND intentos_reintento<6 AND now()<ventana_regularizacion_iniciada_en+interval '24 hours' AND(tipo='nota_credito' OR pago_estado='completado'),'reabrir',rol='admin' AND estado_fiscal='fallido' AND(tipo='nota_credito' OR pago_estado='completado'),'resolver',rol='admin' AND estado_fiscal='anulacion_pendiente' AND cae IS NULL),'bloqueo',CASE WHEN estado_fiscal='anulacion_pendiente' AND cae IS NOT NULL THEN 'La factura espera la Nota de Crédito; no se vuelve a emitir.' WHEN pago_estado='anulado' AND tipo='factura' THEN 'La anulación financiera está confirmada; sólo se resuelve el documento.' WHEN numero_solicitado IS NOT NULL AND solicitud_fiscal IS NULL THEN 'Documento legado sin snapshot verificable: requiere revisión.' ELSE NULL END
+ ) ORDER BY fecha_pago DESC,id DESC),'[]'::jsonb),'page',p_page,'pageSize',p_page_size,'total',(SELECT count(*) FROM filas),'conteos',(SELECT jsonb_build_object('pendientes',count(*)FILTER(WHERE estado_fiscal='pendiente_cae'),'fallidos',count(*)FILTER(WHERE estado_fiscal='fallido'),'anulacionPendiente',count(*)FILTER(WHERE estado_fiscal='anulacion_pendiente'))FROM filas)) INTO result FROM pagina;
+ RETURN result;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.registrar_autorizacion_verificada_fiscal(p_comprobante_id uuid,p_ejecucion_id uuid,p_version bigint,p_resultado jsonb,p_actor_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ref private.fiscal_ejecuciones%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;se private.fiscal_series%ROWTYPE;cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;new_id uuid:=gen_random_uuid();result jsonb;
+BEGIN
+ IF p_actor_id IS NULL THEN RAISE EXCEPTION 'Se requiere administrador activo' USING ERRCODE='42501';END IF;
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ SELECT * INTO ref FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id AND comprobante_id=p_comprobante_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'El intento fiscal no corresponde al comprobante' USING ERRCODE='22023';END IF;
+ SELECT * INTO se FROM private.fiscal_series WHERE id=ref.serie_id FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id;
+ SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id FOR UPDATE;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE id=ref.id FOR UPDATE;
+ IF ex.version IS DISTINCT FROM p_version OR EXISTS(SELECT 1 FROM private.fiscal_ejecuciones e WHERE e.comprobante_id=cb.id AND e.iniciado_en>ex.iniciado_en) THEN RAISE EXCEPTION 'El intento fiscal cambió, consultar de nuevo' USING ERRCODE='40001';END IF;
+ IF ex.estado='autorizado' AND ex.resultado=p_resultado THEN RETURN private.fiscal_ejecucion_json(ex.id);END IF;
+ IF ex.estado<>'rechazado' OR NOT ex.posible_envio OR ex.solicitud IS NULL OR se.ejecucion_activa IS NOT NULL OR p_resultado->>'tipo' IS DISTINCT FROM 'autorizado' THEN RAISE EXCEPTION 'No se admite atribuir esta autorización externa' USING ERRCODE='40001';END IF;
+ IF NOT(private.fiscal_elegible(cb,pg) OR(cb.tipo='factura' AND pg.estado='anulado' AND cb.estado_fiscal='anulacion_pendiente')) THEN RAISE EXCEPTION 'La situación financiera no admite esta resolución' USING ERRCODE='40001';END IF;
+ UPDATE private.fiscal_series SET version=version+1 WHERE id=se.id RETURNING * INTO se;
+ INSERT INTO private.fiscal_ejecuciones(id,comprobante_id,serie_id,version,clase,estado,numero,solicitud,posible_envio)
+ VALUES(new_id,cb.id,se.id,se.version,'conciliacion','posible_envio',ex.numero,ex.solicitud,true);
+ UPDATE private.fiscal_series SET ejecucion_activa=new_id WHERE id=se.id;
+ -- Valida todos los campos contra snapshot exacto antes de proyectar; cualquier error revierte todo.
+ result:=public.confirmar_resultado_fiscal(new_id,se.version,p_resultado);
+ INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'registrar_externo',new_id);
+ RETURN result;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.iniciar_ejecucion_fiscal_administrativa(p_comprobante_id uuid,p_modo text,p_ejecucion_id uuid,p_actor_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE result jsonb;
+BEGIN
+ IF p_actor_id IS NULL OR p_modo IS NULL OR p_modo NOT IN('manual','conciliacion') THEN RAISE EXCEPTION 'Acción administrativa inválida' USING ERRCODE='42501';END IF;
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ result:=public.iniciar_ejecucion_fiscal(p_comprobante_id,p_modo,p_ejecucion_id);
+ IF result->>'estado' IN('adquirida','conciliacion') THEN
+  INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(p_comprobante_id,p_actor_id,'forzar',(result#>>'{ejecucion,id}')::uuid);
+ END IF;
+ RETURN result;
+END;$$;
+
+-- Cierre administrativo de una ejecución confirmada sin posible envío tras consulta sin hallazgo.
+CREATE OR REPLACE FUNCTION public.reabrir_sin_envio_fiscal(p_comprobante_id uuid,p_ejecucion_id uuid,p_version bigint,p_actor_id uuid)
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ref private.fiscal_ejecuciones%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;
+ cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;se private.fiscal_series%ROWTYPE;result jsonb;
+BEGIN
+ IF p_actor_id IS NULL THEN RAISE EXCEPTION 'Se requiere administrador activo' USING ERRCODE='42501';END IF;
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ SELECT * INTO ref FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id AND comprobante_id=p_comprobante_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'La ejecución no corresponde al comprobante' USING ERRCODE='40001';END IF;
+ SELECT * INTO se FROM private.fiscal_series WHERE id=ref.serie_id FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id;
+ SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id FOR UPDATE;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id ORDER BY iniciado_en DESC,id DESC LIMIT 1 FOR UPDATE;
+ IF cb.estado_fiscal<>'fallido' OR NOT private.fiscal_elegible(cb,pg) THEN RETURN jsonb_build_object('reabierto',false);END IF;
+ IF ex.id IS DISTINCT FROM p_ejecucion_id OR ex.version IS DISTINCT FROM p_version OR se.version IS DISTINCT FROM p_version OR se.ejecucion_activa IS DISTINCT FROM ex.id THEN RAISE EXCEPTION 'La adquisición cambió, consultar nuevamente' USING ERRCODE='40001';END IF;
+ IF ex.posible_envio OR ex.estado NOT IN('adquirida','preparada','incidencia') THEN RAISE EXCEPTION 'No consta que el intento siga sin envío; no se reabre' USING ERRCODE='40001';END IF;
+ -- Nuevo fence antes de liberar la serie: el antiguo trabajador ya no puede
+ -- preparar, marcar ni confirmar. Snapshot y número anteriores quedan en historia.
+ UPDATE private.fiscal_series SET version=version+1,ejecucion_activa=NULL WHERE id=se.id RETURNING * INTO se;
+ UPDATE private.fiscal_ejecuciones SET version=se.version,estado='transitorio',cerrado_en=clock_timestamp(),actualizado_en=clock_timestamp(),
+ resultado=jsonb_build_object('tipo','transitorio','codigos',jsonb_build_array(jsonb_build_object('codigo','CIERRE_SIN_ENVIO','mensaje','Consulta administrativa sin hallazgo y ejecución sin posible envío; adquisición anterior cerrada')))
+ WHERE id=ex.id RETURNING * INTO ex;
+ -- Reapertura y auditoría forman parte de la misma transacción, no otro commit.
+ result:=public.reabrir_verificado_fiscal(cb.id,ex.id,ex.version,p_actor_id);
+ IF result->>'reabierto' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'No se confirmó la reapertura' USING ERRCODE='40001';END IF;
+ RETURN result;
+END;$$;
+
+-- Cerrar sólo el documento de una anulación posterior a rechazo terminal tras consulta sin hallazgo.
+CREATE OR REPLACE FUNCTION public.resolver_rechazo_anulado_fiscal(
+ p_comprobante_id uuid,p_ejecucion_id uuid,p_version bigint,p_actor_id uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ref private.fiscal_ejecuciones%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;
+ cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;actual uuid;
+BEGIN
+ IF p_actor_id IS NULL THEN RAISE EXCEPTION 'Se requiere administrador activo' USING ERRCODE='42501';END IF;
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ SELECT * INTO ref FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id AND comprobante_id=p_comprobante_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'La ejecución no corresponde al comprobante' USING ERRCODE='40001';END IF;
+ PERFORM 1 FROM private.fiscal_series WHERE id=ref.serie_id FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id;
+ SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE comprobante_origen_id=cb.id AND tipo='nota_credito' ORDER BY id FOR UPDATE;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE id=ref.id FOR UPDATE;
+ SELECT id INTO actual FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ IF ex.id IS DISTINCT FROM actual OR ex.version IS DISTINCT FROM p_version THEN
+  RAISE EXCEPTION 'El intento fiscal cambió, consultar nuevamente' USING ERRCODE='40001';END IF;
+ IF ex.estado<>'rechazado' OR ex.resultado->>'tipo' IS DISTINCT FROM 'rechazado' OR ex.cerrado_en IS NULL
+ OR NOT ex.posible_envio OR ex.numero IS NULL OR ex.solicitud IS NULL
+ OR cb.tipo<>'factura' OR pg.estado<>'anulado' OR cb.cae IS NOT NULL OR cb.numero_comprobante IS NOT NULL
+ OR cb.numero_solicitado IS DISTINCT FROM ex.numero OR cb.solicitud_fiscal IS DISTINCT FROM ex.solicitud
+ OR EXISTS(SELECT 1 FROM public.comprobantes WHERE comprobante_origen_id=cb.id AND tipo='nota_credito') THEN
+  RAISE EXCEPTION 'El documento no admite cierre por rechazo confirmado' USING ERRCODE='40001';END IF;
+ IF cb.estado_fiscal='anulado' AND EXISTS(SELECT 1 FROM private.fiscal_auditoria WHERE comprobante_id=cb.id AND ejecucion_id=ex.id AND accion='resolver_anulacion') THEN
+  RETURN jsonb_build_object('resuelto',true);END IF;
+ IF cb.estado_fiscal<>'anulacion_pendiente' THEN
+  RAISE EXCEPTION 'No hay anulación pendiente elegible' USING ERRCODE='40001';END IF;
+ UPDATE public.comprobantes SET estado_fiscal='anulado',proximo_reintento_en=NULL,detalle_error_fiscal=NULL WHERE id=cb.id;
+ INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'resolver_anulacion',ex.id);
+ RETURN jsonb_build_object('resuelto',true);
+END;$$;
+
+-- Cierre documental local de anulación sólo con historia íntegra sin envío.
+CREATE OR REPLACE FUNCTION public.resolver_anulacion_sin_envio_fiscal(
+ p_comprobante_id uuid,p_ejecucion_id uuid,p_version bigint,p_actor_id uuid
+) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE ref private.fiscal_ejecuciones%ROWTYPE;ex private.fiscal_ejecuciones%ROWTYPE;
+ cb public.comprobantes%ROWTYPE;pg public.pagos%ROWTYPE;se private.fiscal_series%ROWTYPE;actual uuid;
+BEGIN
+ IF p_actor_id IS NULL THEN RAISE EXCEPTION 'Se requiere administrador activo' USING ERRCODE='42501';END IF;
+ PERFORM private.fiscal_actor_admin(p_actor_id);
+ SELECT * INTO ref FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id AND comprobante_id=p_comprobante_id;
+ IF NOT FOUND THEN RAISE EXCEPTION 'La ejecución no corresponde al comprobante' USING ERRCODE='40001';END IF;
+ SELECT * INTO se FROM private.fiscal_series WHERE id=ref.serie_id FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id;
+ SELECT * INTO pg FROM public.pagos WHERE id=cb.pago_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE id=CASE WHEN cb.tipo='factura' THEN cb.id ELSE cb.comprobante_origen_id END FOR UPDATE;
+ SELECT * INTO cb FROM public.comprobantes WHERE id=ref.comprobante_id FOR UPDATE;
+ PERFORM 1 FROM public.comprobantes WHERE comprobante_origen_id=cb.id AND tipo='nota_credito' ORDER BY id FOR UPDATE;
+ SELECT * INTO ex FROM private.fiscal_ejecuciones WHERE id=ref.id FOR UPDATE;
+ SELECT id INTO actual FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id ORDER BY iniciado_en DESC,id DESC LIMIT 1;
+ IF ex.id IS DISTINCT FROM actual OR ex.version IS DISTINCT FROM p_version THEN
+  RAISE EXCEPTION 'El intento fiscal cambió, consultar nuevamente' USING ERRCODE='40001';END IF;
+ IF cb.tipo<>'factura' OR pg.estado<>'anulado' OR cb.estado_fiscal NOT IN('anulacion_pendiente','anulado')
+ OR cb.cae IS NOT NULL OR cb.numero_comprobante IS NOT NULL
+ OR EXISTS(SELECT 1 FROM public.comprobantes WHERE comprobante_origen_id=cb.id AND tipo='nota_credito')
+ OR EXISTS(SELECT 1 FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id AND(posible_envio OR estado NOT IN('adquirida','preparada','incidencia','transitorio')))
+ OR EXISTS(SELECT 1 FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id AND(serie_id<>ref.serie_id OR(id<>ex.id AND(estado<>'transitorio' OR cerrado_en IS NULL))))
+ OR cb.numero_solicitado IS NULL OR cb.solicitud_fiscal IS NULL
+ OR NOT EXISTS(SELECT 1 FROM private.fiscal_ejecuciones WHERE comprobante_id=cb.id AND NOT posible_envio AND numero=cb.numero_solicitado AND solicitud=cb.solicitud_fiscal AND private.fiscal_solicitud_valida(solicitud)) THEN
+  RETURN jsonb_build_object('resuelto',false);END IF;
+ IF cb.estado_fiscal='anulado' THEN
+  RETURN jsonb_build_object('resuelto',EXISTS(SELECT 1 FROM private.fiscal_auditoria WHERE comprobante_id=cb.id AND ejecucion_id=ex.id AND accion='resolver_anulacion'));END IF;
+ IF se.ejecucion_activa=ex.id THEN
+  IF se.version IS DISTINCT FROM ex.version THEN RAISE EXCEPTION 'La adquisición fiscal cambió' USING ERRCODE='40001';END IF;
+  -- El fence y el puntero invalidan al trabajador anterior. La versión de la
+  -- ejecución cerrada se conserva, como en otros resultados terminales, para
+  -- recuperar una respuesta perdida sin volver a modificar el documento.
+  UPDATE private.fiscal_series SET version=version+1,ejecucion_activa=NULL WHERE id=se.id;
+  UPDATE private.fiscal_ejecuciones SET estado='transitorio',resultado=jsonb_build_object('tipo','transitorio','codigos',jsonb_build_array(jsonb_build_object('codigo','CIERRE_ANULACION_SIN_ENVIO','mensaje','Cierre administrativo de historia íntegra sin posible envío'))),cerrado_en=clock_timestamp(),actualizado_en=clock_timestamp() WHERE id=ex.id;
+ ELSIF ex.estado<>'transitorio' OR ex.cerrado_en IS NULL THEN
+  RAISE EXCEPTION 'La adquisición requiere revisión; no se libera otra ejecución' USING ERRCODE='40001';
+ END IF;
+ UPDATE public.comprobantes SET estado_fiscal='anulado',proximo_reintento_en=NULL,detalle_error_fiscal=NULL WHERE id=cb.id;
+ INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'resolver_anulacion',ex.id);
+ RETURN jsonb_build_object('resuelto',true);
+END;$$;

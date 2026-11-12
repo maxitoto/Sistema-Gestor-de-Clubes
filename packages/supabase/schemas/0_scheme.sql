@@ -465,3 +465,14 @@ CREATE TABLE private.wsaa_tickets(
  propietario uuid,version integer NOT NULL DEFAULT 0 CHECK(version>=0),lease_hasta timestamptz,
  CHECK((sobre IS NULL)=(vence_en IS NULL)),CHECK((propietario IS NULL)=(lease_hasta IS NULL))
 );
+
+-- Regularización, Nota de Crédito y auditoría de acciones fiscales administrativas.
+ALTER TABLE private.fiscal_configuracion ADD COLUMN tipo_nota_credito integer CHECK(tipo_nota_credito BETWEEN 1 AND 999);
+ALTER TABLE private.fiscal_configuracion ADD CONSTRAINT tipo_nc_distinto_factura CHECK(tipo_nota_credito IS NULL OR tipo_nota_credito<>tipo_factura);
+ALTER TABLE private.fiscal_ejecuciones DROP CONSTRAINT fiscal_ejecuciones_clase_check;
+ALTER TABLE private.fiscal_ejecuciones ADD CONSTRAINT fiscal_ejecuciones_clase_check CHECK(clase IN('inicial','conciliacion','manual','automatico'));
+CREATE TABLE private.fiscal_auditoria(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),comprobante_id uuid NOT NULL REFERENCES public.comprobantes(id),
+ actor_id uuid REFERENCES public.usuarios(id),accion text NOT NULL CHECK(accion IN('reabrir','resolver_anulacion','forzar','registrar_externo')),
+ ejecucion_id uuid REFERENCES private.fiscal_ejecuciones(id),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
