@@ -65,9 +65,12 @@ export const MainLayout = () => {
 			: []),
 	];
 	const pageTitle =
-		navigation.find(
-			(item) => item.to === pathname || (item.to === '/socios' && pathname.startsWith('/socios/')),
-		)?.label ?? 'Gestión del club';
+		pathname === '/monitoreo-fiscal'
+			? 'Monitoreo fiscal'
+			: (navigation.find(
+					(item) =>
+						item.to === pathname || (item.to === '/socios' && pathname.startsWith('/socios/')),
+				)?.label ?? 'Gestión del club');
 	const sidebar = (
 		<Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 			<Box
@@ -105,6 +108,7 @@ export const MainLayout = () => {
 						key={to}
 						component={NavLink}
 						to={to}
+						className={to === '/pagos' && pathname === '/monitoreo-fiscal' ? 'active' : ''}
 						onClick={() => setMobileOpen(false)}
 						sx={{
 							mb: 0.75,

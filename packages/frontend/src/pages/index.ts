@@ -3,6 +3,7 @@ export { DashboardPage } from './dashboard/ui/DashboardPage';
 export { DeportesPage } from './deportes/ui/DeportesPage';
 export { GastosPage } from './gastos';
 export { LoginPage } from './login/ui/LoginPage';
+export { MonitoreoFiscalPage } from './monitoreo-fiscal';
 export { PagosPage } from './pagos';
 export { RecoverPasswordPage } from './recover-password/ui/RecoverPasswordPage';
 export { SetPasswordPage } from './set-password/ui/SetPasswordPage';

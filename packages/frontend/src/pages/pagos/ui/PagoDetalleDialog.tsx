@@ -14,6 +14,7 @@ import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getPagoCobranza } from '#entities/pago';
 import { useAuth } from '#entities/session';
+import { AnularCobroSection } from '#features/anular-cobro';
 import { FiscalComprobantePanel } from '#features/comprobante-fiscal';
 import {
 	estadoFiscalDocumento,
@@ -124,6 +125,20 @@ export function PagoDetalleDialog({
 									}}
 								/>
 							)}
+							<AnularCobroSection
+								key={`${cacheScope}:${pagoId}`}
+								pagoId={pagoId}
+								onUpdated={() => {
+									void query.refetch();
+									onUpdated?.();
+									if (pago.comprobante_id) {
+										void queryClient.invalidateQueries({
+											queryKey: ['comprobante-fiscal', cacheScope, pago.comprobante_id],
+											refetchType: 'active',
+										});
+									}
+								}}
+							/>
 							<Button component={Link} to={`/socios/${pago.socio_id}`} onClick={onClose}>
 								Ver ficha del socio
 							</Button>

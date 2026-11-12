@@ -22,7 +22,7 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getCategorias } from '#entities/categoria';
 import { getCuotasCobranza } from '#entities/cuota';
 import { getDeportes } from '#entities/deporte';
@@ -172,6 +172,9 @@ function PagosPanel({
 				<Typography variant="h4" component="h1">
 					Pagos y cobranzas
 				</Typography>
+				<Button component={Link} to="/monitoreo-fiscal" sx={{ mt: 1 }}>
+					Monitoreo fiscal
+				</Button>
 				<Typography sx={{ mt: 1 }} color="text.secondary">
 					Consultá cuotas y cobros, con su estado financiero y fiscal por separado.
 				</Typography>
