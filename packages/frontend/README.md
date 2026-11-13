@@ -1,40 +1,18 @@
 # Frontend del Sistema de Gestión de Clubes
 
-El frontend usa Bun, React y MUI. Ejecutar `bun install` desde la raíz del monorepo para instalar las dependencias del workspace.
+Aplicación web React y MUI ejecutada y compilada con Bun bajo arquitectura por capas (`app` → `pages` → `widgets` → `features` → `entities` → `shared`).
 
-## Configuración local
+Para la preparación inicial (`bun install`, `.env`), el levantamiento del entorno local, el mapa de capas y el listado completo de comandos de verificación, seguir el [README raíz](../../README.md).
 
-Crear `packages/frontend/.env` con las variables públicas del proyecto Supabase local que corresponde a `packages/supabase/config.toml`:
+## Reglas técnicas de entorno y compilación
 
-```dotenv
-PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
-PUBLIC_SUPABASE_ANON_KEY=REEMPLAZAR_POR_LA_CLAVE_PUBLICA_LOCAL
-```
+- **Variables `PUBLIC_*` en cliente:** `bun run dev` y `bun run build` inyectan las variables `PUBLIC_SUPABASE_URL` y `PUBLIC_SUPABASE_ANON_KEY` directamente en el JavaScript del navegador (`--env='PUBLIC_*'`). Utilizar únicamente la clave pública del proyecto; nunca incluir `service_role` ni secretos del backend en `.env`. Si cambia el entorno de destino, volver a ejecutar `bun run build`.
+- **Generación de tipos (`bun run types:sync`):** [scripts/sync-types.ts](scripts/sync-types.ts) lee el esquema desde la base Supabase local en ejecución, escribe de forma atómica [src/shared/types/model.ts](src/shared/types/model.ts) y lo formatea con Biome. Si la generación falla, conserva el archivo anterior; no editar `src/shared/types/model.ts` a mano.
+- **Diferencia entre `bun run build` y `bun run start`:** `bun run start` (`NODE_ENV=production`) ejecuta [src/index.ts](src/index.ts), que procesa [src/index.html](src/index.html) en caliente mediante `Bun.serve` y **no** sirve el directorio estático `dist/`. Para publicar o probar el artefacto generado por `bun run build`, servir `dist/` desde un servidor estático con fallback SPA a `index.html` para todas las rutas de la aplicación.
 
-Estas variables se incorporan al JavaScript del navegador. Usar la clave pública `anon`/publishable del proyecto; nunca una clave `service_role` ni los secretos de correo. El archivo `.env` está excluido de Git.
+## Notas técnicas de controles y pruebas
 
-La base Supabase y las Edge Functions se inician por separado desde el paquete backend. El proyecto local debe coincidir con el `project_id` de su configuración y contener la migración corregida.
+Los comandos de verificación están listados en el [README raíz](../../README.md). Particularidades propias del paquete frontend:
 
-## Comandos
-
-Ejecutar desde `packages/frontend`:
-
-```bash
-bun run types:sync
-bun run build
-bun run dev
-```
-
-- `types:sync` genera `src/shared/types/model.ts` desde la base Supabase local que está corriendo. Requiere tener aplicado el esquema correcto. Si la generación falla, conserva el archivo anterior. Ejecutarlo después de cambiar el esquema; no editar el archivo generado a mano.
-- `typecheck` comprueba los tipos sin generar archivos.
-- `build` ejecuta primero `typecheck` y luego genera el sitio estático en `dist/`. Sustituye las variables `PUBLIC_*`, igual que el servidor de desarrollo. Requiere la configuración del entorno de destino al compilar; no aplica migraciones ni regenera tipos.
-- `dev` inicia el servidor de desarrollo con recarga de cambios.
-- `start` inicia el servidor Bun desde `src/index.ts` en modo producción. Ese servidor procesa el HTML fuente; no sirve automáticamente el contenido de `dist/`. Para probar o publicar el artefacto de `build`, servir `dist/` con un servidor estático con fallback a `index.html` para las rutas de la aplicación.
-
-Para comprobar el código y los límites entre capas:
-
-```bash
-bun run lint
-```
-
-Una compilación correcta verifica el código y el empaquetado. Los recorridos de acceso, configuración, socios y correo deben probarse además contra el backend local. Registrar un aviso en la cola no ejecuta su procesador: el correo aparece en Mailpit después de que el backend procese los pendientes.
+- `bun run lint` combina formato y reglas de código ([biome.json](biome.json)) con los límites entre capas FSD definidos en [.dependency-cruiser.js](.dependency-cruiser.js).
+- `bun test` ejecuta las suites de [tests/](tests) sobre transporte/sesión, formularios y validaciones de dominio, cobranza, anulación, sincronización y monitoreo fiscal, caja, gastos y recuperación de usuarios y trabajos.
