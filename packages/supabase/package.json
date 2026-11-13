@@ -10,6 +10,8 @@
     "start:containers": "bunx supabase start --workdir ..",
     "correos:local": "bun --env-file=functions/.env scripts/procesar-correos-local.ts",
     "correos:una-vez": "bun --env-file=functions/.env scripts/procesar-correos-local.ts --once",
+    "fiscal:local": "bun --env-file=functions/.env scripts/procesar-fiscal-local.ts",
+    "fiscal:una-vez": "bun --env-file=functions/.env scripts/procesar-fiscal-local.ts --once",
     "stop": "bunx supabase stop --workdir ..",
     "db:reset": "bunx supabase db reset --workdir ..",
     "db:push": "bunx supabase db push --workdir ..",
