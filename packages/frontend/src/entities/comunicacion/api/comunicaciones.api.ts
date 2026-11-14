@@ -37,7 +37,7 @@ export async function getHistorialCorreo(
 	const params = new URLSearchParams({
 		page: String(c.page),
 		pageSize: String(c.pageSize),
-		estado: c.estado,
+		...(c.estado !== 'todos' ? { estado: c.estado } : {}),
 		sortBy: c.sortBy,
 		sortOrder: c.sortOrder,
 		...(rango.desde ? { desde: rango.desde } : {}),
