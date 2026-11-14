@@ -15,5 +15,5 @@ export {
   sendEmail,
   validarConfiguracionCorreo,
 } from "./mailer.ts";
-export type { MensajeIndividual } from "./mailer.ts";
+export type { AdjuntoPdf, MensajeIndividual } from "./mailer.ts";
 export { createEdgeClient, createServiceClient } from "./supabase.ts";

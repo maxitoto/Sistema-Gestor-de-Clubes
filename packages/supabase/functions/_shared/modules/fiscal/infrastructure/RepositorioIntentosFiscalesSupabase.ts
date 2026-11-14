@@ -107,11 +107,17 @@ export class RepositorioIntentosFiscalesSupabase
     resultado: ResultadoSolicitudArca,
   ) {
     return parseEjecucionFiscal(
-      await this.rpc("confirmar_resultado_fiscal", {
-        p_ejecucion_id: ejecucionId,
-        p_version: version,
-        p_resultado: resultado,
-      }),
+      await this.rpc(
+        this.actorVerificado
+          ? "confirmar_resultado_fiscal_con_actor"
+          : "confirmar_resultado_fiscal",
+        {
+          p_ejecucion_id: ejecucionId,
+          p_version: version,
+          p_resultado: resultado,
+          ...(this.actorVerificado ? { p_actor_id: this.actorVerificado } : {}),
+        },
+      ),
     );
   }
 }
