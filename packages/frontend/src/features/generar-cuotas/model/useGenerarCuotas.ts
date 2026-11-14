@@ -128,6 +128,7 @@ export function useGenerarCuotas({
 		await Promise.all([
 			queryClient.invalidateQueries({ queryKey: ['job-cuotas', scope] }),
 			queryClient.invalidateQueries({ queryKey: ['job-cuotas-periodo', scope] }),
+			queryClient.invalidateQueries({ queryKey: ['dashboard', scope] }),
 			...['socio', 'socio-deuda', 'inscripciones', 'cuotas', 'socios'].map((key) =>
 				queryClient.invalidateQueries({ queryKey: [key, scope], refetchType: 'none' }),
 			),

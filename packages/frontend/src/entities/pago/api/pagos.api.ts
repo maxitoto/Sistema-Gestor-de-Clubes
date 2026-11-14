@@ -1,17 +1,35 @@
-import { leerCobranza, solicitarCobranza } from '#shared/api/cobranza-read.api';
+import { solicitarCobranza } from '#shared/api/cobranza-read.api';
+import { leerGrillaReporte, type OpcionesReporte } from '#shared/api/reportes-read.api';
 import type { CriteriosCobranza, FilaCobranza } from '#shared/types/cobranza';
+import { criteriosCobranzaIniciales, parseFilaCobranza } from '#shared/types/cobranza';
 import { parseComprobanteCobrado } from '../model/cobroUuid';
-
 export interface SolicitudCobro {
 	cuotaId: string;
 	metodo: 'efectivo' | 'transferencia';
 	referencia: string | null;
 }
-export const getPagosCobranza = (
+export function getPagosReporte(
+	criterios: Omit<Partial<CriteriosCobranza>, 'limite'> & { limite?: number },
+	actorId: string,
+	signal?: AbortSignal,
+	opciones: OpcionesReporte = {},
+) {
+	return leerGrillaReporte(
+		'pagos',
+		{ ...criteriosCobranzaIniciales(), ...criterios },
+		parseFilaCobranza,
+		signal,
+		{ ...opciones, actorId },
+	);
+}
+export async function getPagosCobranza(
 	criterios: Partial<CriteriosCobranza>,
 	actorId: string,
 	signal?: AbortSignal,
-) => leerCobranza('pagos', criterios, actorId, signal);
+) {
+	const p = await getPagosReporte(criterios, actorId, signal);
+	return { filas: p.filas, total: p.total, deuda_filtrada: '0' };
+}
 export async function getPagoCobranza(id: string, actorId: string, signal?: AbortSignal) {
 	const result = await getPagosCobranza({ pago_id: id }, actorId, signal);
 	if (result.total > 1) {

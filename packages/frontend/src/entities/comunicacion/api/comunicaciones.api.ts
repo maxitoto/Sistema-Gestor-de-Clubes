@@ -1,11 +1,12 @@
 import { createHumanRequestClient } from '#shared/api/humanRequest';
+import { leerGrillaReporte, type OpcionesReporte } from '#shared/api/reportes-read.api';
 import { rangoDiasCorreo, UUID_CORREO } from '#shared/lib/comunicaciones';
 import {
 	type CriteriosCandidatos,
 	type CriteriosHistorial,
 	parseCandidatos,
 	parseDetalleEnvio,
-	parseHistorial,
+	parseEnvioCorreo,
 } from '../model/comunicacionContract';
 export async function errorComunicaciones(error: unknown): Promise<Error> {
 	const ctx = error && typeof error === 'object' && 'context' in error ? error.context : null;
@@ -28,34 +29,46 @@ export async function errorComunicaciones(error: unknown): Promise<Error> {
 	}
 	return new Error('No se pudo consultar comunicaciones. Volvé a intentarlo.');
 }
+export function criteriosHistorialReporte(c: CriteriosHistorial) {
+	rangoDiasCorreo(c.desde, c.hasta);
+	return {
+		desde: c.desde,
+		hasta: c.hasta,
+		estado: c.estado,
+		sortBy: c.sortBy,
+		sortOrder: c.sortOrder,
+		pagina: c.page - 1,
+		limite: c.pageSize,
+	};
+}
+export async function getReporteCorreos(
+	c: CriteriosHistorial,
+	actorId: string,
+	signal?: AbortSignal,
+	opciones: OpcionesReporte & { pagina?: number; limite?: number } = {},
+) {
+	return leerGrillaReporte(
+		'correos',
+		{
+			...criteriosHistorialReporte(c),
+			...(opciones.pagina !== undefined ? { pagina: opciones.pagina } : {}),
+			...(opciones.limite !== undefined ? { limite: opciones.limite } : {}),
+		},
+		parseEnvioCorreo,
+		signal,
+		{ ...opciones, actorId },
+	);
+}
 export async function getHistorialCorreo(
 	c: CriteriosHistorial,
 	actorId: string,
 	signal?: AbortSignal,
 ) {
-	const rango = rangoDiasCorreo(c.desde, c.hasta);
-	const params = new URLSearchParams({
-		page: String(c.page),
-		pageSize: String(c.pageSize),
-		...(c.estado !== 'todos' ? { estado: c.estado } : {}),
-		sortBy: c.sortBy,
-		sortOrder: c.sortOrder,
-		...(rango.desde ? { desde: rango.desde } : {}),
-		...(rango.hasta ? { hasta: rango.hasta } : {}),
-	});
-	const db = await createHumanRequestClient(actorId, signal);
-	const { data, error } = await db.functions.invoke(`comunicaciones/historial?${params}`, {
-		method: 'GET',
-		...(signal ? { signal } : {}),
-	});
-	if (error) {
-		throw await errorComunicaciones(error);
-	}
-	const result = parseHistorial(data);
-	if (result.page !== c.page || result.pageSize !== c.pageSize) {
+	const resultado = await getReporteCorreos(c, actorId, signal);
+	if (resultado.pagina !== c.page - 1 || resultado.limite !== c.pageSize) {
 		throw new Error('La página recibida no coincide con la consulta de correos.');
 	}
-	return result;
+	return { envios: resultado.filas, page: c.page, pageSize: c.pageSize, total: resultado.total };
 }
 export async function getDetalleCorreo(
 	id: string,

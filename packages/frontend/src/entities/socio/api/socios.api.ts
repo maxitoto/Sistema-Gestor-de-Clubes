@@ -1,50 +1,46 @@
 // src/modules/socios/api/socios.api.ts
 import { supabase } from '#shared/api';
+import { leerGrillaReporte, type OpcionesReporte } from '#shared/api/reportes-read.api';
 import type { TablesInsert } from '#shared/types';
+import {
+	type CriteriosSocios,
+	criteriosSociosDesdeUrl,
+	parseSocioReporte,
+	type SocioListado,
+} from '../model/sociosReporte';
 
 export interface GetSociosParams {
 	page: number;
 	limit: number;
 	searchTerm: string;
-	estado?: 'activo' | 'inactivo' | 'todos';
+	estado?: CriteriosSocios['estado'];
+	filtros?: Partial<CriteriosSocios> | undefined;
 }
-
+export async function getSociosReporte(
+	criterios: CriteriosSocios,
+	signal?: AbortSignal,
+	opciones: OpcionesReporte = {},
+) {
+	return leerGrillaReporte('socios', criterios, parseSocioReporte, signal, opciones);
+}
 export async function getSocios(
-	{ page, limit, searchTerm, estado = 'todos' }: GetSociosParams,
+	{ page, limit, searchTerm, estado = 'todos', filtros = {} }: GetSociosParams,
 	signal?: AbortSignal,
 ) {
-	const from = (page - 1) * limit;
-	let query = supabase
-		.from('socios')
-		.select(
-			'id, numero_socio, nombre, apellido, dni, estado, email, acepta_comunicaciones, email_invalido',
-			{
-				count: 'exact',
-			},
-		)
-		.order('apellido', { ascending: true })
-		.order('id', { ascending: true })
-		.range(from, from + limit - 1);
-	if (estado !== 'todos') {
-		query = query.eq('estado', estado);
-	}
-	if (searchTerm.trim()) {
-		query = query.ilike('apellido', `%${searchTerm.trim()}%`);
-	}
-	const timeoutSignal = AbortSignal.timeout(10_000);
-	query = query.abortSignal(signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal);
-	const { data, count, error } = await query;
-	if (error) {
-		throw error;
-	}
-	return {
-		socios: data ?? [],
-		total: count ?? 0,
-		totalPages: Math.max(1, Math.ceil((count ?? 0) / limit)),
-	};
+	const p = await getSociosReporte(
+		{
+			...criteriosSociosDesdeUrl(new URLSearchParams()),
+			...filtros,
+			pagina: page - 1,
+			limite: limit,
+			buscar: searchTerm,
+			estado,
+		},
+		signal,
+	);
+	return { socios: p.filas, total: p.total, totalPages: Math.max(1, Math.ceil(p.total / limit)) };
 }
-
-export type SocioListado = Awaited<ReturnType<typeof getSocios>>['socios'][number];
+export type { SocioListado } from '../model/sociosReporte';
 
 export type CrearSocioPayload = Required<
 	Pick<

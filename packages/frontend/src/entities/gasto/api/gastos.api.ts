@@ -1,6 +1,7 @@
 import { createHumanRequestClient, supabase } from '#shared/api';
+import { leerGrillaReporte, type OpcionesReporte } from '#shared/api/reportes-read.api';
+import { rangoDiasCorreo } from '#shared/lib/comunicaciones';
 import { parseGasto } from '../model/gastoContract';
-
 export interface DatosGasto {
 	categoria_id: string;
 	fecha: string;
@@ -38,36 +39,20 @@ const columnas =
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const timed = (signal?: AbortSignal) =>
 	signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000);
+export async function getReporteGastos(
+	filters: FiltrosGasto,
+	signal?: AbortSignal,
+	opciones: OpcionesReporte = {},
+) {
+	rangoDiasCorreo(filters.desde, filters.hasta);
+	return leerGrillaReporte('gastos', { ...filters }, parseGasto, signal, opciones);
+}
 export async function getGastos(filters: FiltrosGasto, signal?: AbortSignal) {
-	let query = supabase.from('gastos').select(columnas, { count: 'exact' });
-	if (filters.desde) {
-		query = query.gte('fecha', filters.desde);
+	const resultado = await getReporteGastos(filters, signal);
+	if (resultado.pagina !== filters.pagina || resultado.limite !== filters.limite) {
+		throw new Error('La página recibida no coincide con los gastos consultados.');
 	}
-	if (filters.hasta) {
-		query = query.lte('fecha', filters.hasta);
-	}
-	if (filters.categoriaId) {
-		query = query.eq('categoria_id', filters.categoriaId);
-	}
-	if (filters.metodo === 'efectivo' || filters.metodo === 'transferencia') {
-		query = query.eq('metodo_pago', filters.metodo);
-	}
-	if (filters.estado === 'activo' || filters.estado === 'anulado') {
-		query = query.eq('estado', filters.estado);
-	}
-	if (filters.busqueda.trim()) {
-		const pattern = JSON.stringify(`%${filters.busqueda.trim().replace(/[%_]/g, '$&')}%`);
-		query = query.or(`concepto.ilike.${pattern},descripcion.ilike.${pattern}`);
-	}
-	const { data, count, error } = await query
-		.order(filters.orden, { ascending: filters.ascendente })
-		.order('id', { ascending: filters.ascendente })
-		.range(filters.pagina * filters.limite, (filters.pagina + 1) * filters.limite - 1)
-		.abortSignal(timed(signal));
-	if (error) {
-		throw error;
-	}
-	return { gastos: (data ?? []).map(parseGasto), total: count ?? 0 };
+	return { gastos: resultado.filas, total: resultado.total };
 }
 export async function getGasto(id: string, signal?: AbortSignal): Promise<Gasto | null> {
 	if (!uuid.test(id)) {
@@ -163,10 +148,7 @@ export async function anularGasto(
 	signal?: AbortSignal,
 ) {
 	const client = await createHumanRequestClient(actorId, signal);
-	const { error, status } = await client.rpc('anular_gasto', {
-		p_gasto_id: id,
-		p_motivo: motivo,
-	});
+	const { error, status } = await client.rpc('anular_gasto', { p_gasto_id: id, p_motivo: motivo });
 	if (error) {
 		throw Object.assign(error, { status });
 	}
