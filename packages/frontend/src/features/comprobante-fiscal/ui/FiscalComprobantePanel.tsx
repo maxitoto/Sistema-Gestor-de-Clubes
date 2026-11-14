@@ -18,8 +18,8 @@ import {
 	generarPdfComprobante,
 	getEstadoComprobante,
 } from '#entities/comprobante';
+import { EstadoNotificacionCorreo } from '#entities/comunicacion';
 import { useAuth } from '#entities/session';
-
 export function FiscalComprobantePanel({
 	comprobanteId,
 	autoEmitir = false,
@@ -205,6 +205,12 @@ export function FiscalComprobantePanel({
 					{needsCheck ? ' Consultá el estado antes de volver a enviar.' : ''}
 				</Alert>
 			)}
+			<EstadoNotificacionCorreo
+				operation={{ comprobanteId }}
+				actorId={actorId}
+				cacheScope={cacheScope}
+				enabled={enabled}
+			/>
 			<Button disabled={!!busy || query.isFetching} onClick={() => void check()}>
 				Consultar estado
 			</Button>

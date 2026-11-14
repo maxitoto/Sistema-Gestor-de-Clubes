@@ -1,139 +1,184 @@
-// src/features/comunicaciones/send-email/ui/SendEmailPanel.tsx
-
 import {
 	Alert,
-	Box,
 	Button,
-	Checkbox,
-	FormControlLabel,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
 	MenuItem,
+	Paper,
 	Stack,
 	TextField,
 	Typography,
 } from '@mui/material';
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '#entities/session';
+import {
+	idsCanonicosCorreo,
+	validarTextoCorreo,
+	vistaPreviaCorreo,
+} from '#shared/lib/comunicaciones';
+import type { AvisoPayload, AvisoResult } from '../api/email.api';
 import { RequestIdentity } from '../model/requestIdentity';
 import { useAvisoManual, useEmailTemplates } from '../model/useEmail';
 
 interface Props {
+	tipo: 'general' | 'deuda';
+	incluirDesuscriptos: boolean;
 	selectedSocios: string[];
 	selectedLabels: string[];
+	elegibles: number;
+	excluidos: number;
 	onClearSelection: () => void;
-	onPendingChange: (pending: boolean) => void;
+	onPendingChange: (pendingRef: boolean) => void;
 	disabled?: boolean;
 }
 export function SendEmailPanel({
+	tipo,
+	incluirDesuscriptos,
 	selectedSocios,
 	selectedLabels,
+	elegibles,
+	excluidos,
 	onClearSelection,
 	onPendingChange,
 	disabled = false,
 }: Props) {
-	const mutation = useAvisoManual();
-	const templates = useEmailTemplates();
-	const [tipo, setTipo] = useState<'general' | 'deuda'>('general');
-	const [plantillaId, setPlantillaId] = useState('');
-	const [asunto, setAsunto] = useState('');
-	const [cuerpo, setCuerpo] = useState('');
-	const [incluirDesuscriptos, setIncluirDesuscriptos] = useState(false);
-	const [success, setSuccess] = useState('');
-	const requestIdentityRef = useRef(new RequestIdentity());
-	const locked = mutation.isPending || disabled;
+	const mutation = useAvisoManual(),
+		templates = useEmailTemplates(),
+		{ cacheScope, profileStatus, isSigningOut } = useAuth();
+	const [plantilla, setPlantilla] = useState(''),
+		[asunto, setAsunto] = useState(''),
+		[cuerpo, setCuerpo] = useState(''),
+		[review, setReview] = useState(false),
+		[busy, setBusy] = useState(false),
+		[uncertain, setUncertain] = useState(false),
+		[error, setError] = useState<string | null>(null),
+		[success, setSuccess] = useState<AvisoResult | null>(null);
+	const identityRef = useRef(new RequestIdentity()),
+		pendingRef = useRef<AvisoPayload | null>(null),
+		lockRef = useRef(false),
+		abortRef = useRef<AbortController | null>(null),
+		aliveRef = useRef(true);
+	const locked = busy || uncertain || disabled;
 	useEffect(() => {
-		onPendingChange(mutation.isPending);
+		aliveRef.current = true;
+		return () => {
+			aliveRef.current = false;
+			abortRef.current?.abort();
+		};
+	}, []);
+	useEffect(() => {
+		onPendingChange(busy || uncertain);
 		return () => onPendingChange(false);
-	}, [mutation.isPending, onPendingChange]);
-	const submit = (event: FormEvent<HTMLFormElement>) => {
-		event.preventDefault();
-		if (locked || selectedSocios.length === 0) {
+	}, [busy, uncertain, onPendingChange]);
+	const prepare = () => {
+		if (locked || !elegibles || profileStatus !== 'ready' || isSigningOut) {
 			return;
 		}
-		setSuccess('');
-		const payload = {
-			tipo,
-			asunto: tipo === 'deuda' ? 'Aviso de deuda' : asunto.trim(),
-			cuerpo:
-				tipo === 'deuda' ? 'Información de la deuda pendiente actual del socio.' : cuerpo.trim(),
-			sociosIds: [...selectedSocios].sort(),
-			plantillaId: tipo === 'general' && plantillaId ? plantillaId : null,
-			incluirDesuscriptos: tipo === 'deuda' && incluirDesuscriptos,
-		};
-		mutation.mutate(
-			{ ...payload, requestId: requestIdentityRef.current.forPayload(payload) },
-			{
-				onSuccess: (result) => {
-					setSuccess(
-						`${result.encolados} destinatarios aceptados en la cola; ${result.excluidos} excluidos. Referencia: ${result.id}. La entrega aún no está confirmada.`,
-					);
-					requestIdentityRef.current.reset();
-					onClearSelection();
-				},
-			},
-		);
+		setError(null);
+		try {
+			const ids = idsCanonicosCorreo(selectedSocios);
+			if (tipo === 'general') {
+				const issue = validarTextoCorreo(asunto, cuerpo);
+				if (issue) {
+					setError(issue);
+					return;
+				}
+			}
+			const payload = {
+				tipo,
+				asunto: tipo === 'deuda' ? 'Aviso de deuda' : asunto.trim(),
+				cuerpo:
+					tipo === 'deuda' ? 'Información de la deuda pendiente actual del socio.' : cuerpo.trim(),
+				sociosIds: ids,
+				plantillaId: tipo === 'general' && plantilla ? plantilla : null,
+				incluirDesuscriptos: tipo === 'deuda' && incluirDesuscriptos,
+			};
+			pendingRef.current = {
+				...payload,
+				requestId: identityRef.current.forPayload({ actor: cacheScope, ...payload }),
+			};
+			setReview(true);
+		} catch (e) {
+			setError(e instanceof Error ? e.message : 'Revisá la selección.');
+		}
 	};
+	const send = async () => {
+		if (lockRef.current || !pendingRef.current || profileStatus !== 'ready' || isSigningOut) {
+			return;
+		}
+		lockRef.current = true;
+		setBusy(true);
+		setError(null);
+		setReview(false);
+		const c = new AbortController();
+		abortRef.current = c;
+		try {
+			const result = await mutation.mutateAsync({ payload: pendingRef.current, signal: c.signal });
+			if (aliveRef.current) {
+				setSuccess(result);
+				setUncertain(false);
+				pendingRef.current = null;
+				identityRef.current.reset();
+				onClearSelection();
+			}
+		} catch (e) {
+			if (aliveRef.current) {
+				setError(e instanceof Error ? e.message : 'No se confirmó la solicitud.');
+				setUncertain(!(e && typeof e === 'object' && 'incierto' in e && e.incierto === false));
+			}
+		} finally {
+			if (aliveRef.current) {
+				lockRef.current = false;
+				setBusy(false);
+			}
+		}
+	};
+	const previewSubject = tipo === 'deuda' ? 'Aviso de deuda pendiente' : vistaPreviaCorreo(asunto);
+	const previewBody =
+		tipo === 'deuda'
+			? 'Cada destinatario recibirá el aviso institucional con su deuda pendiente y fecha de preparación. El importe histórico se conserva; si salda toda la deuda antes del despacho, el aviso se excluye.'
+			: vistaPreviaCorreo(cuerpo);
 	return (
-		<Box
-			component="form"
-			onSubmit={submit}
-			sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: 'divider' }}
-		>
+		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
 			<Stack spacing={2}>
-				<Typography variant="h6">Preparar aviso</Typography>
-				<Typography>
-					{selectedSocios.length} socios seleccionados. Revise los destinatarios antes de confirmar:
+				<Typography component="h2" variant="h6">
+					Componer y revisar el mensaje
 				</Typography>
-				{selectedLabels.length > 0 && (
-					<ul>
-						{selectedLabels.map((label) => (
-							<li key={label}>{label}</li>
-						))}
-					</ul>
-				)}
-				<TextField
-					select
-					label="Tipo de aviso"
-					value={tipo}
-					disabled={locked}
-					onChange={(e) => {
-						setTipo(e.target.value === 'deuda' ? 'deuda' : 'general');
-						setIncluirDesuscriptos(false);
-						mutation.reset();
-					}}
-				>
-					<MenuItem value="general">Comunicación general</MenuItem>
-					<MenuItem value="deuda">Aviso de deuda pendiente</MenuItem>
-				</TextField>
 				{tipo === 'general' ? (
 					<>
+						<TextField
+							select
+							label="Plantilla de correo"
+							value={plantilla}
+							disabled={locked || templates.isLoading}
+							onChange={(e) => {
+								const p = templates.data?.find((x) => x.id === e.target.value);
+								setPlantilla(p?.id ?? '');
+								if (p) {
+									setAsunto(p.asunto);
+									setCuerpo(p.cuerpo);
+								}
+								setSuccess(null);
+							}}
+						>
+							<MenuItem value="">Sin plantilla</MenuItem>
+							{templates.data?.map((p) => (
+								<MenuItem key={p.id} value={p.id}>
+									{p.nombre_interno}
+								</MenuItem>
+							))}
+						</TextField>
 						{templates.isError && (
 							<Alert
 								severity="warning"
 								action={<Button onClick={() => void templates.refetch()}>Reintentar</Button>}
 							>
-								No pudimos cargar las plantillas. Puede redactar el aviso.
+								No se pudieron cargar las plantillas. Podés redactar el mensaje.
 							</Alert>
 						)}
-						<TextField
-							select
-							label="Plantilla"
-							value={plantillaId}
-							disabled={locked || templates.isLoading}
-							onChange={(e) => {
-								const template = templates.data?.find((item) => item.id === e.target.value);
-								setPlantillaId(template?.id ?? '');
-								if (template) {
-									setAsunto(template.asunto);
-									setCuerpo(template.cuerpo);
-								}
-							}}
-						>
-							<MenuItem value="">Sin plantilla</MenuItem>
-							{templates.data?.map((template) => (
-								<MenuItem key={template.id} value={template.id}>
-									{template.nombre_interno}
-								</MenuItem>
-							))}
-						</TextField>
 						<TextField
 							label="Asunto"
 							required
@@ -141,68 +186,135 @@ export function SendEmailPanel({
 							disabled={locked}
 							onChange={(e) => {
 								setAsunto(e.target.value);
-								setPlantillaId('');
+								setPlantilla('');
+								setSuccess(null);
 							}}
-							slotProps={{ htmlInput: { maxLength: 200 } }}
+							slotProps={{ htmlInput: { maxLength: 255 } }}
 						/>
 						<TextField
 							label="Mensaje"
 							required
 							multiline
-							minRows={4}
+							minRows={5}
 							value={cuerpo}
 							disabled={locked}
 							onChange={(e) => {
 								setCuerpo(e.target.value);
-								setPlantillaId('');
+								setPlantilla('');
+								setSuccess(null);
 							}}
-							helperText="Escriba texto simple. Etiquetas disponibles: {{nombre}}, {{apellido}}, {{deporte}} y {{deuda}}."
+							slotProps={{ htmlInput: { maxLength: 10000 } }}
+							helperText="Etiquetas: {{nombre}}, {{apellido}}, {{deporte}} y {{deuda}}. Se muestran como texto simple."
 						/>
 					</>
 				) : (
 					<>
-						<Alert severity="info">
-							El servidor redacta un aviso institucional personalizado con la deuda pendiente
-							actual. Solo incluye socios que tengan deuda.
-						</Alert>
 						<TextField
-							label="Asunto"
-							value="Aviso de deuda"
+							label="Asunto del aviso"
+							value="Aviso de deuda pendiente"
 							slotProps={{ input: { readOnly: true } }}
 						/>
-						<FormControlLabel
-							control={
-								<Checkbox
-									checked={incluirDesuscriptos}
-									disabled={locked}
-									onChange={(e) => setIncluirDesuscriptos(e.target.checked)}
-								/>
-							}
-							label="Incluir socios desuscriptos exclusivamente para este aviso de deuda"
-						/>
+						<Alert severity="info">
+							El contenido del aviso de deuda se prepara con los datos confirmados de cada socio. No
+							se reemplaza con una comunicación general.
+						</Alert>
 					</>
 				)}
-				<Typography variant="body2" color="text.secondary">
-					Los correos inválidos siempre se excluyen. Los avisos generales se envían a socios
-					activos; los avisos de deuda también pueden incluir socios inactivos con deuda pendiente.
-					El envío se procesa en segundo plano y su resultado queda en el historial.
+				<Paper variant="outlined" sx={{ p: 2 }}>
+					<Typography component="h3" variant="subtitle1">
+						Vista previa orientativa con datos sintéticos
+					</Typography>
+					<Typography sx={{ fontWeight: 700, my: 1, overflowWrap: 'anywhere' }}>
+						{previewSubject}
+					</Typography>
+					<Typography sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+						{previewBody}
+					</Typography>
+				</Paper>
+				<Typography color="text.secondary">
+					Cada destinatario recibe un mensaje individual. Antes de despachar se vuelven a comprobar
+					dirección, preferencia y deuda; pueden cambiar las exclusiones.
 				</Typography>
-				{mutation.isError && <Alert severity="error">{mutation.error.message}</Alert>}
-				{success && <Alert severity="success">{success}</Alert>}
+				{error && <Alert severity={uncertain ? 'warning' : 'error'}>{error}</Alert>}
+				{uncertain && (
+					<Button variant="contained" disabled={busy} onClick={() => void send()}>
+						Recuperar la misma solicitud
+					</Button>
+				)}
+				{success && (
+					<Alert severity="success">
+						<Typography sx={{ fontWeight: 700 }}>Encolado</Typography>
+						En cola: {success.encolados}. Excluidos: {success.excluidos}. Los correos están siendo
+						enviados en segundo plano. La entrega todavía no está confirmada.{' '}
+						<Button component={Link} to={`/comunicaciones/${success.id}`}>
+							Ver resultado en el historial
+						</Button>
+					</Alert>
+				)}
 				<Button
-					type="submit"
 					variant="contained"
 					disabled={
-						selectedSocios.length === 0 ||
 						locked ||
+						!selectedSocios.length ||
+						!elegibles ||
 						(tipo === 'general' && (!asunto.trim() || !cuerpo.trim()))
 					}
+					onClick={prepare}
 				>
-					{mutation.isPending
-						? 'Confirmando...'
-						: `Confirmar aviso a ${selectedSocios.length} socios seleccionados`}
+					{busy ? 'Confirmando…' : 'Revisar y confirmar comunicación'}
 				</Button>
+				<Dialog
+					open={review}
+					fullWidth
+					maxWidth="md"
+					onClose={() => {
+						if (!busy) {
+							setReview(false);
+						}
+					}}
+				>
+					<DialogTitle>Confirmar comunicación</DialogTitle>
+					<DialogContent>
+						<Stack spacing={2}>
+							<Typography>
+								{selectedSocios.length} socios seleccionados: {elegibles} elegibles y {excluidos}{' '}
+								excluidos según la consulta actual.
+							</Typography>
+							<Typography variant="body2">
+								{selectedLabels.slice(0, 5).join(' · ')}
+								{selectedLabels.length > 5 ? ` · y ${selectedLabels.length - 5} más` : ''}
+							</Typography>
+							{tipo === 'deuda' && incluirDesuscriptos && (
+								<Alert severity="warning">
+									Se incluyen desuscriptos sólo si conservan deuda pendiente. Una dirección inválida
+									se excluye siempre.
+								</Alert>
+							)}
+							<Typography variant="body2" color="text.secondary">
+								Vista previa con datos de ejemplo. Cada mensaje usará los datos del socio.
+							</Typography>
+							<Typography sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
+								{previewSubject}
+							</Typography>
+							<Typography sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+								{previewBody}
+							</Typography>
+							<Alert severity="info">
+								Se guardará una única solicitud con los destinatarios elegidos. El resultado
+								confirmado será Encolado; consultá el historial para seguir el procesamiento.
+							</Alert>
+						</Stack>
+					</DialogContent>
+					<DialogActions>
+						<Button disabled={busy} onClick={() => setReview(false)}>
+							Volver a revisar
+						</Button>
+						<Button variant="contained" disabled={busy} onClick={() => void send()}>
+							Confirmar y encolar
+						</Button>
+					</DialogActions>
+				</Dialog>
 			</Stack>
-		</Box>
+		</Paper>
 	);
 }

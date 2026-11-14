@@ -1,6 +1,5 @@
-// src/modules/comuniciones/api/email.api.ts
-import { supabase } from '#shared/api/supabaseClient';
-
+import { createHumanRequestClient } from '#shared/api/humanRequest';
+import { idsCanonicosCorreo, UUID_CORREO, validarTextoCorreo } from '#shared/lib/comunicaciones';
 export interface AvisoPayload {
 	requestId: string;
 	tipo: 'general' | 'deuda';
@@ -23,61 +22,85 @@ export interface EmailTemplate {
 	cuerpo: string;
 	estado: 'activo' | 'inactivo';
 }
-
 async function responseError(error: unknown): Promise<Error> {
-	const response = error && typeof error === 'object' && 'context' in error ? error.context : null;
-	if (response instanceof Response) {
-		if (response.status === 401) {
-			return new Error('Su sesión venció. Ingrese nuevamente.');
+	const ctx = error && typeof error === 'object' && 'context' in error ? error.context : null;
+	if (ctx instanceof Response) {
+		if (ctx.status === 401) {
+			return Object.assign(new Error('La sesión venció. Ingresá nuevamente.'), { incierto: false });
 		}
-		if (response.status === 403) {
-			return new Error('Su cuenta no está habilitada para realizar este envío.');
+		if (ctx.status === 403) {
+			return Object.assign(new Error('Tu cuenta no está habilitada para este envío.'), {
+				incierto: false,
+			});
 		}
-		if (response.status === 400 || response.status === 409) {
-			const body: unknown = await response
+		if ([400, 409].includes(ctx.status)) {
+			const x: unknown = await ctx
 				.clone()
 				.json()
 				.catch(() => null);
-			if (body && typeof body === 'object' && 'error' in body && typeof body.error === 'string') {
-				return new Error(body.error);
+			if (x && typeof x === 'object' && 'error' in x && typeof x.error === 'string') {
+				return Object.assign(new Error(x.error), { incierto: false });
 			}
 		}
 	}
-	return new Error(
-		'No pudimos confirmar el resultado. Revise su conexión y reintente sin cambiar el mensaje para evitar duplicados.',
+	return Object.assign(
+		new Error(
+			'No se pudo confirmar la solicitud. Recuperá la misma solicitud sin modificar el contenido ni los destinatarios, o consultá el historial.',
+		),
+		{ incierto: true },
 	);
 }
-
-export async function dispararAvisoManual(payload: AvisoPayload): Promise<AvisoResult> {
-	const { data, error } = await supabase.functions.invoke<AvisoResult>(
-		'comunicaciones/enviar-aviso',
-		{ body: payload },
-	);
+export async function dispararAvisoManual(
+	payload: AvisoPayload,
+	actorId: string,
+	signal?: AbortSignal,
+): Promise<AvisoResult> {
+	if (!UUID_CORREO.test(payload.requestId)) {
+		throw Object.assign(new Error('No se pudo preparar la solicitud.'), { incierto: false });
+	}
+	const sociosIds = idsCanonicosCorreo(payload.sociosIds);
+	if (payload.tipo === 'general') {
+		const issue = validarTextoCorreo(payload.asunto, payload.cuerpo);
+		if (issue) {
+			throw Object.assign(new Error(issue), { incierto: false });
+		}
+	}
+	const db = await createHumanRequestClient(actorId, signal);
+	const { data, error } = await db.functions.invoke('comunicaciones/enviar-aviso', {
+		body: { ...payload, sociosIds },
+		...(signal ? { signal } : {}),
+	});
 	if (error) {
 		throw await responseError(error);
 	}
 	if (
 		!data ||
-		typeof data.id !== 'string' ||
+		!UUID_CORREO.test(data.id) ||
 		data.estado !== 'procesando' ||
-		!Number.isInteger(data.encolados) ||
+		!Number.isSafeInteger(data.encolados) ||
 		data.encolados < 0 ||
-		!Number.isInteger(data.excluidos) ||
-		data.excluidos < 0
+		!Number.isSafeInteger(data.excluidos) ||
+		data.excluidos < 0 ||
+		data.encolados + data.excluidos !== sociosIds.length
 	) {
-		throw new Error('El servidor no confirmó el envío. Reintente sin modificar el mensaje.');
+		throw Object.assign(
+			new Error('La respuesta no confirmó la solicitud completa. Recuperá la misma solicitud.'),
+			{ incierto: true },
+		);
 	}
-	return data;
+	return data as AvisoResult;
 }
-
-export async function getEmailTemplates(signal?: AbortSignal): Promise<EmailTemplate[]> {
-	const options = { method: 'GET' as const, ...(signal ? { signal } : {}) };
-	const { data, error } = await supabase.functions.invoke<{ templates: EmailTemplate[] }>(
-		'comunicaciones/plantillas',
-		options,
-	);
+export async function getEmailTemplates(
+	actorId: string,
+	signal?: AbortSignal,
+): Promise<EmailTemplate[]> {
+	const db = await createHumanRequestClient(actorId, signal);
+	const { data, error } = await db.functions.invoke('comunicaciones/plantillas', {
+		method: 'GET',
+		...(signal ? { signal } : {}),
+	});
 	if (error || !data || !Array.isArray(data.templates)) {
-		throw new Error('No pudimos cargar las plantillas.');
+		throw new Error('No se pudo consultar las plantillas activas.');
 	}
-	return data.templates.filter((template) => template.estado === 'activo');
+	return data.templates.filter((x: EmailTemplate) => x.estado === 'activo');
 }

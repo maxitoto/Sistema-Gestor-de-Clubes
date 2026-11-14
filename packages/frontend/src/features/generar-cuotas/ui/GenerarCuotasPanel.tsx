@@ -20,6 +20,7 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
+import { EstadoNotificacionCorreo } from '#entities/comunicacion';
 import {
 	getHistorialJobsCuotas,
 	getPeriodoCuotasActual,
@@ -163,6 +164,14 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 						: `${result.job.cuotas_generadas} cuotas generadas y ${result.job.cuotas_omitidas} ya existentes conservadas en esa corrida.`}
 				</Alert>
 			)}
+			{result?.job.estado === 'exitoso' && (
+				<EstadoNotificacionCorreo
+					operation={{ jobId: result.job.id }}
+					actorId={usuarioId}
+					cacheScope={cacheScope}
+					enabled={enabled}
+				/>
+			)}
 			<Typography component="h3" variant="subtitle2" sx={{ mb: 1 }}>
 				Últimas corridas
 			</Typography>
@@ -171,7 +180,6 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 				<Alert
 					severity="error"
 					action={<Button onClick={() => void history.refetch()}>Reintentar</Button>}
-					sx={{ mb: 2 }}
 				>
 					No pudimos cargar el historial de generación.
 				</Alert>
