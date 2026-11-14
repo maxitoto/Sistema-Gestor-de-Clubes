@@ -15,4 +15,4 @@ Para la preparación inicial (`bun install`, `.env`), el levantamiento del entor
 Los comandos de verificación están listados en el [README raíz](../../README.md). Particularidades propias del paquete frontend:
 
 - `bun run lint` combina formato y reglas de código ([biome.json](biome.json)) con los límites entre capas FSD definidos en [.dependency-cruiser.js](.dependency-cruiser.js).
-- `bun test` ejecuta las suites de [tests/](tests) sobre transporte/sesión, formularios y validaciones de dominio, cobranza, anulación, sincronización y monitoreo fiscal, caja, gastos y recuperación de usuarios y trabajos.
+- `bun test` ejecuta las suites de [tests/](tests) sobre transporte/sesión, formularios y validaciones de dominio, cobranza, anulación, sincronización y monitoreo fiscal, comunicaciones (plantillas, selección, identidad de envío, historial y formato de fechas), caja, gastos y recuperación de usuarios y trabajos.

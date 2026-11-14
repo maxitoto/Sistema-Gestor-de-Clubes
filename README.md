@@ -7,7 +7,7 @@ Reemplaza planillas dispersas y controles manuales resolviendo el circuito diari
 - **Socios y disciplinas:** padrón de socios con legajo y fotografía privada, catálogo de deportes y categorías e inscripciones activas.
 - **Cuotas, cobranza, caja continua y gastos:** generación programada y manual de cuotas, cobros sobre un libro de movimientos continuo e inmutable (sin borrados; las anulaciones del día o históricas operan mediante reversas auditadas) y registro de gastos con comprobantes PDF o imagen validados.
 - **Facturación electrónica ARCA y monitoreo fiscal:** custodia cifrada de credenciales fiscales, emisión de Factura C y Nota de Crédito C ante WSAA/WSFEv1 (homologación), generación de PDF A4 versionados con QR oficial en almacenamiento privado, regularización automática en segundo plano y consola de monitoreo fiscal con acciones administrativas auditadas.
-- **Comunicaciones y administración:** envío de correos institucionales con plantillas, cola de procesamiento, historial y enlace de baja firmado, además de resumen operativo, configuración institucional y gestión de usuarios y sesiones para `admin`.
+- **Comunicaciones y administración:** envío de correos institucionales manuales (avisos generales y de deuda) con plantillas reutilizables, cola de procesamiento, notificaciones operativas automáticas post-commit (cobros, comprobantes autorizados, anulaciones con PDF adjunto, cierres mensuales y alertas fiscales), historial con seguimiento separado de despacho y entrega y baja en dos pasos para avisos generales, además de resumen operativo, configuración institucional y gestión de usuarios y sesiones para `admin`.
 
 Monorepo con frontend React/MUI servido y compilado con Bun, y backend Supabase local. La base contiene reglas de negocio, funciones RPC, triggers y políticas de acceso. Las Edge Functions cubren autenticación y credenciales, administración de usuarios, custodia de configuración e imágenes/archivos privados, facturación electrónica y Notas de Crédito C ante ARCA (WSAA/WSFEv1 en homologación y generación de PDF A4 con QR), regularización automática en segundo plano, comunicaciones y monitoreo fiscal.
 
@@ -236,10 +236,10 @@ El código está en `packages/frontend/src`. La separación de capas sigue estas
 | Capa       | Responsabilidad                                         | Elementos presentes                                                                                                                                   |
 | ---------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app`      | Inicialización, proveedores globales y rutas protegidas | `App`, proveedores de sesión/tema/router, `RequireAuth`, `RequireRole`                                                                                                       |
-| `pages`    | Composición de pantallas                                | Login, recuperación/establecimiento de clave, dashboard, socios, ficha de socio, deportes, cobranza (`/pagos`), monitoreo fiscal (`/monitoreo-fiscal`), gastos (`/gastos`), usuarios y configuración |
+| `pages`    | Composición de pantallas                                | Login, recuperación/establecimiento de clave, dashboard, socios, ficha de socio, deportes, cobranza (`/pagos`), monitoreo fiscal (`/monitoreo-fiscal`), comunicaciones (`/comunicaciones`, `/comunicaciones/redactar`, `/comunicaciones/plantillas`, `/comunicaciones/:envioId`), gastos (`/gastos`), usuarios y configuración |
 | `widgets`  | Bloques que coordinan componentes y acciones            | `dashboard-panel`, `layout`, `socios-panel`, `deportes-panel`, `gastos-panel`, `caja-panel`                                                                                   |
-| `features` | Interacciones del usuario                               | Autenticación, padrón e inscripciones, catálogo deportivo, cobranza, anulación de cobros, emisión/diagnóstico/regularización fiscal ARCA, gastos con evidencia, usuarios, configuración y correo |
-| `entities` | Datos y estado del dominio                              | `club`, `session`, `usuario`, `socio`, `deporte`, `categoria`, `inscripcion`, `job-cuotas`, `cuota`, `pago`, `comprobante`, `monitoreo-fiscal`, `categoria-gasto`, `gasto`, `movimiento-caja` |
+| `features` | Interacciones del usuario                               | Autenticación, padrón e inscripciones, catálogo deportivo, cobranza, anulación de cobros, emisión/diagnóstico/regularización fiscal ARCA, envío de avisos y gestión de plantillas de correo, seguimiento de notificaciones operativas, gastos con evidencia, usuarios y configuración |
+| `entities` | Datos y estado del dominio                              | `club`, `session`, `usuario`, `socio`, `deporte`, `categoria`, `inscripcion`, `job-cuotas`, `cuota`, `pago`, `comprobante`, `monitoreo-fiscal`, `comunicacion`, `plantilla-correo`, `categoria-gasto`, `gasto`, `movimiento-caja` |
 | `shared`   | Infraestructura común                                   | Clientes Supabase y HTTP verificados, mutaciones idempotentes, temas, utilidades y tipos generados                                                                            |
 
 Las dependencias bajan de `app` hacia `shared`: una capa puede importar las inferiores, pero no las superiores. `shared` no importa `entities`, `features`, `widgets`, `pages` ni `app`. Los límites que comprueba el repositorio se validan con `bun run lint:arch`; no se crean carpetas de módulos sin una implementación que las necesite.
@@ -256,7 +256,7 @@ Las dependencias bajan de `app` hacia `shared`: una capa puede importar las infe
 | `functions/configuracion`                   | Custodia criptográfica (`AES-256-GCM`) y validación de certificados X.509 y claves privadas RSA de ARCA                         |
 | `functions/archivos`                        | Validación binaria real (PNG/JPEG/PDF), carga autorizada y entrega de URLs firmadas sobre `club-archivos`                       |
 | `functions/arca`                            | Emisión electrónica de 4 fases (Factura C y Nota de Crédito C), conciliación, diagnóstico WSAA/WSFEv1, consulta de serie y PDF A4 con QR |
-| `functions/comunicaciones`                  | Entrada HTTP de avisos, plantillas, historial, cola, eventos y baja de comunicaciones                                           |
+| `functions/comunicaciones`                  | Entrada HTTP de avisos, plantillas, historial, notificaciones operativas, cola, eventos y baja de comunicaciones                |
 | `functions/monitoreo`                       | Consulta paginada del monitoreo fiscal (`GET`) y acciones administrativas auditadas (`forzar`, `reabrir`, `resolver`, `registrar-externo`) |
 | `functions/fiscal-worker`                   | Worker automático en segundo plano (autenticado por secreto técnico) que regulariza lotes pendientes dentro de la ventana de 24 h |
 | `functions/_shared/core`                    | Autenticación, clientes Supabase, errores, transporte de correo y firmas                                                        |
@@ -293,7 +293,7 @@ Aplica correcciones automáticas de formato y reglas con Biome cuando sea necesa
 bun run lint:fix
 ```
 
-Ejecuta las suites unitarias y de contratos de dominio/caché del frontend:
+Ejecuta las suites unitarias y de contratos de dominio/caché del frontend (incluyendo contratos de plantillas, selección, identidad de envío, historial y formato de fechas en comunicaciones):
 
 ```bash
 bun test
@@ -337,13 +337,13 @@ Comprueba estáticamente los tipos con Deno para los nueve entrypoints de Edge F
 bun run typecheck:functions
 ```
 
-Ejecuta las suites unitarias en Bun (perfiles fiscales, coordinación, calendario/motor de regularización, invocador fiscal local, custodia y usuarios):
+Ejecuta las suites unitarias en Bun (perfiles fiscales, coordinación, calendario/motor de regularización, invocadores locales fiscal y de correos, custodia y usuarios):
 
 ```bash
 bun test
 ```
 
-Ejecuta las suites en runtime Deno (`tests/*.deno.ts`: adaptador WSAA/WSFE, consulta de serie, PDF/QR de facturas, Notas de Crédito y constancias, y contratos HTTP de `monitoreo` y `fiscal-worker`):
+Ejecuta las suites en runtime Deno (`tests/*.deno.ts`: adaptador WSAA/WSFE, consulta de serie, PDF/QR de facturas, Notas de Crédito y constancias, contratos HTTP de `monitoreo` y `fiscal-worker`, trazabilidad de actor fiscal, preparación documental post-commit, transporte con adjuntos PDF y contratos HTTP de `comunicaciones`):
 
 ```bash
 bun run test:deno
@@ -351,4 +351,4 @@ bun run test:deno
 
 ### Flujo manual recomendado
 
-Además de los controles estáticos y pruebas automatizadas, probar inicio y cierre de sesión, edición de configuración autorizada, alta de socio (que aprovisiona automáticamente su receptor fiscal como Consumidor Final), cobro de cuota con emisión de comprobante electrónico en homologación, anulación de cobro con constancia o Nota de Crédito C, consulta y acciones administrativas en `/monitoreo-fiscal`, y recorrido de un aviso hasta Mailpit.
+Además de los controles estáticos y pruebas automatizadas, probar inicio y cierre de sesión, edición de configuración y credenciales fiscales autorizadas en `/settings` (si se reinicia la base con `db:reset` y se quiere emitir comprobantes oficiales desde el primer cobro), alta de socio (que aprovisiona automáticamente su receptor fiscal como Consumidor Final), cobro de cuota con emisión de comprobante electrónico en homologación y anulación con constancia o Nota de Crédito C (verificando los correos automáticos provisional/oficial y de anulación con PDF adjunto en Mailpit), generación mensual de cuotas, consulta y acciones administrativas en `/monitoreo-fiscal`, y el circuito completo en `/comunicaciones` (plantillas en `/comunicaciones/plantillas`, redacción segmentada general/deuda en `/comunicaciones/redactar`, baja en dos pasos en avisos generales e historial detallado por destinatario en `/comunicaciones/:envioId`).
