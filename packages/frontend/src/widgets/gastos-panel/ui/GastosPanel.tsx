@@ -33,6 +33,7 @@ import {
 	getFechaClubGastos,
 	getGasto,
 	getGastos,
+	getReporteGastos,
 	mensajeAltaGasto,
 	monedaGasto,
 	puedeAnularGasto,
@@ -42,7 +43,9 @@ import { useAuth } from '#entities/session';
 import { AnularGastoDialog } from '#features/anular-gasto';
 import { CreateGastoDialog } from '#features/create-gasto';
 import { EditGastoDialog } from '#features/edit-gasto';
+import { type ColumnaExportacion, ExportGridButton } from '#features/export-grid';
 import { GastoEvidencia } from '#features/gasto-evidencia';
+import { rangoDiasCorreo } from '#shared/lib/comunicaciones';
 
 const initial: FiltrosGasto = {
 	desde: '',
@@ -56,17 +59,35 @@ const initial: FiltrosGasto = {
 	pagina: 0,
 	limite: 20,
 };
-const fechaVisible = (date: string) =>
-	new Intl.DateTimeFormat('es-AR', {
-		dateStyle: 'short',
-		timeZone: 'America/Argentina/Buenos_Aires',
-	}).format(new Date(`${date}T12:00:00Z`));
-const instante = (date: string) =>
-	new Intl.DateTimeFormat('es-AR', {
-		dateStyle: 'short',
-		timeStyle: 'short',
-		timeZone: 'America/Argentina/Buenos_Aires',
-	}).format(new Date(date));
+const formatoFechaGasto = new Intl.DateTimeFormat('es-AR', {
+	dateStyle: 'short',
+	timeZone: 'America/Argentina/Buenos_Aires',
+});
+const formatoInstanteGasto = new Intl.DateTimeFormat('es-AR', {
+	dateStyle: 'short',
+	timeStyle: 'short',
+	timeZone: 'America/Argentina/Buenos_Aires',
+});
+const fechaVisible = (date: string) => formatoFechaGasto.format(new Date(`${date}T12:00:00Z`));
+const instante = (date: string) => formatoInstanteGasto.format(new Date(date));
+const columnasExportacionGastos: ColumnaExportacion<Gasto>[] = [
+	{ titulo: 'Fecha del gasto', tipo: 'texto', valor: (g) => fechaVisible(g.fecha) },
+	{
+		titulo: 'Categoría',
+		tipo: 'texto',
+		valor: (g) => g.categoria?.nombre ?? 'Categoría no disponible',
+	},
+	{ titulo: 'Concepto', tipo: 'texto', valor: (g) => g.concepto },
+	{ titulo: 'Descripción', tipo: 'texto', valor: (g) => g.descripcion },
+	{ titulo: 'Importe', tipo: 'numero', valor: (g) => g.monto },
+	{
+		titulo: 'Medio de pago',
+		tipo: 'texto',
+		valor: (g) => (g.metodo_pago === 'efectivo' ? 'Efectivo' : 'Transferencia'),
+	},
+	{ titulo: 'Referencia / Banco', tipo: 'texto', valor: (g) => g.referencia_banco },
+	{ titulo: 'Estado', tipo: 'texto', valor: (g) => (g.estado === 'activo' ? 'Activo' : 'Anulado') },
+];
 export function GastosPanel() {
 	const { cacheScope } = useAuth();
 	return <Panel key={cacheScope} />;
@@ -76,7 +97,16 @@ function Panel() {
 	const enabled = profileStatus === 'ready' && !isSigningOut;
 	const [searchParams, setSearchParams] = useSearchParams();
 	const selectedId = searchParams.get('gastoId');
-	const [filters, setFilters] = useState<FiltrosGasto>(initial);
+	const desdeUrl = searchParams.get('desde') ?? '',
+		hastaUrl = searchParams.get('hasta') ?? '';
+	const [filters, setFilters] = useState<FiltrosGasto>(() => ({
+		...initial,
+		desde: desdeUrl,
+		hasta: hastaUrl,
+	}));
+	useEffect(() => {
+		setFilters((f) => ({ ...f, desde: desdeUrl, hasta: hastaUrl, pagina: 0 }));
+	}, [desdeUrl, hastaUrl]);
 	const [search, setSearch] = useState('');
 	const [creating, setCreating] = useState(false);
 	const [editing, setEditing] = useState<Gasto | null>(null);
@@ -99,7 +129,12 @@ function Panel() {
 		);
 		return () => clearTimeout(handle);
 	}, [search]);
-	const dateError = Boolean(filters.desde && filters.hasta && filters.desde > filters.hasta);
+	let dateError: string | null = null;
+	try {
+		rangoDiasCorreo(filters.desde, filters.hasta);
+	} catch (e) {
+		dateError = e instanceof Error ? e.message : 'Revisá las fechas.';
+	}
 	const list = useQuery({
 		queryKey: ['gastos', cacheScope, filters],
 		queryFn: ({ signal }) => getGastos(filters, signal),
@@ -183,6 +218,42 @@ function Panel() {
 							Registrar gasto
 						</Button>
 					</Stack>
+					<ExportGridButton
+						nombreArchivo="gastos"
+						filtroSnapshot={filters}
+						orden={{ campo: filters.orden, direccion: filters.ascendente ? 'asc' : 'desc' }}
+						columnas={columnasExportacionGastos}
+						claveFila={(g) => g.id}
+						disabled={
+							!enabled ||
+							!!dateError ||
+							list.isPending ||
+							list.isError ||
+							search !== filters.busqueda
+						}
+						obtenerPagina={async (p) => {
+							const resultado = await getReporteGastos(
+								{
+									...p.filtro,
+									orden: p.orden.campo as FiltrosGasto['orden'],
+									ascendente: p.orden.direccion === 'asc',
+									pagina: p.pagina - 1,
+									limite: p.tamanoPagina,
+								},
+								p.signal,
+								{
+									actorId: perfil?.id ?? '',
+									...(p.version ? { revision: p.version } : {}),
+									exportar: true,
+								},
+							);
+							return {
+								filas: resultado.filas,
+								total: resultado.total,
+								version: resultado.revision,
+							};
+						}}
+					/>
 					<Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
 						<TextField
 							type="date"
@@ -264,13 +335,13 @@ function Panel() {
 						</Alert>
 					)}
 					{dateError ? (
-						<Alert severity="warning">La fecha Desde debe ser anterior o igual a Hasta.</Alert>
+						<Alert severity="warning">{dateError}</Alert>
 					) : list.isError ? (
 						<Alert
 							severity="error"
 							action={<Button onClick={() => void list.refetch()}>Reintentar</Button>}
 						>
-							No pudimos consultar los gastos.
+							{list.error.message}
 						</Alert>
 					) : (
 						<>

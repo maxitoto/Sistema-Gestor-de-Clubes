@@ -26,20 +26,50 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { getCategorias } from '#entities/categoria';
 import { getCuotasCobranza } from '#entities/cuota';
 import { getDeportes } from '#entities/deporte';
-import { getPagosCobranza } from '#entities/pago';
+import { getPagosCobranza, getPagosReporte } from '#entities/pago';
 import { useAuth } from '#entities/session';
 import { CobrarCuotaDialog, type CobroConfirmado } from '#features/cobrar-cuota';
+import { type ColumnaExportacion, ExportGridButton } from '#features/export-grid';
 import {
 	type CriteriosCobranza,
 	criteriosCobranzaIniciales,
 	estadoFiscalCobranza,
 	esUuidCobranza,
+	type FilaCobranza,
 	fechaCobranza,
 	monedaCobranza,
 	periodoCobranza,
 } from '#shared/types/cobranza';
 import { PagoDetalleDialog } from './PagoDetalleDialog';
 
+const columnasPagos: readonly ColumnaExportacion<FilaCobranza>[] = [
+	{
+		titulo: 'Fecha y hora (Buenos Aires)',
+		tipo: 'texto',
+		valor: (p) => fechaCobranza(p.fecha_pago),
+	},
+	{ titulo: 'Número de socio', tipo: 'numero', valor: (p) => p.socio_numero },
+	{ titulo: 'DNI', tipo: 'texto', valor: (p) => p.socio_dni },
+	{ titulo: 'Apellido', tipo: 'texto', valor: (p) => p.socio_apellido },
+	{ titulo: 'Nombre', tipo: 'texto', valor: (p) => p.socio_nombre },
+	{ titulo: 'Deporte', tipo: 'texto', valor: (p) => p.deporte_nombre },
+	{ titulo: 'Categoría', tipo: 'texto', valor: (p) => p.categoria_nombre },
+	{ titulo: 'Período de cuota', tipo: 'texto', valor: (p) => periodoCobranza(p) },
+	{ titulo: 'Importe', tipo: 'numero', valor: (p) => p.monto },
+	{
+		titulo: 'Medio',
+		tipo: 'texto',
+		valor: (p) =>
+			p.medio === 'efectivo' ? 'Efectivo' : p.medio === 'transferencia' ? 'Transferencia' : '',
+	},
+	{ titulo: 'Comprobante', tipo: 'texto', valor: (p) => p.numero_comprobante },
+	{
+		titulo: 'Estado del cobro',
+		tipo: 'texto',
+		valor: (p) => (p.estado_pago === 'anulado' ? 'Anulado' : 'Confirmado'),
+	},
+	{ titulo: 'Estado fiscal', tipo: 'texto', valor: (p) => estadoFiscalCobranza(p) },
+];
 export function PagosPage() {
 	const { cacheScope, perfil, profileStatus } = useAuth();
 	return (
@@ -63,10 +93,14 @@ function PagosPanel({
 	const [params, setParams] = useSearchParams();
 	const socioId = params.get('socioId') ?? '';
 	const deepPago = params.get('pagoId');
-	const [tab, setTab] = useState<'cuotas' | 'pagos'>(deepPago ? 'pagos' : 'cuotas');
+	const [tab, setTab] = useState<'cuotas' | 'pagos'>(
+		deepPago || params.get('tab') === 'pagos' ? 'pagos' : 'cuotas',
+	);
 	const [criteria, setCriteria] = useState<CriteriosCobranza>(() => ({
 		...criteriosCobranzaIniciales(),
-		estado_cuota: 'pendiente',
+		estado_cuota: params.get('estadoCuota') === 'pagada' ? 'pagada' : 'pendiente',
+		desde: params.get('desde') ?? '',
+		hasta: params.get('hasta') ?? '',
 	}));
 	const [search, setSearch] = useState('');
 	const [receipt, setReceipt] = useState('');
@@ -126,6 +160,22 @@ function PagosPanel({
 			}
 		}
 	}, [list.data, criteria.pagina, criteria.limite]);
+	const tabUrl = params.get('tab'),
+		desdeUrl = params.get('desde') ?? '',
+		hastaUrl = params.get('hasta') ?? '',
+		estadoUrl = params.get('estadoCuota');
+	useEffect(() => {
+		if (tabUrl === 'pagos' || tabUrl === 'cuotas') {
+			setTab(tabUrl);
+			setCriteria((x) => ({
+				...x,
+				pagina: 0,
+				desde: desdeUrl,
+				hasta: hastaUrl,
+				estado_cuota: estadoUrl === 'pagada' ? 'pagada' : 'pendiente',
+			}));
+		}
+	}, [tabUrl, desdeUrl, hastaUrl, estadoUrl]);
 	const closeDetail = () => {
 		setPagoId(null);
 		if (deepPago) {
@@ -160,11 +210,12 @@ function PagosPanel({
 		setCriteria({ ...criteriosCobranzaIniciales(), estado_cuota: 'pendiente' });
 		setSearch('');
 		setReceipt('');
-		if (socioId) {
-			const next = new URLSearchParams(params);
-			next.delete('socioId');
-			setParams(next);
+		const next = new URLSearchParams(params);
+		for (const key of ['socioId', 'desde', 'hasta', 'estadoCuota']) {
+			next.delete(key);
 		}
+		next.set('tab', tab);
+		setParams(next, { replace: true });
 	};
 	return (
 		<Stack spacing={3}>
@@ -179,6 +230,32 @@ function PagosPanel({
 					Consultá cuotas y cobros, con su estado financiero y fiscal por separado.
 				</Typography>
 			</Box>
+			{tab === 'pagos' && (
+				<ExportGridButton<FilaCobranza, CriteriosCobranza>
+					nombreArchivo="pagos"
+					filtroSnapshot={input}
+					orden={{ campo: criteria.orden, direccion: criteria.direccion }}
+					columnas={columnasPagos}
+					claveFila={(p) => p.id}
+					disabled={
+						!enabled ||
+						invalidSocio ||
+						list.isFetching ||
+						list.isError ||
+						search !== criteria.buscar ||
+						receipt !== criteria.comprobante
+					}
+					obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
+						const p = await getPagosReporte(
+							{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
+							actorId,
+							signal,
+							{ revision: version, exportar: true },
+						);
+						return { filas: p.filas, total: p.total, version: p.revision };
+					}}
+				/>
+			)}
 			{confirmed && (
 				<Alert
 					severity="success"

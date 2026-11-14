@@ -18,23 +18,72 @@ import {
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
 	type CriteriosHistorial,
 	criteriosHistorialIniciales,
+	type EnvioCorreo,
 	getHistorialCorreo,
+	getReporteCorreos,
 } from '#entities/comunicacion';
 import { useAuth } from '#entities/session';
+import { type ColumnaExportacion, ExportGridButton } from '#features/export-grid';
 import { fechaCorreo, rangoDiasCorreo } from '#shared/lib/comunicaciones';
 import { ComunicacionesTabs } from './ComunicacionesTabs';
 
+const columnasExportacionCorreos: ColumnaExportacion<EnvioCorreo>[] = [
+	{ titulo: 'Fecha y hora del club', tipo: 'texto', valor: (e) => fechaCorreo(e.fecha_envio) },
+	{ titulo: 'Asunto', tipo: 'texto', valor: (e) => e.asunto },
+	{
+		titulo: 'Tipo',
+		tipo: 'texto',
+		valor: (e) =>
+			e.tipo === 'general'
+				? 'Comunicación general'
+				: e.tipo === 'deuda'
+					? 'Aviso de deuda'
+					: 'Notificación de operación',
+	},
+	{
+		titulo: 'Origen',
+		tipo: 'texto',
+		valor: (e) => (e.origen === 'automatico' ? 'Automático' : 'Manual'),
+	},
+	{
+		titulo: 'Autor',
+		tipo: 'texto',
+		valor: (e) =>
+			e.origen === 'automatico' ? 'Automático' : (e.autor_nombre ?? 'Autor no disponible'),
+	},
+	{ titulo: 'Destinatarios', tipo: 'numero', valor: (e) => e.destinatarios_count },
+	{
+		titulo: 'Estado del envío',
+		tipo: 'texto',
+		valor: (e) =>
+			e.estado === 'enviado'
+				? 'Aceptado por proveedor'
+				: e.estado === 'fallido'
+					? 'Con fallos'
+					: 'Procesando',
+	},
+];
 export function ComunicacionesPage() {
 	const { cacheScope } = useAuth();
 	return <Historial key={cacheScope} />;
 }
 function Historial() {
 	const { perfil, cacheScope, profileStatus, isSigningOut } = useAuth();
-	const [c, setC] = useState<CriteriosHistorial>(criteriosHistorialIniciales);
+	const [searchParams] = useSearchParams();
+	const desdeUrl = searchParams.get('desde') ?? '',
+		hastaUrl = searchParams.get('hasta') ?? '';
+	const [c, setC] = useState<CriteriosHistorial>(() => ({
+		...criteriosHistorialIniciales,
+		desde: desdeUrl,
+		hasta: hastaUrl,
+	}));
+	useEffect(() => {
+		setC((x) => ({ ...x, desde: desdeUrl, hasta: hastaUrl, page: 1 }));
+	}, [desdeUrl, hastaUrl]);
 	const startRef = useRef(Date.now());
 	useEffect(() => {
 		startRef.current = Date.now();
@@ -86,6 +135,38 @@ function Historial() {
 					<Typography component="h2" variant="h6">
 						Historial de envíos
 					</Typography>
+					<ExportGridButton
+						nombreArchivo="correos"
+						filtroSnapshot={c}
+						orden={{ campo: c.sortBy, direccion: c.sortOrder }}
+						columnas={columnasExportacionCorreos}
+						claveFila={(e) => e.id}
+						disabled={
+							profileStatus !== 'ready' || isSigningOut || !!issue || q.isLoading || q.isError
+						}
+						obtenerPagina={async (p) => {
+							const resultado = await getReporteCorreos(
+								{
+									...p.filtro,
+									sortBy: p.orden.campo as CriteriosHistorial['sortBy'],
+									sortOrder: p.orden.direccion,
+								},
+								perfil?.id ?? '',
+								p.signal,
+								{
+									pagina: p.pagina - 1,
+									limite: p.tamanoPagina,
+									...(p.version ? { revision: p.version } : {}),
+									exportar: true,
+								},
+							);
+							return {
+								filas: resultado.filas,
+								total: resultado.total,
+								version: resultado.revision,
+							};
+						}}
+					/>
 					<Stack
 						direction={{ xs: 'column', sm: 'row' }}
 						spacing={2}

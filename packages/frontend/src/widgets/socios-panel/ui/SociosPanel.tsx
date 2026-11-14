@@ -10,23 +10,59 @@ import {
 	MenuItem,
 	Paper,
 	Radio,
+	Stack,
 	Table,
 	TableBody,
 	TableCell,
 	TableContainer,
 	TableHead,
 	TableRow,
+	TableSortLabel,
 	TextField,
 	Typography,
 } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { getCategorias } from '#entities/categoria';
+import { getDeportes } from '#entities/deporte';
 import { useAuth } from '#entities/session';
-import { type SocioListado, useSocios } from '#entities/socio';
+import {
+	type CriteriosSocios,
+	criteriosSociosDesdeUrl,
+	getSociosReporte,
+	type SocioListado,
+	type SocioReporte,
+	useSocios,
+} from '#entities/socio';
 import { CreateSocioDialog } from '#features/create-socio';
+import { type ColumnaExportacion, ExportGridButton } from '#features/export-grid';
 import { InscribirSocioDialog } from '#features/inscribir-socio';
 import { useDebounce } from '#shared/lib/useDebounce';
 
+const columnasSocios: readonly ColumnaExportacion<SocioReporte>[] = [
+	{ titulo: 'Número de socio', tipo: 'numero', valor: (s) => s.numero_socio },
+	{ titulo: 'DNI', tipo: 'texto', valor: (s) => s.dni },
+	{ titulo: 'Apellido', tipo: 'texto', valor: (s) => s.apellido },
+	{ titulo: 'Nombre', tipo: 'texto', valor: (s) => s.nombre },
+	{
+		titulo: 'Estado',
+		tipo: 'texto',
+		valor: (s) => (s.estado === 'activo' ? 'Activo' : 'Inactivo'),
+	},
+	{ titulo: 'Correo', tipo: 'texto', valor: (s) => s.email },
+	{ titulo: 'Correo inválido', tipo: 'texto', valor: (s) => (s.email_invalido ? 'Sí' : 'No') },
+	{
+		titulo: 'Acepta comunicaciones',
+		tipo: 'texto',
+		valor: (s) => (s.acepta_comunicaciones ? 'Sí' : 'No'),
+	},
+	{ titulo: 'Moroso', tipo: 'texto', valor: (s) => (s.es_moroso ? 'Sí' : 'No') },
+	{ titulo: 'Deuda pendiente', tipo: 'numero', valor: (s) => s.deuda_pendiente },
+	{ titulo: 'Cuotas pendientes', tipo: 'numero', valor: (s) => s.pendientes_count },
+	{ titulo: 'Deportes con inscripción vigente', tipo: 'texto', valor: (s) => s.deportes },
+];
+const monedaSocios = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 export interface SociosPanelProps {
 	actions?: ReactNode;
 	renderSelectedSocio?: (socio: SocioListado) => ReactNode;
@@ -50,10 +86,15 @@ export function SociosPanel(props: SociosPanelProps) {
 }
 
 function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: SociosListProps) {
+	const [params] = useSearchParams();
+	const urlKey = params.toString();
+	const initial = criteriosSociosDesdeUrl(params);
+	const { perfil } = useAuth();
+	const [filtros, setFiltros] = useState<CriteriosSocios>(initial);
 	const [page, setPage] = useState(1);
 	const [pageSize, setPageSize] = useState(20);
-	const [searchTerm, setSearchTerm] = useState('');
-	const [estado, setEstado] = useState<'activo' | 'inactivo' | 'todos'>('activo');
+	const [searchTerm, setSearchTerm] = useState(initial.buscar);
+	const [estado, setEstado] = useState<'activo' | 'inactivo' | 'todos'>(initial.estado);
 	const [selectedSocio, setSelectedSocio] = useState<SocioListado | null>(null);
 	const [createOpen, setCreateOpen] = useState(false);
 	const [inscripcionTarget, setInscripcionTarget] = useState<SocioListado | null>(null);
@@ -74,7 +115,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 		page,
 		pageSize,
 		debouncedSearchTerm,
-		{ cacheScope, enabled: enabled && !filtering, estado },
+		{ cacheScope, enabled: enabled && !filtering, estado, filtros },
 	);
 	const loading = !enabled || isPending || isFetching || filtering;
 	const result = !loading && !isError ? data : undefined;
@@ -82,6 +123,59 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 	const recent = recentSelection?.socio.id === selectedSocio?.id ? recentSelection : null;
 	const selected = enabled ? (visibleSelected ?? recent?.socio) : undefined;
 
+	const sports = useQuery({
+		queryKey: ['deportes', cacheScope, 'reporte-socios'],
+		queryFn: ({ signal }) => getDeportes(false, signal),
+		enabled,
+		retry: 1,
+	});
+	const categories = useQuery({
+		queryKey: ['categorias', cacheScope, 'reporte-socios', filtros.deporte_id],
+		queryFn: ({ signal }) => getCategorias(filtros.deporte_id, false, signal),
+		enabled: enabled && !!filtros.deporte_id,
+		retry: 1,
+	});
+	const cambiarFiltro = <K extends keyof CriteriosSocios>(k: K, v: CriteriosSocios[K]) => {
+		clearSelection();
+		setPage(1);
+		setFiltros((x) => ({ ...x, [k]: v, ...(k === 'deporte_id' ? { categoria_id: '' } : {}) }));
+	};
+	const ordenar = (orden: CriteriosSocios['orden']) => {
+		clearSelection();
+		setPage(1);
+		setFiltros((x) => ({
+			...x,
+			orden,
+			direccion: x.orden === orden && x.direccion === 'asc' ? 'desc' : 'asc',
+		}));
+	};
+	const cabecera = (texto: string, orden: CriteriosSocios['orden']) => (
+		<TableSortLabel
+			active={filtros.orden === orden}
+			direction={filtros.direccion}
+			onClick={() => ordenar(orden)}
+		>
+			{texto}
+		</TableSortLabel>
+	);
+	const filtroSnapshot: CriteriosSocios = {
+		...filtros,
+		pagina: page - 1,
+		limite: pageSize,
+		buscar: debouncedSearchTerm,
+		estado,
+	};
+	useEffect(() => {
+		const next = criteriosSociosDesdeUrl(new URLSearchParams(urlKey));
+		setFiltros(next);
+		setEstado(next.estado);
+		setSearchTerm(next.buscar);
+		setPage(1);
+		setSelectedSocio(null);
+		setRecentSelection(null);
+		setInscripcionOpen(false);
+		setInscripcionTarget(null);
+	}, [urlKey]);
 	useEffect(() => {
 		if (enabled && !filtering && data && page > data.totalPages) {
 			setPage(data.totalPages);
@@ -116,7 +210,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 			</Typography>
 			<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 2 }}>
 				<TextField
-					label="Buscar por apellido"
+					label="Nombre, apellido, DNI o número"
 					size="small"
 					value={searchTerm}
 					onChange={(event) => {
@@ -172,6 +266,106 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 					<MenuItem value="todos">Todos</MenuItem>
 				</TextField>
 			</Box>
+			<Stack
+				direction={{ xs: 'column', sm: 'row' }}
+				useFlexGap
+				sx={{ flexWrap: 'wrap', mb: 2 }}
+				spacing={2}
+			>
+				<TextField
+					select
+					size="small"
+					label="Deporte"
+					value={filtros.deporte_id}
+					sx={{ minWidth: 170 }}
+					onChange={(e) => cambiarFiltro('deporte_id', e.target.value)}
+				>
+					<MenuItem value="">Todos</MenuItem>
+					{sports.data?.map((d) => (
+						<MenuItem key={d.id} value={d.id}>
+							{d.nombre}
+						</MenuItem>
+					))}
+				</TextField>
+				<TextField
+					select
+					size="small"
+					label="Categoría"
+					value={filtros.categoria_id}
+					disabled={!filtros.deporte_id || categories.isPending}
+					sx={{ minWidth: 170 }}
+					onChange={(e) => cambiarFiltro('categoria_id', e.target.value)}
+				>
+					<MenuItem value="">Todas</MenuItem>
+					{categories.data?.map((c) => (
+						<MenuItem key={c.id} value={c.id}>
+							{c.nombre}
+						</MenuItem>
+					))}
+				</TextField>
+				<TextField
+					select
+					size="small"
+					label="Estado de pago"
+					value={filtros.estado_pago}
+					sx={{ minWidth: 170 }}
+					onChange={(e) =>
+						cambiarFiltro('estado_pago', e.target.value as CriteriosSocios['estado_pago'])
+					}
+				>
+					<MenuItem value="todos">Todos</MenuItem>
+					<MenuItem value="moroso">Morosos</MenuItem>
+					<MenuItem value="al_dia">Al día</MenuItem>
+				</TextField>
+				<TextField
+					select
+					size="small"
+					label="Correo inválido"
+					value={filtros.email_invalido}
+					sx={{ minWidth: 170 }}
+					onChange={(e) =>
+						cambiarFiltro('email_invalido', e.target.value as CriteriosSocios['email_invalido'])
+					}
+				>
+					<MenuItem value="todos">Todos</MenuItem>
+					<MenuItem value="si">Sí</MenuItem>
+					<MenuItem value="no">No</MenuItem>
+				</TextField>
+				<Button
+					onClick={() => {
+						clearSelection();
+						setPage(1);
+						setSearchTerm('');
+						setEstado('todos');
+						setFiltros(criteriosSociosDesdeUrl(new URLSearchParams('estado=todos')));
+					}}
+				>
+					Limpiar filtros
+				</Button>
+			</Stack>
+			{(sports.isError || categories.isError) && (
+				<Alert severity="warning">
+					No se pudo cargar el catálogo de filtros. Volvé a intentarlo.
+				</Alert>
+			)}
+			<Box sx={{ mb: 2 }}>
+				<ExportGridButton<SocioReporte, CriteriosSocios>
+					nombreArchivo="socios"
+					filtroSnapshot={filtroSnapshot}
+					orden={{ campo: filtros.orden, direccion: filtros.direccion }}
+					columnas={columnasSocios}
+					claveFila={(s) => s.id}
+					disabled={loading || isError || !perfil}
+					obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
+						const p = await getSociosReporte(
+							{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
+							signal,
+							{ actorId: perfil?.id, revision: version, exportar: true },
+						);
+						return { filas: p.filas, total: p.total, version: p.revision };
+					}}
+				/>
+			</Box>
 			{loading && (
 				<Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 4 }}>
 					<CircularProgress size={24} aria-label="Cargando socios" />
@@ -188,7 +382,7 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 					{result.socios.length === 0 ? (
 						<Alert severity="info">
 							{debouncedSearchTerm.trim()
-								? 'No se encontraron socios para este apellido.'
+								? 'No se encontraron socios para estos filtros.'
 								: 'Todavía no hay socios para mostrar.'}
 						</Alert>
 					) : (
@@ -197,9 +391,13 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 								<TableHead>
 									<TableRow>
 										<TableCell sx={{ width: 72 }}>Seleccionar</TableCell>
-										<TableCell>Socio</TableCell>
-										<TableCell>Matrícula</TableCell>
-										<TableCell>Estado</TableCell>
+										<TableCell>{cabecera('Socio', 'apellido')}</TableCell>
+										<TableCell>{cabecera('Matrícula', 'numero_socio')}</TableCell>
+										<TableCell>{cabecera('Estado', 'estado')}</TableCell>
+										<TableCell>Pago</TableCell>
+										<TableCell align="right">
+											{cabecera('Deuda pendiente', 'deuda_pendiente')}
+										</TableCell>
 										<TableCell>Acciones</TableCell>
 									</TableRow>
 								</TableHead>
@@ -241,6 +439,22 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 													color={socio.estado === 'activo' ? 'success' : 'default'}
 													variant="outlined"
 												/>
+											</TableCell>
+											<TableCell>
+												<Chip
+													size="small"
+													variant="outlined"
+													color={socio.es_moroso ? 'warning' : 'default'}
+													label={socio.es_moroso ? 'Moroso' : 'Al día'}
+												/>
+												{socio.email_invalido && (
+													<Typography variant="caption" sx={{ display: 'block' }} color="error">
+														Correo inválido
+													</Typography>
+												)}
+											</TableCell>
+											<TableCell align="right">
+												{monedaSocios.format(socio.deuda_pendiente)}
 											</TableCell>
 											<TableCell>
 												<Button component={Link} to={`/socios/${socio.id}`}>
