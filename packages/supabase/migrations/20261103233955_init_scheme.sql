@@ -2939,6 +2939,241 @@ BEGIN
  EXCEPTION WHEN OTHERS THEN PERFORM set_config('club.correo_actor',coalesce(anterior,''),true);RAISE;END;
  PERFORM set_config('club.correo_actor',coalesce(anterior,''),true);RETURN result;
 END;$$;
+
+-- Lecturas humanas de cuatro grillas y dashboard conciliable.
+-- No almacena otro libro mayor ni replica reglas financieras en el navegador.
+-- La revisión de exportación detecta cambios de TODO el DTO filtrado/ordenado.
+-- No promete un snapshot transaccional entre peticiones ni devuelve archivos parciales.
+
+CREATE FUNCTION private.filas_grilla_reporte(p_grilla text,p_criterios jsonb)
+RETURNS TABLE(posicion bigint,fila jsonb)
+LANGUAGE plpgsql STABLE SET search_path='' AS $$
+DECLARE
+ v_query text; v_sort text; v_direction text; v_keys text[];
+ v_number_keys text[]:=ARRAY['pagina','limite','periodo_mes','periodo_anio'];
+BEGIN
+ IF p_grilla='socios' THEN
+  v_keys:=ARRAY['pagina','limite','buscar','estado','deporte_id','categoria_id','estado_pago','email_invalido','orden','direccion'];
+ ELSIF p_grilla='pagos' THEN
+  v_keys:=ARRAY['pagina','limite','buscar','comprobante','desde','hasta','medio','estado_recibo','estado_cuota','estado_socio','deporte_id','categoria_id','socio_id','cuota_id','pago_id','comprobante_id','periodo_mes','periodo_anio','orden','direccion'];
+ ELSIF p_grilla='gastos' THEN
+  v_keys:=ARRAY['pagina','limite','desde','hasta','categoriaId','metodo','estado','busqueda','orden','ascendente'];
+ ELSIF p_grilla='correos' THEN
+  v_keys:=ARRAY['pagina','limite','desde','hasta','estado','sortBy','sortOrder'];
+ ELSE RAISE EXCEPTION 'Grilla no permitida' USING ERRCODE='22023'; END IF;
+ IF jsonb_typeof(p_criterios) IS DISTINCT FROM 'object'
+  OR EXISTS(SELECT 1 FROM jsonb_object_keys(p_criterios) k WHERE NOT k=ANY(v_keys))
+  OR EXISTS(SELECT 1 FROM jsonb_each(p_criterios) x WHERE x.value<>'null'::jsonb AND
+   CASE WHEN x.key=ANY(v_number_keys) THEN jsonb_typeof(x.value)<>'number' OR x.value::text!~'^(0|[1-9][0-9]{0,8})$'
+        WHEN x.key='ascendente' THEN jsonb_typeof(x.value)<>'boolean'
+        ELSE jsonb_typeof(x.value)<>'string' END) THEN
+  RAISE EXCEPTION 'Filtros de reporte no permitidos' USING ERRCODE='22023';
+ END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_each_text(p_criterios) x WHERE x.key IN('buscar','comprobante','busqueda') AND length(x.value)>100)
+ OR EXISTS(SELECT 1 FROM jsonb_each_text(p_criterios) x WHERE x.key IN('desde','hasta') AND coalesce(x.value,'')<>'' AND x.value!~'^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+ OR nullif(p_criterios->>'desde','')::date>nullif(p_criterios->>'hasta','')::date THEN
+  RAISE EXCEPTION 'Texto o intervalo de fechas inválido' USING ERRCODE='22023';
+ END IF;
+ IF p_grilla='socios' THEN
+  IF coalesce(p_criterios->>'estado','todos') NOT IN('todos','activo','inactivo')
+   OR coalesce(p_criterios->>'estado_pago','todos') NOT IN('todos','moroso','al_dia')
+   OR coalesce(p_criterios->>'email_invalido','todos') NOT IN('todos','si','no') THEN
+   RAISE EXCEPTION 'Filtros de socios inválidos' USING ERRCODE='22023';END IF;
+  v_sort:=CASE coalesce(p_criterios->>'orden','apellido')
+   WHEN 'apellido' THEN 'lower(b.apellido)' WHEN 'nombre' THEN 'lower(b.nombre)' WHEN 'dni' THEN 'b.dni'
+   WHEN 'numero_socio' THEN 'b.numero_socio' WHEN 'estado' THEN 'b.estado' WHEN 'deuda_pendiente' THEN 'b.deuda_pendiente' END;
+  v_direction:=coalesce(p_criterios->>'direccion','asc');
+  v_query:=$q$
+   SELECT s.id,s.numero_socio,s.nombre,s.apellido,s.dni,s.estado,s.email,s.acepta_comunicaciones,s.email_invalido,
+    s.es_moroso,s.deuda_pendiente,s.pendientes_count,
+    coalesce((SELECT string_agg(DISTINCT d.nombre,', ' ORDER BY d.nombre) FROM public.inscripciones i
+      JOIN public.categorias c ON c.id=i.categoria_id JOIN public.deportes d ON d.id=c.deporte_id
+      WHERE i.socio_id=s.id AND i.estado='activa'),'') AS deportes
+   FROM public.v_socios_estado_pago s
+   WHERE (coalesce($1->>'buscar','')='' OR strpos(lower(s.nombre||' '||s.apellido),lower(btrim($1->>'buscar')))>0
+    OR strpos(lower(s.apellido||' '||s.nombre),lower(btrim($1->>'buscar')))>0
+    OR strpos(lower(s.dni),lower(btrim($1->>'buscar')))>0 OR strpos(s.numero_socio::text,btrim($1->>'buscar'))>0)
+    AND(coalesce($1->>'estado','todos')='todos' OR s.estado::text=$1->>'estado')
+    AND(coalesce($1->>'estado_pago','todos')='todos' OR s.es_moroso=($1->>'estado_pago'='moroso'))
+    AND(coalesce($1->>'email_invalido','todos')='todos' OR s.email_invalido=($1->>'email_invalido'='si'))
+    AND(nullif($1->>'deporte_id','') IS NULL AND nullif($1->>'categoria_id','') IS NULL OR EXISTS(
+     SELECT 1 FROM public.inscripciones i JOIN public.categorias c ON c.id=i.categoria_id
+     WHERE i.socio_id=s.id AND i.estado='activa'
+      AND(nullif($1->>'deporte_id','') IS NULL OR c.deporte_id=($1->>'deporte_id')::uuid)
+      AND(nullif($1->>'categoria_id','') IS NULL OR c.id=($1->>'categoria_id')::uuid)))
+  $q$;
+ ELSIF p_grilla='pagos' THEN
+  IF coalesce(p_criterios->>'medio','todos') NOT IN('todos','efectivo','transferencia')
+   OR coalesce(p_criterios->>'estado_recibo','todos') NOT IN('todos','activo','pendiente_cae','fallido','anulado')
+   OR coalesce(p_criterios->>'estado_cuota','todos') NOT IN('todos','pendiente','pagada')
+   OR coalesce(p_criterios->>'estado_socio','todos') NOT IN('todos','activo','inactivo')
+   OR(p_criterios->>'periodo_mes')::integer NOT BETWEEN 1 AND 12
+   OR(p_criterios->>'periodo_anio')::integer NOT BETWEEN 2001 AND 9999 THEN
+   RAISE EXCEPTION 'Filtros de pagos inválidos' USING ERRCODE='22023';END IF;
+  v_sort:=CASE coalesce(p_criterios->>'orden','fecha') WHEN 'fecha' THEN 'b.fecha'
+   WHEN 'socio' THEN 'lower(b.socio_apellido||'' ''||b.socio_nombre)' WHEN 'periodo' THEN '(b.periodo_anio*12+b.periodo_mes)'
+   WHEN 'monto' THEN 'b.monto' WHEN 'medio' THEN 'b.medio' WHEN 'numero' THEN 'b.numero_comprobante' WHEN 'estado' THEN 'b.etiqueta_recibo' END;
+  v_direction:=coalesce(p_criterios->>'direccion','desc');
+  v_query:=$q$
+   SELECT p.id,p.cuota_id,p.pago_id,p.comprobante_id,p.socio_id,p.socio_numero,p.socio_dni,p.socio_nombre,p.socio_apellido,p.socio_estado,
+    p.categoria_id,p.categoria_nombre,p.deporte_id,p.deporte_nombre,p.periodo_mes,p.periodo_anio,p.monto,p.estado_cuota,
+    p.estado_pago,p.estado_fiscal,p.etiqueta_recibo,p.numero_comprobante,p.fecha,p.fecha_pago,p.medio,p.referencia,p.usuario_id,
+    p.es_moroso,p.deuda_pendiente,p.cuota_en_mora
+   FROM public.v_pagos_cobranza p
+   WHERE(coalesce($1->>'buscar','')='' OR strpos(lower(p.socio_nombre||' '||p.socio_apellido),lower(btrim($1->>'buscar')))>0
+    OR strpos(lower(p.socio_apellido||' '||p.socio_nombre),lower(btrim($1->>'buscar')))>0
+    OR strpos(lower(p.socio_dni),lower(btrim($1->>'buscar')))>0 OR strpos(p.socio_numero::text,btrim($1->>'buscar'))>0)
+   AND(coalesce($1->>'comprobante','')='' OR strpos(lower(coalesce(p.numero_comprobante,'')),lower(btrim($1->>'comprobante')))>0)
+   AND(nullif($1->>'desde','') IS NULL OR p.fecha>=nullif($1->>'desde','')::date::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+   AND(nullif($1->>'hasta','') IS NULL OR p.fecha<(nullif($1->>'hasta','')::date+1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+   AND(coalesce($1->>'medio','todos')='todos' OR p.medio=$1->>'medio')
+   AND(coalesce($1->>'estado_recibo','todos')='todos' OR p.etiqueta_recibo=$1->>'estado_recibo')
+   AND(coalesce($1->>'estado_cuota','todos')='todos' OR p.estado_cuota=$1->>'estado_cuota')
+   AND(coalesce($1->>'estado_socio','todos')='todos' OR p.socio_estado=$1->>'estado_socio')
+   AND(nullif($1->>'deporte_id','') IS NULL OR p.deporte_id=($1->>'deporte_id')::uuid)
+   AND(nullif($1->>'categoria_id','') IS NULL OR p.categoria_id=($1->>'categoria_id')::uuid)
+   AND(nullif($1->>'socio_id','') IS NULL OR p.socio_id=($1->>'socio_id')::uuid)
+   AND(nullif($1->>'cuota_id','') IS NULL OR p.cuota_id=($1->>'cuota_id')::uuid)
+   AND(nullif($1->>'pago_id','') IS NULL OR p.pago_id=($1->>'pago_id')::uuid)
+   AND(nullif($1->>'comprobante_id','') IS NULL OR p.comprobante_id=($1->>'comprobante_id')::uuid)
+   AND($1->>'periodo_mes' IS NULL OR p.periodo_mes=($1->>'periodo_mes')::integer)
+   AND($1->>'periodo_anio' IS NULL OR p.periodo_anio=($1->>'periodo_anio')::integer)
+  $q$;
+ ELSIF p_grilla='gastos' THEN
+  IF coalesce(p_criterios->>'metodo','todos') NOT IN('todos','efectivo','transferencia')
+   OR coalesce(p_criterios->>'estado','todos') NOT IN('todos','activo','anulado') THEN
+   RAISE EXCEPTION 'Filtros de gastos inválidos' USING ERRCODE='22023';END IF;
+  v_sort:=CASE coalesce(p_criterios->>'orden','fecha') WHEN 'fecha' THEN 'b.fecha' WHEN 'concepto' THEN 'b.concepto'
+   WHEN 'monto' THEN 'b.monto' WHEN 'metodo_pago' THEN 'b.metodo_pago' WHEN 'estado' THEN 'b.estado' END;
+  v_direction:=CASE WHEN coalesce((p_criterios->>'ascendente')::boolean,false) THEN 'asc' ELSE 'desc' END;
+  v_query:=$q$
+   SELECT g.id,g.categoria_id,g.usuario_id,g.fecha,g.concepto,g.monto,g.metodo_pago,g.referencia_banco,g.descripcion,
+    g.estado,g.created_at,g.updated_at,g.motivo_anulacion,g.anulado_at,g.anulado_por,
+    jsonb_build_object('id',c.id,'nombre',c.nombre,'estado',c.estado) AS categoria
+   FROM public.gastos g JOIN public.categorias_gasto c ON c.id=g.categoria_id
+   WHERE(nullif($1->>'desde','') IS NULL OR g.fecha>=nullif($1->>'desde','')::date)
+   AND(nullif($1->>'hasta','') IS NULL OR g.fecha<nullif($1->>'hasta','')::date+1)
+   AND(nullif($1->>'categoriaId','') IS NULL OR g.categoria_id=($1->>'categoriaId')::uuid)
+   AND(coalesce($1->>'metodo','todos')='todos' OR g.metodo_pago::text=$1->>'metodo')
+   AND(coalesce($1->>'estado','todos')='todos' OR g.estado::text=$1->>'estado')
+   AND(coalesce($1->>'busqueda','')='' OR strpos(lower(g.concepto),lower(btrim($1->>'busqueda')))>0
+    OR strpos(lower(coalesce(g.descripcion,'')),lower(btrim($1->>'busqueda')))>0)
+  $q$;
+ ELSE
+  IF coalesce(p_criterios->>'estado','todos') NOT IN('todos','enviado','fallido','procesando') THEN
+   RAISE EXCEPTION 'Estado de comunicaciones inválido' USING ERRCODE='22023';END IF;
+  v_sort:=CASE coalesce(p_criterios->>'sortBy','fecha_envio') WHEN 'fecha_envio' THEN 'b.fecha_envio'
+   WHEN 'asunto' THEN 'b.asunto' WHEN 'destinatarios_count' THEN 'b.destinatarios_count' WHEN 'estado' THEN 'b.estado' END;
+  v_direction:=coalesce(p_criterios->>'sortOrder','desc');
+  v_query:=$q$
+   SELECT e.id,e.asunto,e.fecha_envio,e.estado,e.origen,e.tipo,e.destinatarios_count,e.autor_nombre_snapshot AS autor_nombre
+   FROM public.email_logs e
+   WHERE(nullif($1->>'desde','') IS NULL OR e.fecha_envio>=nullif($1->>'desde','')::date::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+   AND(nullif($1->>'hasta','') IS NULL OR e.fecha_envio<(nullif($1->>'hasta','')::date+1)::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires')
+   AND(coalesce($1->>'estado','todos')='todos' OR e.estado::text=$1->>'estado')
+  $q$;
+ END IF;
+ IF v_sort IS NULL OR v_direction NOT IN('asc','desc') THEN
+  RAISE EXCEPTION 'Orden del reporte no permitido' USING ERRCODE='22023';END IF;
+ -- Sólo la expresión de orden de la lista anterior se interpola; criterios son parámetros.
+ RETURN QUERY EXECUTE format('WITH b AS (%s) SELECT row_number()OVER(ORDER BY %s %s NULLS LAST,b.id ASC),to_jsonb(b) FROM b ORDER BY %s %s NULLS LAST,b.id ASC',v_query,v_sort,v_direction,v_sort,v_direction)
+ USING p_criterios;
+END;
+$$;
+
+CREATE FUNCTION public.consultar_grilla_reporte(p_grilla text,p_criterios jsonb DEFAULT '{}'::jsonb,p_revision text DEFAULT NULL,p_exportar boolean DEFAULT false)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE
+ v_page integer;v_limit integer;v_total bigint;v_revision text;v_filas jsonb;v_bytes bigint;
+BEGIN
+ PERFORM private.require_operador();
+ IF p_grilla IS NULL OR p_grilla NOT IN('socios','pagos','gastos','correos') OR jsonb_typeof(p_criterios) IS DISTINCT FROM 'object'
+  OR p_exportar IS NULL OR p_revision IS NOT NULL AND p_revision!~'^[0-9a-f]{32}$' THEN
+  RAISE EXCEPTION 'Consulta de reporte inválida' USING ERRCODE='22023';END IF;
+ IF EXISTS(SELECT 1 FROM jsonb_each(p_criterios) x WHERE x.key IN('pagina','limite') AND
+  (jsonb_typeof(x.value)<>'number' OR x.value::text!~'^(0|[1-9][0-9]{0,6})$')) THEN
+  RAISE EXCEPTION 'Paginación inválida' USING ERRCODE='22023';END IF;
+ v_page:=coalesce((p_criterios->>'pagina')::integer,0);v_limit:=coalesce((p_criterios->>'limite')::integer,20);
+ IF v_page<0 OR v_page>100000 OR (NOT p_exportar AND v_limit NOT IN(20,50,100)) OR(p_exportar AND v_limit NOT IN(100,500,1000)) THEN
+  RAISE EXCEPTION 'Tamaño de página no permitido' USING ERRCODE='22023';END IF;
+ -- Todas las filas del DTO se consultan bajo el mismo snapshot de esta sentencia.
+ -- La siguiente petición debe probar el mismo contenido; no sólo count o max(updated_at).
+ WITH filas AS MATERIALIZED(SELECT f.posicion,f.fila FROM private.filas_grilla_reporte(p_grilla,p_criterios) f),
+ resumen AS(SELECT count(*) AS total,coalesce(sum(octet_length(fila::text)),0) AS bytes,
+  md5(coalesce(string_agg(fila::text,E'\n' ORDER BY posicion),'')||'|'||p_grilla||'|'||(p_criterios-'pagina'-'limite')::text||'|'||auth.uid()::text) AS revision
+  FROM filas)
+ SELECT z.total,z.bytes,z.revision,coalesce((SELECT jsonb_agg(f.fila ORDER BY f.posicion) FROM filas f
+  WHERE f.posicion>v_page::bigint*v_limit AND f.posicion<=(v_page::bigint+1)*v_limit),'[]'::jsonb)
+ INTO v_total,v_bytes,v_revision,v_filas FROM resumen z;
+ IF p_exportar AND(v_total>100000 OR v_bytes>33554432) THEN
+  RAISE EXCEPTION 'El reporte supera 100000 filas o 32 MB. Ajustá los filtros antes de exportar.' USING ERRCODE='54000';END IF;
+ IF p_revision IS NOT NULL AND p_revision<>v_revision THEN
+  RAISE EXCEPTION 'Los datos cambiaron durante la exportación. Volvé a exportar el filtro completo.' USING ERRCODE='40001';END IF;
+ RETURN jsonb_build_object('version',1,'grilla',p_grilla,'filas',v_filas,'total',v_total,'pagina',v_page,'limite',v_limit,'revision',v_revision,'deuda_filtrada','0');
+END;
+$$;
+ALTER FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) OWNER TO postgres;
+
+CREATE FUNCTION public.consultar_dashboard(p_mes integer,p_anio integer)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
+DECLARE v_result jsonb;v_inicio date;v_fin date;v_hoy date;
+BEGIN
+ PERFORM private.require_operador(true);
+ IF p_mes IS NULL OR p_mes NOT BETWEEN 1 AND 12 OR p_anio IS NULL OR p_anio NOT BETWEEN 2001 AND 9999 THEN
+  RAISE EXCEPTION 'Período del dashboard inválido' USING ERRCODE='22023';END IF;
+ v_inicio:=make_date(p_anio,p_mes,1);v_fin:=(v_inicio+interval '1 month')::date;
+ v_hoy:=(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date;
+ WITH actuales AS(
+  SELECT count(*)FILTER(WHERE s.estado='activo') AS activos,
+   count(*)FILTER(WHERE public.es_socio_moroso(s.id)) AS morosos,
+   count(*)FILTER(WHERE s.email_invalido) AS emails FROM public.socios s
+ ),deuda AS(SELECT coalesce(sum(q.monto),0)::numeric(24,2)::text AS total FROM public.cuotas q WHERE q.estado='pendiente'),
+ movimientos AS MATERIALIZED(
+  SELECT f.tipo_movimiento,f.fecha,f.monto,f.es_reverso FROM public.flujo_caja f
+  WHERE f.fecha>=(v_inicio-interval '5 months')::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'
+   AND f.fecha<v_fin::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'
+ ),meses AS(
+  SELECT t.inicio::date AS inicio,(t.inicio+interval '1 month')::date AS fin FROM generate_series(v_inicio-interval '5 months',v_inicio,interval '1 month') t(inicio)
+ ),barras AS(
+  SELECT m.inicio,extract(month FROM m.inicio)::integer AS mes,extract(year FROM m.inicio)::integer AS anio,
+   coalesce(sum(f.monto)FILTER(WHERE f.tipo_movimiento='ingreso' AND NOT f.es_reverso),0)::numeric(24,2)::text AS ingresos,
+   coalesce(sum(f.monto)FILTER(WHERE f.tipo_movimiento='egreso' AND NOT f.es_reverso),0)::numeric(24,2)::text AS egresos,
+   coalesce(sum(CASE WHEN f.tipo_movimiento='ingreso' THEN f.monto ELSE -f.monto END),0)::numeric(24,2)::text AS neto
+  FROM meses m LEFT JOIN movimientos f ON f.fecha>=m.inicio::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'
+   AND f.fecha<m.fin::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires' GROUP BY m.inicio
+ ),finanzas AS(
+  SELECT count(*) AS cantidad,
+   coalesce(sum(monto)FILTER(WHERE tipo_movimiento='ingreso' AND NOT es_reverso),0)::numeric(24,2)::text AS ingresos,
+   coalesce(sum(monto)FILTER(WHERE tipo_movimiento='egreso' AND NOT es_reverso),0)::numeric(24,2)::text AS egresos,
+   coalesce(sum(CASE WHEN tipo_movimiento='ingreso' THEN monto ELSE -monto END),0)::numeric(24,2)::text AS neto
+  FROM movimientos WHERE fecha>=v_inicio::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'
+ ),certificado AS(
+  SELECT c.certificado_vencimiento AS vencimiento,
+   c.certificado_arca IS NOT NULL AND c.certificado_key IS NOT NULL AND c.certificado_vencimiento IS NOT NULL AS presente
+  FROM public.club c WHERE c.id='00000000-0000-0000-0000-000000000000'::uuid
+ ),fiscales AS(
+  SELECT count(*)FILTER(WHERE c.estado_fiscal='pendiente_cae') AS pendientes,
+   count(*)FILTER(WHERE c.estado_fiscal='fallido') AS fallidos,
+   count(*)FILTER(WHERE c.estado_fiscal='anulacion_pendiente') AS anulaciones FROM public.comprobantes c
+ ),ultimo AS(
+  SELECT j.id,j.periodo_mes,j.periodo_anio,j.estado,j.cuotas_generadas,j.cuotas_omitidas,j.fecha_inicio,j.fecha_fin
+  FROM public.cuota_job_logs j ORDER BY j.fecha_inicio DESC,j.id DESC LIMIT 1
+ )
+ SELECT jsonb_build_object('version',1,'zona','America/Argentina/Buenos_Aires','consultadoEn',now(),
+  'periodo',jsonb_build_object('mes',p_mes,'anio',p_anio,'desde',v_inicio::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires','hasta',v_fin::timestamp AT TIME ZONE 'America/Argentina/Buenos_Aires'),
+  'actuales',jsonb_build_object('sociosActivos',a.activos,'sociosMorosos',a.morosos,'deudaTotal',d.total,'emailsInvalidos',a.emails),
+  'finanzas',jsonb_build_object('ingresosOriginales',f.ingresos,'egresosOriginales',f.egresos,'neto',f.neto,'movimientos',f.cantidad),
+  'meses',(SELECT jsonb_agg(jsonb_build_object('mes',b.mes,'anio',b.anio,'ingresosOriginales',b.ingresos,'egresosOriginales',b.egresos,'neto',b.neto)ORDER BY b.inicio)FROM barras b),
+  'morosidadPorDeporte',coalesce((SELECT jsonb_agg(jsonb_build_object('deporteId',x.deporte_id,'deporte',x.deporte,'cuotasMorosas',x.cuotas_morosas,'deudaMorosa',x.deuda_morosa::numeric(24,2)::text)ORDER BY x.deuda_morosa DESC,x.deporte_id)FROM public.v_morosidad_por_deporte x),'[]'::jsonb),
+  'alertas',jsonb_build_object('emailsInvalidos',a.emails,'comprobantesPendientes',fi.pendientes,'comprobantesFallidos',fi.fallidos,'anulacionesPendientes',fi.anulaciones,
+   'certificado',coalesce((SELECT jsonb_build_object('estado',CASE WHEN NOT c.presente THEN 'ausente' WHEN c.vencimiento<v_hoy THEN 'vencido' WHEN c.vencimiento-v_hoy<=30 THEN 'proximo' ELSE 'vigente' END,
+     'vencimiento',CASE WHEN c.presente THEN c.vencimiento ELSE NULL END,'diasRestantes',CASE WHEN c.presente THEN c.vencimiento-v_hoy ELSE NULL END)FROM certificado c),jsonb_build_object('estado','ausente','vencimiento',NULL,'diasRestantes',NULL)),
+   'ultimoJob',(SELECT jsonb_build_object('id',j.id,'periodoMes',j.periodo_mes,'periodoAnio',j.periodo_anio,'estado',j.estado,'cuotasGeneradas',coalesce(j.cuotas_generadas,0),'cuotasOmitidas',coalesce(j.cuotas_omitidas,0),'fechaInicio',j.fecha_inicio,'fechaFin',j.fecha_fin)FROM ultimo j)))
+ INTO v_result FROM actuales a CROSS JOIN deuda d CROSS JOIN finanzas f CROSS JOIN fiscales fi;
+ RETURN v_result;
+END;
+$$;
+ALTER FUNCTION public.consultar_dashboard(integer,integer) OWNER TO postgres;
 --=================================================================================
 -- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
@@ -4191,7 +4426,7 @@ GRANT EXECUTE ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_co
 REVOKE ALL ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) TO authenticated,service_role;
 
--- RLS, permisos de tablas/funciones y privilegios de columna (Comunicaciones operativas e intenciones post-commit).
+-- RLS, permisos de tablas/funciones y privilegios de columna.
 REVOKE INSERT,UPDATE,DELETE ON public.plantillas_correo FROM PUBLIC,anon,authenticated;
 GRANT INSERT(nombre_interno,asunto,cuerpo,estado),UPDATE(nombre_interno,asunto,cuerpo,estado) ON public.plantillas_correo TO authenticated;
 ALTER TABLE private.correo_intenciones ENABLE ROW LEVEL SECURITY;
@@ -4206,6 +4441,13 @@ GRANT EXECUTE ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),pub
 REVOKE SELECT ON public.email_logs,public.email_destinatarios FROM PUBLIC,anon,authenticated;
 GRANT SELECT(id,origen,tipo,asunto,cuerpo,destinatarios_count,estado,fecha_envio,autor_nombre_snapshot) ON public.email_logs TO authenticated;
 GRANT SELECT(id,email_log_id,email,nombre_snapshot,apellido_snapshot,estado_envio,entrega_estado,motivo,asunto_snapshot,cuerpo_snapshot,aceptado_en,created_at) ON public.email_destinatarios TO authenticated;
+
+-- Permisos de reportes de grillas y dashboard conciliable.
+REVOKE ALL ON FUNCTION private.filas_grilla_reporte(text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.consultar_dashboard(integer,integer) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_dashboard(integer,integer) TO authenticated;
 
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

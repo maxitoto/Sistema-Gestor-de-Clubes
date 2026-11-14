@@ -1432,8 +1432,13 @@ export type Database = {
 				Returns: Json;
 			};
 			consultar_cobranza: { Args: { p_criterios?: Json; p_vista: string }; Returns: Json };
+			consultar_dashboard: { Args: { p_anio: number; p_mes: number }; Returns: Json };
 			consultar_ejecucion_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
 			consultar_eventos_correo_log: { Args: { p_log_id: string }; Returns: Json };
+			consultar_grilla_reporte: {
+				Args: { p_criterios?: Json; p_exportar?: boolean; p_grilla: string; p_revision?: string };
+				Returns: Json;
+			};
 			consultar_monitoreo_fiscal: {
 				Args: {
 					p_busqueda?: string;

@@ -348,5 +348,12 @@ REVOKE SELECT ON public.email_logs,public.email_destinatarios FROM PUBLIC,anon,a
 GRANT SELECT(id,origen,tipo,asunto,cuerpo,destinatarios_count,estado,fecha_envio,autor_nombre_snapshot) ON public.email_logs TO authenticated;
 GRANT SELECT(id,email_log_id,email,nombre_snapshot,apellido_snapshot,estado_envio,entrega_estado,motivo,asunto_snapshot,cuerpo_snapshot,aceptado_en,created_at) ON public.email_destinatarios TO authenticated;
 
+-- Permisos de reportes de grillas y dashboard conciliable.
+REVOKE ALL ON FUNCTION private.filas_grilla_reporte(text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.consultar_dashboard(integer,integer) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_dashboard(integer,integer) TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';
