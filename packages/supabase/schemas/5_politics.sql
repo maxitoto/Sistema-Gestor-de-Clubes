@@ -332,5 +332,21 @@ GRANT EXECUTE ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_co
 REVOKE ALL ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) TO authenticated,service_role;
 
+-- RLS, permisos de tablas/funciones y privilegios de columna.
+REVOKE INSERT,UPDATE,DELETE ON public.plantillas_correo FROM PUBLIC,anon,authenticated;
+GRANT INSERT(nombre_interno,asunto,cuerpo,estado),UPDATE(nombre_interno,asunto,cuerpo,estado) ON public.plantillas_correo TO authenticated;
+ALTER TABLE private.correo_intenciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.correo_intenciones FROM PUBLIC,anon,authenticated;
+GRANT SELECT,INSERT,UPDATE ON private.correo_intenciones TO service_role;
+REVOKE ALL ON FUNCTION private.correo_nombres_snapshot(),private.correo_fuente_documento(uuid),private.correo_capturar_comprobante(),private.correo_capturar_job(),private.correo_intencion_inmutable(),private.correo_actor_actual(),private.correo_proyectar_actor_fiscal(),private.correo_alerta_fiscal(),private.correo_snapshot_inmutable() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) TO authenticated;
+-- El navegador sólo puede leer el contrato humano del historial, nunca la cola técnica.
+REVOKE SELECT ON public.email_logs,public.email_destinatarios FROM PUBLIC,anon,authenticated;
+GRANT SELECT(id,origen,tipo,asunto,cuerpo,destinatarios_count,estado,fecha_envio,autor_nombre_snapshot) ON public.email_logs TO authenticated;
+GRANT SELECT(id,email_log_id,email,nombre_snapshot,apellido_snapshot,estado_envio,entrega_estado,motivo,asunto_snapshot,cuerpo_snapshot,aceptado_en,created_at) ON public.email_destinatarios TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

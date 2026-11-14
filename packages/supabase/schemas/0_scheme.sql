@@ -476,3 +476,29 @@ CREATE TABLE private.fiscal_auditoria(
  actor_id uuid REFERENCES public.usuarios(id),accion text NOT NULL CHECK(accion IN('reabrir','resolver_anulacion','forzar','registrar_externo')),
  ejecucion_id uuid REFERENCES private.fiscal_ejecuciones(id),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+
+-- Comunicaciones operativas e intenciones post-commit recuperables.
+ALTER TABLE public.email_logs ADD COLUMN autor_nombre_snapshot text;
+ALTER TABLE public.email_destinatarios ADD COLUMN nombre_snapshot text,ADD COLUMN apellido_snapshot text;
+CREATE TABLE private.correo_intenciones(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ evento text NOT NULL CHECK(evento IN('cobro_confirmado','comprobante_autorizado','anulacion_confirmada','reporte_mensual','alerta_fiscal')),
+ operacion_id uuid NOT NULL,comprobante_id uuid REFERENCES public.comprobantes(id) ON DELETE RESTRICT,
+ job_id uuid REFERENCES public.cuota_job_logs(id) ON DELETE RESTRICT,
+ socio_id uuid REFERENCES public.socios(id) ON DELETE RESTRICT,destinatario_usuario_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+ destinatario_snapshot text,nombre_snapshot text,apellido_snapshot text,creacion_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),version_documento text CHECK(version_documento IN('provisional','autorizado')),
+ version_clave text NOT NULL,fuente_documento jsonb,
+ actor_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,autor_nombre_snapshot text,
+ origen text NOT NULL CHECK(origen IN('manual','automatico')),
+ asunto_snapshot text NOT NULL,cuerpo_snapshot text NOT NULL,
+ estado text NOT NULL DEFAULT 'pendiente' CHECK(estado IN('pendiente','preparando','encolada','omitida')),
+ codigo text,reserva uuid,reservado_en timestamptz,proximo_intento_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ intentos integer NOT NULL DEFAULT 0 CHECK(intentos>=0),documento_path text,email_log_id uuid REFERENCES public.email_logs(id) ON DELETE RESTRICT,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK((origen='manual' AND actor_id IS NOT NULL)OR(origen='automatico' AND actor_id IS NULL)),
+ CHECK((job_id IS NOT NULL AND comprobante_id IS NULL AND fuente_documento IS NULL AND version_documento IS NULL)
+ OR(job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NOT NULL AND version_documento IS NOT NULL)OR(evento='alerta_fiscal'AND job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NULL AND version_documento IS NULL))
+);
+ALTER TABLE public.email_destinatarios ADD COLUMN intencion_id uuid REFERENCES private.correo_intenciones(id) ON DELETE RESTRICT,ADD COLUMN documento_path text,ADD COLUMN despacho_iniciado boolean NOT NULL DEFAULT false,ADD COLUMN proximo_intento_documental timestamptz;
+-- Las reservas heredadas no tienen prueba de fase: conservarlas como posible transporte.
+UPDATE public.email_destinatarios SET despacho_iniciado=true WHERE estado_envio IN('procesando','incierto','aceptado');

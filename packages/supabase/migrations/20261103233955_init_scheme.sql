@@ -476,6 +476,32 @@ CREATE TABLE private.fiscal_auditoria(
  actor_id uuid REFERENCES public.usuarios(id),accion text NOT NULL CHECK(accion IN('reabrir','resolver_anulacion','forzar','registrar_externo')),
  ejecucion_id uuid REFERENCES private.fiscal_ejecuciones(id),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+
+-- Comunicaciones operativas e intenciones post-commit recuperables.
+ALTER TABLE public.email_logs ADD COLUMN autor_nombre_snapshot text;
+ALTER TABLE public.email_destinatarios ADD COLUMN nombre_snapshot text,ADD COLUMN apellido_snapshot text;
+CREATE TABLE private.correo_intenciones(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ evento text NOT NULL CHECK(evento IN('cobro_confirmado','comprobante_autorizado','anulacion_confirmada','reporte_mensual','alerta_fiscal')),
+ operacion_id uuid NOT NULL,comprobante_id uuid REFERENCES public.comprobantes(id) ON DELETE RESTRICT,
+ job_id uuid REFERENCES public.cuota_job_logs(id) ON DELETE RESTRICT,
+ socio_id uuid REFERENCES public.socios(id) ON DELETE RESTRICT,destinatario_usuario_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+ destinatario_snapshot text,nombre_snapshot text,apellido_snapshot text,creacion_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),version_documento text CHECK(version_documento IN('provisional','autorizado')),
+ version_clave text NOT NULL,fuente_documento jsonb,
+ actor_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,autor_nombre_snapshot text,
+ origen text NOT NULL CHECK(origen IN('manual','automatico')),
+ asunto_snapshot text NOT NULL,cuerpo_snapshot text NOT NULL,
+ estado text NOT NULL DEFAULT 'pendiente' CHECK(estado IN('pendiente','preparando','encolada','omitida')),
+ codigo text,reserva uuid,reservado_en timestamptz,proximo_intento_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ intentos integer NOT NULL DEFAULT 0 CHECK(intentos>=0),documento_path text,email_log_id uuid REFERENCES public.email_logs(id) ON DELETE RESTRICT,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK((origen='manual' AND actor_id IS NOT NULL)OR(origen='automatico' AND actor_id IS NULL)),
+ CHECK((job_id IS NOT NULL AND comprobante_id IS NULL AND fuente_documento IS NULL AND version_documento IS NULL)
+ OR(job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NOT NULL AND version_documento IS NOT NULL)OR(evento='alerta_fiscal'AND job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NULL AND version_documento IS NULL))
+);
+ALTER TABLE public.email_destinatarios ADD COLUMN intencion_id uuid REFERENCES private.correo_intenciones(id) ON DELETE RESTRICT,ADD COLUMN documento_path text,ADD COLUMN despacho_iniciado boolean NOT NULL DEFAULT false,ADD COLUMN proximo_intento_documental timestamptz;
+-- Las reservas heredadas no tienen prueba de fase: conservarlas como posible transporte.
+UPDATE public.email_destinatarios SET despacho_iniciado=true WHERE estado_envio IN('procesando','incierto','aceptado');
 --=================================================================================
 -- ÍNDICES DE RENDIMIENTO Y BÚSQUEDA
 --=================================================================================
@@ -543,6 +569,11 @@ CREATE UNIQUE INDEX comprobante_numero_identidad_fiscal ON public.comprobantes(e
  WHERE tipo_fiscal IS NOT NULL AND numero_comprobante IS NOT NULL;
 CREATE UNIQUE INDEX comprobante_numero_identidad_legada ON public.comprobantes(punto_venta,tipo,numero_comprobante)
  WHERE tipo_fiscal IS NULL AND numero_comprobante IS NOT NULL;
+
+-- índices de identidad y cola de intenciones de correo post-commit
+CREATE UNIQUE INDEX correo_intencion_identidad ON private.correo_intenciones(evento,operacion_id,version_clave,coalesce(lower(btrim(destinatario_snapshot)),''));
+CREATE INDEX correo_intencion_cola ON private.correo_intenciones(proximo_intento_en,id)WHERE estado IN('pendiente','preparando');
+CREATE UNIQUE INDEX correo_destinatario_intencion ON public.email_destinatarios(intencion_id)WHERE intencion_id IS NOT NULL;
 CREATE SCHEMA IF NOT EXISTS private;
 CREATE OR REPLACE FUNCTION private.get_rol()
 RETURNS public.rol_usuario
@@ -1219,16 +1250,23 @@ DECLARE v_libres int; v_log uuid;
 BEGIN
  IF p_proveedor IS NULL OR p_proveedor NOT IN ('resend','mailpit') THEN RAISE EXCEPTION 'Proveedor inválido'; END IF;
  PERFORM pg_advisory_xact_lock(73121,19);
- -- No se reenvía automáticamente un envío cuya aceptación se desconoce.
+ -- Una preparación nueva interrumpida ANTES de marcar transporte se puede recuperar.
+ -- El token viejo queda invalidado y hay backoff; una marca de posible envío nunca se borra.
+ UPDATE public.email_destinatarios SET estado_envio='pendiente',reserva_id=NULL,
+  proximo_intento_documental=clock_timestamp()+interval '1 minute',
+  motivo='Preparación interrumpida antes del envío; pendiente de recuperación'
+ WHERE estado_envio='procesando'AND NOT despacho_iniciado AND reservado_en<now()-interval '5 minutes';
  UPDATE public.email_destinatarios SET estado_envio='incierto',motivo='Ejecución interrumpida; verificar aceptación antes de reenviar'
- WHERE estado_envio='procesando' AND reservado_en<now()-interval '5 minutes';
+ WHERE estado_envio='procesando'AND despacho_iniciado AND reservado_en<now()-interval '5 minutes';
  -- Cambios de correo, baja, desuscripción y deuda pagada antes de despachar se respetan.
  UPDATE public.email_destinatarios e SET estado_envio='excluido',motivo='El destinatario dejó de cumplir las condiciones antes del envío'
- FROM public.email_logs l WHERE e.email_log_id=l.id AND e.estado_envio='pendiente' AND NOT EXISTS (
-  SELECT 1 FROM public.socios s WHERE s.id=e.socio_id AND (s.estado='activo' OR l.tipo='deuda') AND NOT s.email_invalido
-   AND lower(btrim(s.email))=lower(btrim(e.email))
-   AND (s.acepta_comunicaciones OR l.incluir_desuscriptos)
-   AND (l.tipo<>'deuda' OR EXISTS (SELECT 1 FROM public.cuotas q WHERE q.socio_id=s.id AND q.estado='pendiente' AND q.monto>0)));
+ FROM public.email_logs l WHERE e.email_log_id=l.id AND e.estado_envio='pendiente'AND(
+ e.email IS NULL OR btrim(e.email)!~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'
+ OR(l.tipo<>'transaccional'AND NOT EXISTS(SELECT 1 FROM public.socios s WHERE s.id=e.socio_id AND(s.estado='activo'OR l.tipo='deuda')AND NOT s.email_invalido
+  AND lower(btrim(s.email))=lower(btrim(e.email))AND(s.acepta_comunicaciones OR l.incluir_desuscriptos)
+  AND(l.tipo<>'deuda'OR EXISTS(SELECT 1 FROM public.cuotas q WHERE q.socio_id=s.id AND q.estado='pendiente'AND q.monto>0))))
+ OR(l.tipo='transaccional'AND(e.intencion_id IS NULL OR EXISTS(SELECT 1 FROM public.socios s WHERE s.id=e.socio_id AND s.email_invalido AND lower(btrim(s.email))=lower(btrim(e.email)))
+  OR EXISTS(SELECT 1 FROM public.email_destinatarios bad WHERE bad.email=e.email AND bad.entrega_estado='rebote_duro'))));
  SELECT greatest(0,50-count(*))::int INTO v_libres FROM public.email_destinatarios
  WHERE reservado_en>now()-interval '1 minute';
  FOR v_log IN SELECT id FROM public.email_logs WHERE estado='procesando' LOOP
@@ -1237,10 +1275,10 @@ BEGIN
  -- Evita ráfagas si dos invocaciones del worker coinciden.
  IF EXISTS (SELECT 1 FROM public.email_destinatarios WHERE reservado_en>now()-interval '600 milliseconds') THEN RETURN; END IF;
  RETURN QUERY WITH candidatos AS (
-  SELECT id FROM public.email_destinatarios WHERE estado_envio='pendiente'
+  SELECT id FROM public.email_destinatarios WHERE estado_envio='pendiente'AND coalesce(proximo_intento_documental,now())<=now()
   ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT least(v_libres,1)
  ) UPDATE public.email_destinatarios e SET estado_envio='procesando',proveedor=p_proveedor,
-  reservado_en=now(),reserva_id=gen_random_uuid() FROM candidatos c WHERE e.id=c.id RETURNING e.*;
+  reservado_en=now(),reserva_id=gen_random_uuid(),despacho_iniciado=false,proximo_intento_documental=NULL FROM candidatos c WHERE e.id=c.id RETURNING e.*;
 END; $$;
 
 CREATE OR REPLACE FUNCTION private.aplicar_eventos_correo(p_destinatario uuid)
@@ -2730,6 +2768,177 @@ BEGIN
  INSERT INTO private.fiscal_auditoria(comprobante_id,actor_id,accion,ejecucion_id)VALUES(cb.id,p_actor_id,'resolver_anulacion',ex.id);
  RETURN jsonb_build_object('resuelto',true);
 END;$$;
+
+-- =================================================================================
+-- COMUNICACIONES OPERATIVAS E INTENCIONES POST-COMMIT RECUPERABLES
+-- =================================================================================
+CREATE OR REPLACE FUNCTION private.correo_fuente_documento(p_id uuid)RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+ SELECT jsonb_build_object('comprobanteId',c.id,'pagoId',c.pago_id,'tipo',c.tipo,'estadoFiscal',c.estado_fiscal,
+ 'puntoVenta',c.punto_venta,'numero',c.numero_comprobante,'cae',c.cae,'vencimiento',c.cae_vencimiento,
+ 'solicitud',c.solicitud_fiscal,'actualizadoEn',c.updated_at,
+ 'pago',jsonb_build_object('estado',p.estado,'importe',to_char(p.monto,'FM9999999999990.00'),'fecha',p.fecha_pago,'medio',p.medio_pago),
+ 'club',jsonb_build_object('nombre',cl.nombre,'cuit',cl.cuit,'domicilio',cl.domicilio_fiscal),
+ 'socio',jsonb_build_object('nombre',s.apellido||', '||s.nombre,'documento',s.dni),
+ 'concepto',d.nombre||' - '||ct.nombre,'periodo',q.periodo_mes::text||'/'||q.periodo_anio::text)
+ ||CASE WHEN p.estado='anulado' THEN jsonb_build_object('anulacion',jsonb_build_object('fecha',p.anulado_at,'motivo',p.motivo_anulacion))ELSE '{}'::jsonb END
+ ||CASE WHEN c.tipo='nota_credito' THEN jsonb_build_object('original',jsonb_build_object('id',o.id,'pagoId',o.pago_id,'numero',o.numero_comprobante,
+ 'puntoVenta',o.punto_venta,'tipoFiscal',o.tipo_fiscal,'cuit',o.emisor_cuit,'cae',o.cae,'solicitud',o.solicitud_fiscal))ELSE '{}'::jsonb END
+ FROM public.comprobantes c JOIN public.pagos p ON p.id=c.pago_id JOIN public.cuotas q ON q.id=p.cuota_id
+ JOIN public.socios s ON s.id=q.socio_id JOIN public.categorias ct ON ct.id=q.categoria_id JOIN public.deportes d ON d.id=ct.deporte_id
+ CROSS JOIN public.club cl LEFT JOIN public.comprobantes o ON o.id=c.comprobante_origen_id WHERE c.id=p_id
+$$;
+
+CREATE OR REPLACE FUNCTION private.correo_actor_actual()RETURNS uuid LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=''AS $$
+DECLARE actor uuid;
+BEGIN
+ actor:=auth.uid();
+ IF actor IS NULL AND auth.role()='service_role'AND coalesce(current_setting('club.correo_actor',true),'')~'^[0-9a-fA-F-]{36}$'THEN actor:=current_setting('club.correo_actor',true)::uuid;END IF;
+ IF actor IS NOT NULL AND EXISTS(SELECT 1 FROM public.usuarios WHERE id=actor AND estado='activo')THEN RETURN actor;END IF;
+ RETURN NULL;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.reclamar_intenciones_correo(p_limite integer DEFAULT 10)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE result jsonb;
+BEGIN
+ IF p_limite IS NULL OR p_limite NOT BETWEEN 1 AND 10 THEN RAISE EXCEPTION 'Lote de notificaciones inválido' USING ERRCODE='22023';END IF;
+ WITH candidates AS(SELECT id FROM private.correo_intenciones WHERE(estado='pendiente'AND proximo_intento_en<=clock_timestamp())OR(estado='preparando'AND reservado_en<clock_timestamp()-interval '5 minutes')ORDER BY proximo_intento_en,id FOR UPDATE SKIP LOCKED LIMIT p_limite),claimed AS(
+ UPDATE private.correo_intenciones i SET estado='preparando',reserva=gen_random_uuid(),reservado_en=clock_timestamp(),intentos=intentos+1,updated_at=clock_timestamp()FROM candidates c WHERE i.id=c.id RETURNING i.*)
+ SELECT coalesce(jsonb_agg(jsonb_build_object('id',id,'evento',evento,'operacion_id',operacion_id,'version_documento',version_documento,'destinatario_snapshot',destinatario_snapshot,'fuente_documento',fuente_documento,'asunto_snapshot',asunto_snapshot,'cuerpo_snapshot',cuerpo_snapshot,'documento_path',documento_path,'reserva',reserva)ORDER BY created_at,id),'[]'::jsonb)INTO result FROM claimed;
+ RETURN result;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.confirmar_documento_intencion(p_id uuid,p_reserva uuid,p_path text)RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE i private.correo_intenciones%ROWTYPE;
+BEGIN
+ SELECT *INTO i FROM private.correo_intenciones WHERE id=p_id FOR UPDATE;
+ IF NOT FOUND OR i.reserva IS DISTINCT FROM p_reserva OR i.estado<>'preparando'OR i.comprobante_id IS NULL THEN RAISE EXCEPTION 'La preparación de documento cambió' USING ERRCODE='40001';END IF;
+ IF p_path IS NULL OR p_path!~('^comprobantes/'||i.comprobante_id::text||'/'||i.version_documento||'/[0-9a-f]{64}\.pdf$')
+ OR NOT EXISTS(SELECT 1 FROM storage.objects WHERE bucket_id='club-archivos'AND name=p_path)THEN RAISE EXCEPTION 'El PDF privado de esta intención no está confirmado' USING ERRCODE='22023';END IF;
+ IF i.documento_path IS NOT NULL AND i.documento_path<>p_path THEN RAISE EXCEPTION 'La versión documental congelada no se reemplaza' USING ERRCODE='40001';END IF;
+ UPDATE private.correo_intenciones SET documento_path=p_path,updated_at=clock_timestamp()WHERE id=p_id;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.registrar_fallo_intencion(p_id uuid,p_reserva uuid,p_codigo text)RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+BEGIN
+ IF p_codigo IS NULL OR p_codigo NOT IN('DOCUMENTO_NO_DISPONIBLE','PDF_NO_DISPONIBLE','FUENTE_DOCUMENTAL_INVALIDA','ENCOLADO_NO_CONFIRMADO','NOTIFICACION_NO_CONFIRMADA')THEN RAISE EXCEPTION 'Código de notificación inválido' USING ERRCODE='22023';END IF;
+ UPDATE private.correo_intenciones SET estado='pendiente',codigo=p_codigo,proximo_intento_en=clock_timestamp()+interval '1 minute',updated_at=clock_timestamp()WHERE id=p_id AND reserva=p_reserva AND estado='preparando';
+ IF NOT FOUND THEN RAISE EXCEPTION 'La preparación de notificación cambió' USING ERRCODE='40001';END IF;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.encolar_intencion_correo(p_id uuid,p_reserva uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE i private.correo_intenciones%ROWTYPE;log_id uuid;dest_id uuid;motivo text;salida text;
+BEGIN
+ SELECT *INTO i FROM private.correo_intenciones WHERE id=p_id FOR UPDATE;
+ IF NOT FOUND OR i.reserva IS DISTINCT FROM p_reserva THEN RAISE EXCEPTION 'La preparación de notificación cambió' USING ERRCODE='40001';END IF;
+ IF i.email_log_id IS NOT NULL THEN RETURN jsonb_build_object('id',i.email_log_id,'encolados',(SELECT count(*)FROM public.email_destinatarios WHERE intencion_id=i.id AND estado_envio<>'excluido'),'excluidos',(SELECT count(*)FROM public.email_destinatarios WHERE intencion_id=i.id AND estado_envio='excluido'));END IF;
+ IF i.estado<>'preparando'OR(i.fuente_documento IS NOT NULL AND i.documento_path IS NULL)THEN RAISE EXCEPTION 'La notificación todavía no tiene su documento confirmado' USING ERRCODE='40001';END IF;
+ motivo:=CASE WHEN i.destinatario_snapshot IS NULL OR i.destinatario_snapshot!~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'Sin correo válido'
+ WHEN i.socio_id IS NOT NULL AND EXISTS(SELECT 1 FROM public.socios WHERE id=i.socio_id AND email_invalido AND lower(btrim(email))=lower(btrim(i.destinatario_snapshot)))THEN 'Correo marcado inválido'ELSE NULL END;
+ INSERT INTO public.email_logs(usuario_id,asunto,cuerpo,destinatarios_count,origen,tipo,request_id,solicitud)
+ VALUES(i.actor_id,i.asunto_snapshot,i.cuerpo_snapshot,1,i.origen,'transaccional',i.id,jsonb_build_object('intencionId',i.id))RETURNING id INTO log_id;
+ -- La autoría/nombres son los del instante de intención, nunca recalculados durante recuperación.
+ INSERT INTO public.email_destinatarios(email_log_id,socio_id,email,estado_envio,motivo,asunto_snapshot,cuerpo_snapshot,intencion_id,documento_path)
+ VALUES(log_id,i.socio_id,i.destinatario_snapshot,CASE WHEN motivo IS NULL THEN 'pendiente'ELSE 'excluido'END,motivo,i.asunto_snapshot,i.cuerpo_snapshot,i.id,i.documento_path)RETURNING id INTO dest_id;
+ UPDATE private.correo_intenciones SET estado='encolada',email_log_id=log_id,codigo=CASE WHEN motivo IS NULL THEN NULL ELSE 'CORREO_INVALIDO'END,updated_at=clock_timestamp()WHERE id=i.id;
+ PERFORM private.actualizar_estado_correo(log_id);
+ RETURN jsonb_build_object('id',log_id,'encolados',CASE WHEN motivo IS NULL THEN 1 ELSE 0 END,'excluidos',CASE WHEN motivo IS NULL THEN 0 ELSE 1 END);
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.desuscribir_correo_confirmado(p_destinatario uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE e public.email_destinatarios%ROWTYPE;s public.socios%ROWTYPE;
+BEGIN
+ SELECT *INTO e FROM public.email_destinatarios WHERE id=p_destinatario;
+ IF NOT FOUND OR e.socio_id IS NULL THEN RETURN jsonb_build_object('resultado','no_disponible');END IF;
+ SELECT *INTO s FROM public.socios WHERE id=e.socio_id FOR UPDATE;
+ IF NOT FOUND THEN RETURN jsonb_build_object('resultado','no_disponible');END IF;
+ IF nullif(lower(btrim(e.email)),'')IS DISTINCT FROM nullif(lower(btrim(s.email)),'')THEN RETURN jsonb_build_object('resultado','direccion_antigua');END IF;
+ IF NOT s.acepta_comunicaciones THEN RETURN jsonb_build_object('resultado','ya_confirmada');END IF;
+ UPDATE public.socios SET acepta_comunicaciones=false WHERE id=s.id;
+ RETURN jsonb_build_object('resultado','confirmada');
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.consultar_notificacion_operacion(p_comprobante_id uuid DEFAULT NULL,p_job_id uuid DEFAULT NULL)RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=''AS $$
+DECLARE total integer;pendientes integer;warn integer;mensaje text;
+BEGIN
+ PERFORM private.require_operador(p_job_id IS NOT NULL);
+ IF(p_comprobante_id IS NULL)=(p_job_id IS NULL)THEN RAISE EXCEPTION 'Seleccione una operación de notificación' USING ERRCODE='22023';END IF;
+ IF p_comprobante_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.comprobantes WHERE id=p_comprobante_id)OR p_job_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.cuota_job_logs WHERE id=p_job_id)THEN RAISE EXCEPTION 'Operación inexistente' USING ERRCODE='22023';END IF;
+ SELECT count(*),count(*)FILTER(WHERE estado IN('pendiente','preparando')),count(*)FILTER(WHERE codigo IS NOT NULL OR EXISTS(SELECT 1 FROM public.email_destinatarios d WHERE d.intencion_id=private.correo_intenciones.id AND(d.estado_envio IN('fallido','incierto','excluido')OR d.entrega_estado IN('rebote_duro','fallida')OR d.proximo_intento_documental IS NOT NULL)))INTO total,pendientes,warn FROM private.correo_intenciones WHERE comprobante_id=p_comprobante_id OR job_id=p_job_id;
+ mensaje:=CASE WHEN warn>0 THEN 'La operación está confirmada. Hay una notificación pendiente de revisión; no repita el cobro ni la generación de cuotas.'ELSE NULL END;
+ RETURN jsonb_build_object('estado',CASE WHEN warn>0 THEN 'advertencia'WHEN pendientes>0 THEN 'pendiente'WHEN total>0 THEN 'encolado'ELSE 'sin_notificacion'END,'advertencia',mensaje);
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.consultar_eventos_correo_log(p_log_id uuid)RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=''AS $$
+DECLARE result jsonb;
+BEGIN
+ PERFORM private.require_operador();
+ SELECT coalesce(jsonb_agg(jsonb_build_object('destinatario_id',e.destinatario_id,'tipo',e.tipo,'ocurrido_en',e.ocurrido_en)ORDER BY e.ocurrido_en,e.event_id),'[]'::jsonb)INTO result FROM public.email_eventos e JOIN public.email_destinatarios d ON d.id=e.destinatario_id WHERE d.email_log_id=p_log_id;
+ RETURN result;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.consultar_candidatos_correo(p_page integer DEFAULT 1,p_page_size integer DEFAULT 20,p_tipo text DEFAULT 'general',p_busqueda text DEFAULT '',p_deporte_id uuid DEFAULT NULL,p_categoria_id uuid DEFAULT NULL,p_estado_pago text DEFAULT 'todos',p_incluir_desuscriptos boolean DEFAULT false,p_todos boolean DEFAULT false)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path=''AS $$
+DECLARE result jsonb;total integer;
+BEGIN
+ PERFORM private.require_operador();
+ IF p_page IS NULL OR p_page<1 OR p_page>100000 OR p_page_size IS NULL OR p_page_size NOT IN(20,50,100)OR p_tipo IS NULL OR p_tipo NOT IN('general','deuda')OR length(coalesce(p_busqueda,''))>100 OR p_estado_pago IS NULL OR p_estado_pago NOT IN('todos','moroso','aldia')OR p_incluir_desuscriptos IS NULL OR(p_incluir_desuscriptos AND p_tipo<>'deuda')OR p_todos IS NULL THEN RAISE EXCEPTION 'Criterios de destinatarios inválidos' USING ERRCODE='22023';END IF;
+ WITH candidatos AS MATERIALIZED(
+  SELECT s.id,s.nombre,s.apellido,s.dni,s.email,s.estado,s.acepta_comunicaciones,s.email_invalido,to_char(s.deuda_pendiente,'FM9999999999990.00')AS deuda_pendiente,s.es_moroso AS moroso,
+  coalesce((SELECT string_agg(DISTINCT d.nombre,', 'ORDER BY d.nombre)FROM public.cuotas q JOIN public.categorias ct ON ct.id=q.categoria_id JOIN public.deportes d ON d.id=ct.deporte_id WHERE q.socio_id=s.id AND q.estado='pendiente'),'')AS deportes,
+  CASE WHEN p_tipo='general'AND s.estado<>'activo'THEN 'Socio inactivo para comunicaciones generales'
+   WHEN s.email IS NULL OR btrim(s.email)!~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'Sin correo válido'
+   WHEN s.email_invalido THEN 'Correo marcado inválido'WHEN NOT s.acepta_comunicaciones AND NOT p_incluir_desuscriptos THEN 'Socio desuscripto'
+   WHEN p_tipo='deuda'AND s.deuda_pendiente<=0 THEN 'Sin deuda pendiente'ELSE NULL END AS motivo
+  FROM public.v_socios_estado_pago s WHERE(nullif(btrim(p_busqueda),'')IS NULL OR position(lower(btrim(p_busqueda))in lower(s.apellido||' '||s.nombre||' '||s.dni||' '||s.numero_socio::text||' '||coalesce(s.email,'')))>0)
+  AND(p_estado_pago='todos'OR(p_estado_pago='moroso'AND s.es_moroso)OR(p_estado_pago='aldia'AND NOT s.es_moroso))
+  AND((p_deporte_id IS NULL AND p_categoria_id IS NULL)OR EXISTS(SELECT 1 FROM public.inscripciones i JOIN public.categorias ct ON ct.id=i.categoria_id WHERE i.socio_id=s.id AND i.estado='activa'AND(p_deporte_id IS NULL OR ct.deporte_id=p_deporte_id)AND(p_categoria_id IS NULL OR ct.id=p_categoria_id))
+   OR EXISTS(SELECT 1 FROM public.cuotas q JOIN public.categorias ct ON ct.id=q.categoria_id WHERE q.socio_id=s.id AND q.estado='pendiente'AND(p_deporte_id IS NULL OR ct.deporte_id=p_deporte_id)AND(p_categoria_id IS NULL OR ct.id=p_categoria_id)))
+ ),pagina AS(SELECT *FROM candidatos ORDER BY lower(apellido),lower(nombre),id LIMIT p_page_size OFFSET(p_page-1)::bigint*p_page_size)
+ SELECT jsonb_build_object('candidatos',coalesce((SELECT jsonb_agg(to_jsonb(p)||jsonb_build_object('elegible',p.motivo IS NULL)ORDER BY lower(p.apellido),lower(p.nombre),p.id)FROM pagina p),'[]'::jsonb),'page',p_page,'pageSize',p_page_size,'total',(SELECT count(*)FROM candidatos),'elegibles',(SELECT count(*)FROM candidatos WHERE motivo IS NULL),'excluidos',(SELECT count(*)FROM candidatos WHERE motivo IS NOT NULL))
+ ||CASE WHEN p_todos THEN jsonb_build_object('idsFiltrados',coalesce((SELECT jsonb_agg(id ORDER BY id)FROM(SELECT id FROM candidatos ORDER BY id LIMIT 1001)todos),'[]'::jsonb))ELSE '{}'::jsonb END INTO result;
+ IF p_todos AND(result->>'total')::integer>1000 THEN RAISE EXCEPTION 'Hay más de 1000 candidatos; ajuste los filtros antes de seleccionar todos' USING ERRCODE='22023';END IF;
+ RETURN result;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.leer_documento_correo(p_destinatario_id uuid,p_reserva_id uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE d public.email_destinatarios%ROWTYPE;i private.correo_intenciones%ROWTYPE;
+BEGIN
+ SELECT *INTO d FROM public.email_destinatarios WHERE id=p_destinatario_id;
+ IF NOT FOUND OR d.estado_envio<>'procesando'OR d.reserva_id IS DISTINCT FROM p_reserva_id THEN RAISE EXCEPTION 'Reserva de correo no vigente' USING ERRCODE='40001';END IF;
+ IF d.intencion_id IS NULL THEN RETURN NULL;END IF;
+ SELECT *INTO i FROM private.correo_intenciones WHERE id=d.intencion_id;
+ IF NOT FOUND OR i.estado<>'encolada'OR i.email_log_id<>d.email_log_id THEN RAISE EXCEPTION 'Referencia de notificación no vigente' USING ERRCODE='40001';END IF;
+ IF i.fuente_documento IS NULL THEN RETURN NULL;END IF;
+ IF i.documento_path IS NULL OR i.documento_path IS DISTINCT FROM d.documento_path OR i.documento_path!~('^comprobantes/'||i.comprobante_id::text||'/'||i.version_documento||'/[0-9a-f]{64}\.pdf$')THEN RAISE EXCEPTION 'Referencia documental inconsistente' USING ERRCODE='40001';END IF;
+ RETURN jsonb_build_object('storagePath',i.documento_path,'nombreArchivo',CASE WHEN i.fuente_documento->>'tipo'='nota_credito'THEN 'nota-de-credito-'ELSE 'comprobante-'END||i.version_documento||'.pdf','fuenteDocumento',i.fuente_documento,'versionDocumento',i.version_documento);
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.marcar_despacho_correo(p_id uuid,p_reserva uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE started boolean;
+BEGIN
+ UPDATE public.email_destinatarios SET despacho_iniciado=true WHERE id=p_id AND reserva_id=p_reserva AND estado_envio='procesando'AND NOT despacho_iniciado;
+ started:=FOUND;RETURN jsonb_build_object('iniciado',started);
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.posponer_correo_documental(p_id uuid,p_reserva uuid)RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+BEGIN
+ UPDATE public.email_destinatarios SET estado_envio='pendiente',motivo='Documento privado pendiente de recuperación; no se inició el envío',proximo_intento_documental=clock_timestamp()+interval '1 minute',reserva_id=NULL
+ WHERE id=p_id AND reserva_id=p_reserva AND estado_envio='procesando'AND NOT despacho_iniciado AND intencion_id IS NOT NULL AND documento_path IS NOT NULL;
+ IF NOT FOUND THEN RAISE EXCEPTION 'No se puede reencolar un despacho iniciado o una reserva anterior' USING ERRCODE='40001';END IF;
+END;$$;
+
+CREATE OR REPLACE FUNCTION public.confirmar_resultado_fiscal_con_actor(p_ejecucion_id uuid,p_version bigint,p_resultado jsonb,p_actor_id uuid)RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE ex private.fiscal_ejecuciones%ROWTYPE;rol public.rol_usuario;anterior text;result jsonb;
+BEGIN
+ SELECT *INTO ex FROM private.fiscal_ejecuciones WHERE id=p_ejecucion_id;
+ SELECT u.rol INTO rol FROM public.usuarios u WHERE u.id=p_actor_id AND u.estado='activo';
+ IF p_actor_id IS NULL OR rol IS NULL OR ex.id IS NULL OR ex.clase='automatico'OR(ex.clase<>'inicial'AND rol<>'admin')THEN RAISE EXCEPTION 'El actor no puede confirmar esta operación fiscal' USING ERRCODE='42501';END IF;
+ anterior:=current_setting('club.correo_actor',true);PERFORM set_config('club.correo_actor',p_actor_id::text,true);
+ BEGIN
+  result:=public.confirmar_resultado_fiscal(p_ejecucion_id,p_version,p_resultado);
+ EXCEPTION WHEN OTHERS THEN PERFORM set_config('club.correo_actor',coalesce(anterior,''),true);RAISE;END;
+ PERFORM set_config('club.correo_actor',coalesce(anterior,''),true);RETURN result;
+END;$$;
 --=================================================================================
 -- VISTAS SQL REQUERIDAS (LIBRO MAYOR CONTINUO)
 --=================================================================================
@@ -3534,6 +3743,120 @@ DROP TRIGGER IF EXISTS socios_auto_receptor_fiscal ON public.socios;
 CREATE TRIGGER socios_auto_receptor_fiscal
 AFTER INSERT OR UPDATE OF dni ON public.socios
 FOR EACH ROW EXECUTE FUNCTION private.trg_socios_auto_receptor_fiscal();
+
+-- ---------------------------------------------------------------------------------
+-- Snapshots, captura post-commit e inmutabilidad de intenciones de correo
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.correo_nombres_snapshot() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF TG_TABLE_NAME='email_logs' THEN
+  IF NEW.tipo='transaccional' THEN SELECT autor_nombre_snapshot INTO NEW.autor_nombre_snapshot FROM private.correo_intenciones WHERE id=NEW.request_id;
+  ELSE SELECT concat_ws(' ',nombre,apellido)INTO NEW.autor_nombre_snapshot FROM public.usuarios WHERE id=NEW.usuario_id;END IF;
+ ELSE
+  IF NEW.intencion_id IS NOT NULL THEN SELECT nombre_snapshot,apellido_snapshot INTO NEW.nombre_snapshot,NEW.apellido_snapshot FROM private.correo_intenciones WHERE id=NEW.intencion_id;
+  ELSE SELECT nombre,apellido INTO NEW.nombre_snapshot,NEW.apellido_snapshot FROM public.socios WHERE id=NEW.socio_id;END IF;
+ END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_autor_snapshot BEFORE INSERT ON public.email_logs FOR EACH ROW EXECUTE FUNCTION private.correo_nombres_snapshot();
+CREATE TRIGGER correo_socio_snapshot BEFORE INSERT ON public.email_destinatarios FOR EACH ROW EXECUTE FUNCTION private.correo_nombres_snapshot();
+
+CREATE OR REPLACE FUNCTION private.correo_capturar_comprobante()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE evento text;version text;fuente jsonb;receptor public.socios%ROWTYPE;actor uuid;autor text;motivo text;
+BEGIN
+ IF TG_OP='INSERT' AND NEW.tipo='factura' THEN evento:='cobro_confirmado';version:=CASE WHEN NEW.cae IS NULL THEN 'provisional' ELSE 'autorizado' END;
+ ELSIF TG_OP='UPDATE' AND OLD.cae IS NULL AND NEW.cae IS NOT NULL THEN evento:='comprobante_autorizado';version:='autorizado';
+ ELSIF TG_OP='UPDATE' AND NEW.tipo='factura' AND NEW.cae IS NULL AND NEW.estado_fiscal='anulado' AND OLD.estado_fiscal IS DISTINCT FROM NEW.estado_fiscal THEN evento:='anulacion_confirmada';version:='provisional';
+ ELSE RETURN NEW;END IF;
+ SELECT s.* INTO receptor FROM public.pagos p JOIN public.cuotas q ON q.id=p.cuota_id JOIN public.socios s ON s.id=q.socio_id WHERE p.id=NEW.pago_id;
+ -- Sólo una identidad humana auténtica de esta transacción; un worker no adopta al receptor como autor.
+ actor:=private.correo_actor_actual();
+ SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ fuente:=private.correo_fuente_documento(NEW.id);
+ motivo:=CASE WHEN receptor.email IS NULL OR btrim(receptor.email)!~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'SIN_CORREO_VALIDO' WHEN receptor.email_invalido THEN 'CORREO_INVALIDO' ELSE NULL END;
+ INSERT INTO private.correo_intenciones(evento,operacion_id,comprobante_id,socio_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_documento,version_clave,
+ fuente_documento,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+ VALUES(evento,NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,version,
+ version||':'||encode(extensions.digest(convert_to(fuente::text,'UTF8'),'sha256'),'hex'),fuente,actor,autor,CASE WHEN actor IS NULL THEN 'automatico' ELSE 'manual' END,
+ CASE WHEN NEW.tipo='nota_credito'THEN 'Nota de Crédito del club'WHEN evento='anulacion_confirmada'THEN 'Constancia de anulación del cobro'WHEN version='autorizado'THEN 'Comprobante fiscal del club'ELSE 'Comprobante provisional del cobro'END,
+ 'Hola '||receptor.nombre||'. Se adjunta la documentación correspondiente al estado confirmado de la operación. El envío de este mensaje no modifica su pago ni su deuda.',
+ CASE WHEN motivo IS NULL THEN 'pendiente' ELSE 'omitida' END,motivo)
+ ON CONFLICT DO NOTHING;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_comprobante AFTER INSERT OR UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.correo_capturar_comprobante();
+
+CREATE OR REPLACE FUNCTION private.correo_capturar_job()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE receptor record;actor uuid;autor text;cuantos integer:=0;
+BEGIN
+ IF NEW.estado<>'exitoso'OR(TG_OP='UPDATE' AND OLD.estado='exitoso')THEN RETURN NEW;END IF;
+ actor:=private.correo_actor_actual();IF actor IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=actor AND rol='admin')THEN actor:=NULL;END IF;
+ SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ -- Destinatarios del reporte mensual: administradores activos.
+ FOR receptor IN SELECT id,email,nombre,apellido FROM public.usuarios WHERE rol='admin'AND estado='activo'ORDER BY id LOOP
+  cuantos:=cuantos+1;
+  INSERT INTO private.correo_intenciones(evento,operacion_id,job_id,destinatario_usuario_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_clave,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('reporte_mensual',NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,'reporte:v1',actor,autor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,
+  'Resultado de generación mensual de cuotas',format('Período %s/%s. Generación confirmada: %s cuotas creadas y %s omitidas. Este reporte corresponde a la ejecución confirmada y su recuperación no genera cuotas nuevamente.',NEW.periodo_mes,NEW.periodo_anio,NEW.cuotas_generadas,NEW.cuotas_omitidas),
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'pendiente'ELSE 'omitida'END,
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN NULL ELSE 'SIN_CORREO_VALIDO'END)ON CONFLICT DO NOTHING;
+ END LOOP;
+ IF cuantos=0 THEN
+  INSERT INTO private.correo_intenciones(evento,operacion_id,job_id,version_clave,actor_id,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('reporte_mensual',NEW.id,NEW.id,'reporte:v1',actor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,'Resultado de generación mensual de cuotas','Generación confirmada sin administrador destinatario configurado.','omitida','SIN_ADMIN_DESTINATARIO')ON CONFLICT DO NOTHING;
+ END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_job AFTER INSERT OR UPDATE ON public.cuota_job_logs FOR EACH ROW EXECUTE FUNCTION private.correo_capturar_job();
+
+CREATE OR REPLACE FUNCTION private.correo_intencion_inmutable()RETURNS trigger LANGUAGE plpgsql SET search_path=''AS $$
+DECLARE autor_permitido boolean;
+BEGIN
+ autor_permitido:=OLD.actor_id IS NULL AND OLD.origen='automatico'AND NEW.actor_id IS NOT NULL AND NEW.origen='manual'
+ AND OLD.estado='pendiente'AND OLD.reserva IS NULL AND OLD.creacion_xid=pg_current_xact_id()
+ AND EXISTS(SELECT 1 FROM private.fiscal_auditoria a WHERE a.comprobante_id=OLD.comprobante_id AND a.actor_id=NEW.actor_id);
+ IF NEW.id IS DISTINCT FROM OLD.id OR ROW(NEW.evento,NEW.operacion_id,NEW.comprobante_id,NEW.job_id,NEW.socio_id,NEW.destinatario_usuario_id,NEW.destinatario_snapshot,NEW.nombre_snapshot,NEW.apellido_snapshot,NEW.creacion_xid,NEW.version_documento,NEW.version_clave,NEW.fuente_documento,NEW.asunto_snapshot,NEW.cuerpo_snapshot,NEW.created_at)
+ IS DISTINCT FROM ROW(OLD.evento,OLD.operacion_id,OLD.comprobante_id,OLD.job_id,OLD.socio_id,OLD.destinatario_usuario_id,OLD.destinatario_snapshot,OLD.nombre_snapshot,OLD.apellido_snapshot,OLD.creacion_xid,OLD.version_documento,OLD.version_clave,OLD.fuente_documento,OLD.asunto_snapshot,OLD.cuerpo_snapshot,OLD.created_at)
+ OR(ROW(NEW.actor_id,NEW.autor_nombre_snapshot,NEW.origen)IS DISTINCT FROM ROW(OLD.actor_id,OLD.autor_nombre_snapshot,OLD.origen)AND NOT autor_permitido)
+ OR(OLD.documento_path IS NOT NULL AND NEW.documento_path IS DISTINCT FROM OLD.documento_path)OR(OLD.email_log_id IS NOT NULL AND NEW.email_log_id IS DISTINCT FROM OLD.email_log_id)THEN RAISE EXCEPTION 'La identidad de la notificación es inmutable';END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_inmutable BEFORE UPDATE ON private.correo_intenciones FOR EACH ROW EXECUTE FUNCTION private.correo_intencion_inmutable();
+
+CREATE OR REPLACE FUNCTION private.correo_proyectar_actor_fiscal()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+BEGIN
+ IF NEW.actor_id IS NULL OR NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=NEW.actor_id AND estado='activo'AND rol='admin')THEN RETURN NEW;END IF;
+ UPDATE private.correo_intenciones SET actor_id=NEW.actor_id,origen='manual',autor_nombre_snapshot=(SELECT concat_ws(' ',nombre,apellido)FROM public.usuarios WHERE id=NEW.actor_id)
+ WHERE comprobante_id=NEW.comprobante_id AND creacion_xid=pg_current_xact_id()AND estado='pendiente'AND reserva IS NULL AND actor_id IS NULL;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_actor_fiscal_auditoria AFTER INSERT ON private.fiscal_auditoria FOR EACH ROW EXECUTE FUNCTION private.correo_proyectar_actor_fiscal();
+
+CREATE OR REPLACE FUNCTION private.correo_alerta_fiscal()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE receptor record;actor uuid;autor text;
+BEGIN
+ IF NEW.estado_fiscal<>'fallido'OR OLD.estado_fiscal='fallido'THEN RETURN NEW;END IF;
+ actor:=private.correo_actor_actual();SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ FOR receptor IN SELECT id,nombre,apellido,email FROM public.usuarios WHERE rol='admin'AND estado='activo'ORDER BY id LOOP
+  INSERT INTO private.correo_intenciones(evento,operacion_id,comprobante_id,destinatario_usuario_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_clave,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('alerta_fiscal',NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,'alerta:'||coalesce(NEW.ventana_regularizacion_iniciada_en::text,NEW.created_at::text,NEW.id::text),actor,autor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,
+  'Revisión requerida: regularización fiscal pendiente','La regularización fiscal no se confirmó dentro de su presupuesto o plazo. Revise Monitoreo fiscal. El estado financiero del cobro y cualquier recobro posterior se conservan.',
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'pendiente'ELSE 'omitida'END,
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN NULL ELSE 'SIN_CORREO_VALIDO'END)ON CONFLICT DO NOTHING;
+ END LOOP;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_alerta_fiscal AFTER UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.correo_alerta_fiscal();
+
+CREATE OR REPLACE FUNCTION private.correo_snapshot_inmutable()RETURNS trigger LANGUAGE plpgsql SET search_path=''AS $$
+BEGIN
+ IF TG_TABLE_NAME='email_logs'THEN
+  IF NEW.autor_nombre_snapshot IS DISTINCT FROM OLD.autor_nombre_snapshot THEN RAISE EXCEPTION 'La autoría histórica no se reescribe';END IF;
+ ELSIF ROW(NEW.nombre_snapshot,NEW.apellido_snapshot,NEW.asunto_snapshot,NEW.cuerpo_snapshot,NEW.email,NEW.intencion_id,NEW.documento_path)IS DISTINCT FROM ROW(OLD.nombre_snapshot,OLD.apellido_snapshot,OLD.asunto_snapshot,OLD.cuerpo_snapshot,OLD.email,OLD.intencion_id,OLD.documento_path)THEN RAISE EXCEPTION 'El destinatario y documento históricos no se reescriben';END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_log_snapshot_inmutable BEFORE UPDATE ON public.email_logs FOR EACH ROW EXECUTE FUNCTION private.correo_snapshot_inmutable();
+CREATE TRIGGER correo_dest_snapshot_inmutable BEFORE UPDATE ON public.email_destinatarios FOR EACH ROW EXECUTE FUNCTION private.correo_snapshot_inmutable();
 -- Schema no expuesto a PostgREST: alberga helpers internos de RLS
 CREATE SCHEMA IF NOT EXISTS private;
 GRANT USAGE ON SCHEMA private TO authenticated, service_role;
@@ -3867,6 +4190,22 @@ REVOKE ALL ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_conte
 GRANT EXECUTE ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_contexto_fiscal(uuid),public.iniciar_ejecucion_fiscal(uuid,text,uuid),public.preparar_solicitud_fiscal(uuid,bigint,text,jsonb),public.marcar_envio_fiscal(uuid,bigint),public.confirmar_resultado_fiscal(uuid,bigint,jsonb),public.registrar_incidencia_fiscal(uuid,bigint,text),public.adquirir_ticket_wsaa(text,uuid),public.guardar_ticket_wsaa(text,uuid,integer,text,timestamptz),public.registrar_pdf_comprobante(uuid,text,text,jsonb),public.expirar_comprobante_fiscal(uuid),public.listar_candidatos_fiscales(integer),public.resolver_anulacion_fiscal(uuid,bigint,jsonb,uuid),public.reabrir_verificado_fiscal(uuid,uuid,bigint,uuid),public.reabrir_regularizacion_fiscal(uuid),public.registrar_autorizacion_verificada_fiscal(uuid,uuid,bigint,jsonb,uuid),public.iniciar_ejecucion_fiscal_administrativa(uuid,text,uuid,uuid),public.reabrir_sin_envio_fiscal(uuid,uuid,bigint,uuid),public.resolver_rechazo_anulado_fiscal(uuid,uuid,bigint,uuid),public.resolver_anulacion_sin_envio_fiscal(uuid,uuid,bigint,uuid) TO service_role;
 REVOKE ALL ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) FROM PUBLIC,anon;
 GRANT EXECUTE ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) TO authenticated,service_role;
+
+-- RLS, permisos de tablas/funciones y privilegios de columna (Comunicaciones operativas e intenciones post-commit).
+REVOKE INSERT,UPDATE,DELETE ON public.plantillas_correo FROM PUBLIC,anon,authenticated;
+GRANT INSERT(nombre_interno,asunto,cuerpo,estado),UPDATE(nombre_interno,asunto,cuerpo,estado) ON public.plantillas_correo TO authenticated;
+ALTER TABLE private.correo_intenciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.correo_intenciones FROM PUBLIC,anon,authenticated;
+GRANT SELECT,INSERT,UPDATE ON private.correo_intenciones TO service_role;
+REVOKE ALL ON FUNCTION private.correo_nombres_snapshot(),private.correo_fuente_documento(uuid),private.correo_capturar_comprobante(),private.correo_capturar_job(),private.correo_intencion_inmutable(),private.correo_actor_actual(),private.correo_proyectar_actor_fiscal(),private.correo_alerta_fiscal(),private.correo_snapshot_inmutable() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) TO authenticated;
+-- El navegador sólo puede leer el contrato humano del historial, nunca la cola técnica.
+REVOKE SELECT ON public.email_logs,public.email_destinatarios FROM PUBLIC,anon,authenticated;
+GRANT SELECT(id,origen,tipo,asunto,cuerpo,destinatarios_count,estado,fecha_envio,autor_nombre_snapshot) ON public.email_logs TO authenticated;
+GRANT SELECT(id,email_log_id,email,nombre_snapshot,apellido_snapshot,estado_envio,entrega_estado,motivo,asunto_snapshot,cuerpo_snapshot,aceptado_en,created_at) ON public.email_destinatarios TO authenticated;
 
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

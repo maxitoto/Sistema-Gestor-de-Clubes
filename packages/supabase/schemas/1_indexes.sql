@@ -65,3 +65,8 @@ CREATE UNIQUE INDEX comprobante_numero_identidad_fiscal ON public.comprobantes(e
  WHERE tipo_fiscal IS NOT NULL AND numero_comprobante IS NOT NULL;
 CREATE UNIQUE INDEX comprobante_numero_identidad_legada ON public.comprobantes(punto_venta,tipo,numero_comprobante)
  WHERE tipo_fiscal IS NULL AND numero_comprobante IS NOT NULL;
+
+-- índices de identidad y cola de intenciones de correo post-commit
+CREATE UNIQUE INDEX correo_intencion_identidad ON private.correo_intenciones(evento,operacion_id,version_clave,coalesce(lower(btrim(destinatario_snapshot)),''));
+CREATE INDEX correo_intencion_cola ON private.correo_intenciones(proximo_intento_en,id)WHERE estado IN('pendiente','preparando');
+CREATE UNIQUE INDEX correo_destinatario_intencion ON public.email_destinatarios(intencion_id)WHERE intencion_id IS NOT NULL;

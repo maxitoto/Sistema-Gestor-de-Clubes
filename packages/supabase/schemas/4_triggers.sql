@@ -661,3 +661,117 @@ DROP TRIGGER IF EXISTS socios_auto_receptor_fiscal ON public.socios;
 CREATE TRIGGER socios_auto_receptor_fiscal
 AFTER INSERT OR UPDATE OF dni ON public.socios
 FOR EACH ROW EXECUTE FUNCTION private.trg_socios_auto_receptor_fiscal();
+
+-- ---------------------------------------------------------------------------------
+-- Snapshots, captura post-commit e inmutabilidad de intenciones de correo
+-- ---------------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION private.correo_nombres_snapshot() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+BEGIN
+ IF TG_TABLE_NAME='email_logs' THEN
+  IF NEW.tipo='transaccional' THEN SELECT autor_nombre_snapshot INTO NEW.autor_nombre_snapshot FROM private.correo_intenciones WHERE id=NEW.request_id;
+  ELSE SELECT concat_ws(' ',nombre,apellido)INTO NEW.autor_nombre_snapshot FROM public.usuarios WHERE id=NEW.usuario_id;END IF;
+ ELSE
+  IF NEW.intencion_id IS NOT NULL THEN SELECT nombre_snapshot,apellido_snapshot INTO NEW.nombre_snapshot,NEW.apellido_snapshot FROM private.correo_intenciones WHERE id=NEW.intencion_id;
+  ELSE SELECT nombre,apellido INTO NEW.nombre_snapshot,NEW.apellido_snapshot FROM public.socios WHERE id=NEW.socio_id;END IF;
+ END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_autor_snapshot BEFORE INSERT ON public.email_logs FOR EACH ROW EXECUTE FUNCTION private.correo_nombres_snapshot();
+CREATE TRIGGER correo_socio_snapshot BEFORE INSERT ON public.email_destinatarios FOR EACH ROW EXECUTE FUNCTION private.correo_nombres_snapshot();
+
+CREATE OR REPLACE FUNCTION private.correo_capturar_comprobante()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE evento text;version text;fuente jsonb;receptor public.socios%ROWTYPE;actor uuid;autor text;motivo text;
+BEGIN
+ IF TG_OP='INSERT' AND NEW.tipo='factura' THEN evento:='cobro_confirmado';version:=CASE WHEN NEW.cae IS NULL THEN 'provisional' ELSE 'autorizado' END;
+ ELSIF TG_OP='UPDATE' AND OLD.cae IS NULL AND NEW.cae IS NOT NULL THEN evento:='comprobante_autorizado';version:='autorizado';
+ ELSIF TG_OP='UPDATE' AND NEW.tipo='factura' AND NEW.cae IS NULL AND NEW.estado_fiscal='anulado' AND OLD.estado_fiscal IS DISTINCT FROM NEW.estado_fiscal THEN evento:='anulacion_confirmada';version:='provisional';
+ ELSE RETURN NEW;END IF;
+ SELECT s.* INTO receptor FROM public.pagos p JOIN public.cuotas q ON q.id=p.cuota_id JOIN public.socios s ON s.id=q.socio_id WHERE p.id=NEW.pago_id;
+ -- Sólo una identidad humana auténtica de esta transacción; un worker no adopta al receptor como autor.
+ actor:=private.correo_actor_actual();
+ SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ fuente:=private.correo_fuente_documento(NEW.id);
+ motivo:=CASE WHEN receptor.email IS NULL OR btrim(receptor.email)!~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'SIN_CORREO_VALIDO' WHEN receptor.email_invalido THEN 'CORREO_INVALIDO' ELSE NULL END;
+ INSERT INTO private.correo_intenciones(evento,operacion_id,comprobante_id,socio_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_documento,version_clave,
+ fuente_documento,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+ VALUES(evento,NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,version,
+ version||':'||encode(extensions.digest(convert_to(fuente::text,'UTF8'),'sha256'),'hex'),fuente,actor,autor,CASE WHEN actor IS NULL THEN 'automatico' ELSE 'manual' END,
+ CASE WHEN NEW.tipo='nota_credito'THEN 'Nota de Crédito del club'WHEN evento='anulacion_confirmada'THEN 'Constancia de anulación del cobro'WHEN version='autorizado'THEN 'Comprobante fiscal del club'ELSE 'Comprobante provisional del cobro'END,
+ 'Hola '||receptor.nombre||'. Se adjunta la documentación correspondiente al estado confirmado de la operación. El envío de este mensaje no modifica su pago ni su deuda.',
+ CASE WHEN motivo IS NULL THEN 'pendiente' ELSE 'omitida' END,motivo)
+ ON CONFLICT DO NOTHING;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_comprobante AFTER INSERT OR UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.correo_capturar_comprobante();
+
+CREATE OR REPLACE FUNCTION private.correo_capturar_job()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE receptor record;actor uuid;autor text;cuantos integer:=0;
+BEGIN
+ IF NEW.estado<>'exitoso'OR(TG_OP='UPDATE' AND OLD.estado='exitoso')THEN RETURN NEW;END IF;
+ actor:=private.correo_actor_actual();IF actor IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=actor AND rol='admin')THEN actor:=NULL;END IF;
+ SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ -- Destinatarios del reporte mensual: administradores activos.
+ FOR receptor IN SELECT id,email,nombre,apellido FROM public.usuarios WHERE rol='admin'AND estado='activo'ORDER BY id LOOP
+  cuantos:=cuantos+1;
+  INSERT INTO private.correo_intenciones(evento,operacion_id,job_id,destinatario_usuario_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_clave,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('reporte_mensual',NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,'reporte:v1',actor,autor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,
+  'Resultado de generación mensual de cuotas',format('Período %s/%s. Generación confirmada: %s cuotas creadas y %s omitidas. Este reporte corresponde a la ejecución confirmada y su recuperación no genera cuotas nuevamente.',NEW.periodo_mes,NEW.periodo_anio,NEW.cuotas_generadas,NEW.cuotas_omitidas),
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'pendiente'ELSE 'omitida'END,
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN NULL ELSE 'SIN_CORREO_VALIDO'END)ON CONFLICT DO NOTHING;
+ END LOOP;
+ IF cuantos=0 THEN
+  INSERT INTO private.correo_intenciones(evento,operacion_id,job_id,version_clave,actor_id,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('reporte_mensual',NEW.id,NEW.id,'reporte:v1',actor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,'Resultado de generación mensual de cuotas','Generación confirmada sin administrador destinatario configurado.','omitida','SIN_ADMIN_DESTINATARIO')ON CONFLICT DO NOTHING;
+ END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_job AFTER INSERT OR UPDATE ON public.cuota_job_logs FOR EACH ROW EXECUTE FUNCTION private.correo_capturar_job();
+
+CREATE OR REPLACE FUNCTION private.correo_intencion_inmutable()RETURNS trigger LANGUAGE plpgsql SET search_path=''AS $$
+DECLARE autor_permitido boolean;
+BEGIN
+ autor_permitido:=OLD.actor_id IS NULL AND OLD.origen='automatico'AND NEW.actor_id IS NOT NULL AND NEW.origen='manual'
+ AND OLD.estado='pendiente'AND OLD.reserva IS NULL AND OLD.creacion_xid=pg_current_xact_id()
+ AND EXISTS(SELECT 1 FROM private.fiscal_auditoria a WHERE a.comprobante_id=OLD.comprobante_id AND a.actor_id=NEW.actor_id);
+ IF NEW.id IS DISTINCT FROM OLD.id OR ROW(NEW.evento,NEW.operacion_id,NEW.comprobante_id,NEW.job_id,NEW.socio_id,NEW.destinatario_usuario_id,NEW.destinatario_snapshot,NEW.nombre_snapshot,NEW.apellido_snapshot,NEW.creacion_xid,NEW.version_documento,NEW.version_clave,NEW.fuente_documento,NEW.asunto_snapshot,NEW.cuerpo_snapshot,NEW.created_at)
+ IS DISTINCT FROM ROW(OLD.evento,OLD.operacion_id,OLD.comprobante_id,OLD.job_id,OLD.socio_id,OLD.destinatario_usuario_id,OLD.destinatario_snapshot,OLD.nombre_snapshot,OLD.apellido_snapshot,OLD.creacion_xid,OLD.version_documento,OLD.version_clave,OLD.fuente_documento,OLD.asunto_snapshot,OLD.cuerpo_snapshot,OLD.created_at)
+ OR(ROW(NEW.actor_id,NEW.autor_nombre_snapshot,NEW.origen)IS DISTINCT FROM ROW(OLD.actor_id,OLD.autor_nombre_snapshot,OLD.origen)AND NOT autor_permitido)
+ OR(OLD.documento_path IS NOT NULL AND NEW.documento_path IS DISTINCT FROM OLD.documento_path)OR(OLD.email_log_id IS NOT NULL AND NEW.email_log_id IS DISTINCT FROM OLD.email_log_id)THEN RAISE EXCEPTION 'La identidad de la notificación es inmutable';END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_inmutable BEFORE UPDATE ON private.correo_intenciones FOR EACH ROW EXECUTE FUNCTION private.correo_intencion_inmutable();
+
+CREATE OR REPLACE FUNCTION private.correo_proyectar_actor_fiscal()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+BEGIN
+ IF NEW.actor_id IS NULL OR NOT EXISTS(SELECT 1 FROM public.usuarios WHERE id=NEW.actor_id AND estado='activo'AND rol='admin')THEN RETURN NEW;END IF;
+ UPDATE private.correo_intenciones SET actor_id=NEW.actor_id,origen='manual',autor_nombre_snapshot=(SELECT concat_ws(' ',nombre,apellido)FROM public.usuarios WHERE id=NEW.actor_id)
+ WHERE comprobante_id=NEW.comprobante_id AND creacion_xid=pg_current_xact_id()AND estado='pendiente'AND reserva IS NULL AND actor_id IS NULL;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_actor_fiscal_auditoria AFTER INSERT ON private.fiscal_auditoria FOR EACH ROW EXECUTE FUNCTION private.correo_proyectar_actor_fiscal();
+
+CREATE OR REPLACE FUNCTION private.correo_alerta_fiscal()RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=''AS $$
+DECLARE receptor record;actor uuid;autor text;
+BEGIN
+ IF NEW.estado_fiscal<>'fallido'OR OLD.estado_fiscal='fallido'THEN RETURN NEW;END IF;
+ actor:=private.correo_actor_actual();SELECT concat_ws(' ',nombre,apellido)INTO autor FROM public.usuarios WHERE id=actor;
+ FOR receptor IN SELECT id,nombre,apellido,email FROM public.usuarios WHERE rol='admin'AND estado='activo'ORDER BY id LOOP
+  INSERT INTO private.correo_intenciones(evento,operacion_id,comprobante_id,destinatario_usuario_id,destinatario_snapshot,nombre_snapshot,apellido_snapshot,version_clave,actor_id,autor_nombre_snapshot,origen,asunto_snapshot,cuerpo_snapshot,estado,codigo)
+  VALUES('alerta_fiscal',NEW.id,NEW.id,receptor.id,nullif(btrim(receptor.email),''),receptor.nombre,receptor.apellido,'alerta:'||coalesce(NEW.ventana_regularizacion_iniciada_en::text,NEW.created_at::text,NEW.id::text),actor,autor,CASE WHEN actor IS NULL THEN 'automatico'ELSE 'manual'END,
+  'Revisión requerida: regularización fiscal pendiente','La regularización fiscal no se confirmó dentro de su presupuesto o plazo. Revise Monitoreo fiscal. El estado financiero del cobro y cualquier recobro posterior se conservan.',
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN 'pendiente'ELSE 'omitida'END,
+  CASE WHEN receptor.email~'^[^[:space:]@,;<>]+@[^[:space:]@,;<>]+\.[^[:space:]@,;<>]+$'THEN NULL ELSE 'SIN_CORREO_VALIDO'END)ON CONFLICT DO NOTHING;
+ END LOOP;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_intencion_alerta_fiscal AFTER UPDATE ON public.comprobantes FOR EACH ROW EXECUTE FUNCTION private.correo_alerta_fiscal();
+
+CREATE OR REPLACE FUNCTION private.correo_snapshot_inmutable()RETURNS trigger LANGUAGE plpgsql SET search_path=''AS $$
+BEGIN
+ IF TG_TABLE_NAME='email_logs'THEN
+  IF NEW.autor_nombre_snapshot IS DISTINCT FROM OLD.autor_nombre_snapshot THEN RAISE EXCEPTION 'La autoría histórica no se reescribe';END IF;
+ ELSIF ROW(NEW.nombre_snapshot,NEW.apellido_snapshot,NEW.asunto_snapshot,NEW.cuerpo_snapshot,NEW.email,NEW.intencion_id,NEW.documento_path)IS DISTINCT FROM ROW(OLD.nombre_snapshot,OLD.apellido_snapshot,OLD.asunto_snapshot,OLD.cuerpo_snapshot,OLD.email,OLD.intencion_id,OLD.documento_path)THEN RAISE EXCEPTION 'El destinatario y documento históricos no se reescriben';END IF;
+ RETURN NEW;
+END;$$;
+CREATE TRIGGER correo_log_snapshot_inmutable BEFORE UPDATE ON public.email_logs FOR EACH ROW EXECUTE FUNCTION private.correo_snapshot_inmutable();
+CREATE TRIGGER correo_dest_snapshot_inmutable BEFORE UPDATE ON public.email_destinatarios FOR EACH ROW EXECUTE FUNCTION private.correo_snapshot_inmutable();

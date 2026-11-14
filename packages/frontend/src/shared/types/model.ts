@@ -462,18 +462,24 @@ export type Database = {
 			email_destinatarios: {
 				Row: {
 					aceptado_en: string | null;
+					apellido_snapshot: string | null;
 					asunto_snapshot: string | null;
 					created_at: string | null;
 					cuerpo_snapshot: string | null;
+					despacho_iniciado: boolean;
+					documento_path: string | null;
 					email: string | null;
 					email_log_id: string;
 					entrega_estado: string;
 					estado: Database['public']['Enums']['estado_email'];
 					estado_envio: string;
 					id: string;
+					intencion_id: string | null;
 					motivo: string | null;
+					nombre_snapshot: string | null;
 					proveedor: string | null;
 					provider_message_id: string | null;
+					proximo_intento_documental: string | null;
 					reserva_id: string | null;
 					reservado_en: string | null;
 					socio_id: string | null;
@@ -481,36 +487,48 @@ export type Database = {
 				ComputedFields: never;
 				Insert: {
 					aceptado_en?: string | null;
+					apellido_snapshot?: string | null;
 					asunto_snapshot?: string | null;
 					created_at?: string | null;
 					cuerpo_snapshot?: string | null;
+					despacho_iniciado?: boolean;
+					documento_path?: string | null;
 					email?: string | null;
 					email_log_id: string;
 					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
 					estado_envio?: string;
 					id?: string;
+					intencion_id?: string | null;
 					motivo?: string | null;
+					nombre_snapshot?: string | null;
 					proveedor?: string | null;
 					provider_message_id?: string | null;
+					proximo_intento_documental?: string | null;
 					reserva_id?: string | null;
 					reservado_en?: string | null;
 					socio_id?: string | null;
 				};
 				Update: {
 					aceptado_en?: string | null;
+					apellido_snapshot?: string | null;
 					asunto_snapshot?: string | null;
 					created_at?: string | null;
 					cuerpo_snapshot?: string | null;
+					despacho_iniciado?: boolean;
+					documento_path?: string | null;
 					email?: string | null;
 					email_log_id?: string;
 					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
 					estado_envio?: string;
 					id?: string;
+					intencion_id?: string | null;
 					motivo?: string | null;
+					nombre_snapshot?: string | null;
 					proveedor?: string | null;
 					provider_message_id?: string | null;
+					proximo_intento_documental?: string | null;
 					reserva_id?: string | null;
 					reservado_en?: string | null;
 					socio_id?: string | null;
@@ -605,6 +623,7 @@ export type Database = {
 			email_logs: {
 				Row: {
 					asunto: string;
+					autor_nombre_snapshot: string | null;
 					cuerpo: string;
 					destinatarios_count: number;
 					estado: Database['public']['Enums']['estado_email'];
@@ -621,6 +640,7 @@ export type Database = {
 				ComputedFields: never;
 				Insert: {
 					asunto: string;
+					autor_nombre_snapshot?: string | null;
 					cuerpo: string;
 					destinatarios_count?: number;
 					estado?: Database['public']['Enums']['estado_email'];
@@ -636,6 +656,7 @@ export type Database = {
 				};
 				Update: {
 					asunto?: string;
+					autor_nombre_snapshot?: string | null;
 					cuerpo?: string;
 					destinatarios_count?: number;
 					estado?: Database['public']['Enums']['estado_email'];
@@ -1378,6 +1399,10 @@ export type Database = {
 				};
 				Returns: string;
 			};
+			confirmar_documento_intencion: {
+				Args: { p_id: string; p_path: string; p_reserva: string };
+				Returns: undefined;
+			};
 			confirmar_inscripcion: {
 				Args: { p_categoria_id: string; p_socio_id: string };
 				Returns: Json;
@@ -1386,10 +1411,29 @@ export type Database = {
 				Args: { p_ejecucion_id: string; p_resultado: Json; p_version: number };
 				Returns: Json;
 			};
+			confirmar_resultado_fiscal_con_actor: {
+				Args: { p_actor_id: string; p_ejecucion_id: string; p_resultado: Json; p_version: number };
+				Returns: Json;
+			};
 			consultar_alta_gasto: { Args: { p_solicitud: string }; Returns: string };
 			consultar_caja: { Args: { p_criterios?: Json }; Returns: Json };
+			consultar_candidatos_correo: {
+				Args: {
+					p_busqueda?: string;
+					p_categoria_id?: string;
+					p_deporte_id?: string;
+					p_estado_pago?: string;
+					p_incluir_desuscriptos?: boolean;
+					p_page?: number;
+					p_page_size?: number;
+					p_tipo?: string;
+					p_todos?: boolean;
+				};
+				Returns: Json;
+			};
 			consultar_cobranza: { Args: { p_criterios?: Json; p_vista: string }; Returns: Json };
 			consultar_ejecucion_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			consultar_eventos_correo_log: { Args: { p_log_id: string }; Returns: Json };
 			consultar_monitoreo_fiscal: {
 				Args: {
 					p_busqueda?: string;
@@ -1400,6 +1444,10 @@ export type Database = {
 					p_page_size?: number;
 					p_tipo?: string;
 				};
+				Returns: Json;
+			};
+			consultar_notificacion_operacion: {
+				Args: { p_comprobante_id?: string; p_job_id?: string };
 				Returns: Json;
 			};
 			crear_comunicacion: { Args: { p_solicitud: Json }; Returns: string };
@@ -1424,6 +1472,8 @@ export type Database = {
 				}[];
 			};
 			desuscribir_correo: { Args: { p_destinatario: string }; Returns: undefined };
+			desuscribir_correo_confirmado: { Args: { p_destinatario: string }; Returns: Json };
+			encolar_intencion_correo: { Args: { p_id: string; p_reserva: string }; Returns: Json };
 			es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean };
 			expirar_comprobante_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
 			fecha_actual_club: { Args: Record<PropertyKey, never>; Returns: string };
@@ -1463,8 +1513,14 @@ export type Database = {
 				Returns: Json;
 			};
 			leer_contexto_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			leer_documento_correo: {
+				Args: { p_destinatario_id: string; p_reserva_id: string };
+				Returns: Json;
+			};
 			listar_candidatos_fiscales: { Args: { p_limite?: number }; Returns: Json };
+			marcar_despacho_correo: { Args: { p_id: string; p_reserva: string }; Returns: Json };
 			marcar_envio_fiscal: { Args: { p_ejecucion_id: string; p_version: number }; Returns: Json };
+			posponer_correo_documental: { Args: { p_id: string; p_reserva: string }; Returns: undefined };
 			preparar_solicitud_fiscal: {
 				Args: { p_ejecucion_id: string; p_numero: string; p_solicitud: Json; p_version: number };
 				Returns: Json;
@@ -1500,6 +1556,7 @@ export type Database = {
 				Returns: Json;
 			};
 			reactivar_socio: { Args: { p_socio_id: string }; Returns: undefined };
+			reclamar_intenciones_correo: { Args: { p_limite?: number }; Returns: Json };
 			registrar_autorizacion_verificada_fiscal: {
 				Args: {
 					p_actor_id: string;
@@ -1518,6 +1575,10 @@ export type Database = {
 					p_ocurrido: string;
 					p_tipo: string;
 				};
+				Returns: undefined;
+			};
+			registrar_fallo_intencion: {
+				Args: { p_codigo: string; p_id: string; p_reserva: string };
 				Returns: undefined;
 			};
 			registrar_gasto_idempotente: {
@@ -1541,18 +1602,24 @@ export type Database = {
 				Args: { p_proveedor: string };
 				Returns: {
 					aceptado_en: string | null;
+					apellido_snapshot: string | null;
 					asunto_snapshot: string | null;
 					created_at: string | null;
 					cuerpo_snapshot: string | null;
+					despacho_iniciado: boolean;
+					documento_path: string | null;
 					email: string | null;
 					email_log_id: string;
 					entrega_estado: string;
 					estado: Database['public']['Enums']['estado_email'];
 					estado_envio: string;
 					id: string;
+					intencion_id: string | null;
 					motivo: string | null;
+					nombre_snapshot: string | null;
 					proveedor: string | null;
 					provider_message_id: string | null;
+					proximo_intento_documental: string | null;
 					reserva_id: string | null;
 					reservado_en: string | null;
 					socio_id: string | null;
