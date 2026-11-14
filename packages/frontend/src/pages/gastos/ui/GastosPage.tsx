@@ -22,6 +22,17 @@ function GastosContent() {
 		next.delete('gastoId');
 		setParams(next);
 	};
+	const desdeUrl = params.get('desde') ?? '',
+		hastaUrl = params.get('hasta') ?? '';
+	const limpiarPeriodo = () => {
+		if (!params.has('desde') && !params.has('hasta')) {
+			return;
+		}
+		const next = new URLSearchParams(params);
+		next.delete('desde');
+		next.delete('hasta');
+		setParams(next, { replace: true });
+	};
 	return (
 		<Stack spacing={3}>
 			<Box>
@@ -48,9 +59,10 @@ function GastosContent() {
 					<GastosPanel />
 				) : tab === 'movimientos' ? (
 					<CajaPanel
-						{...(params.get('desde') && params.get('hasta')
-							? { periodo: { desde: params.get('desde') ?? '', hasta: params.get('hasta') ?? '' } }
+						{...(desdeUrl || hastaUrl
+							? { periodoInicial: { desde: desdeUrl, hasta: hastaUrl } }
 							: {})}
+						onRestablecerPeriodo={limpiarPeriodo}
 					/>
 				) : perfil?.rol === 'admin' ? (
 					<CategoriasGastoPanel />

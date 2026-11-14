@@ -47,7 +47,15 @@ function fechaMovimiento(row: MovimientoCaja) {
 		? date(row.fechaNegocio)
 		: datetime.format(new Date(row.fecha));
 }
-export function CajaPanel({ periodo }: { periodo?: { desde: string; hasta: string } } = {}) {
+export function CajaPanel({
+	periodo,
+	periodoInicial,
+	onRestablecerPeriodo,
+}: {
+	periodo?: { desde: string; hasta: string };
+	periodoInicial?: { desde: string; hasta: string };
+	onRestablecerPeriodo?: () => void;
+} = {}) {
 	const { cacheScope, profileStatus } = useAuth();
 	return (
 		<CajaContent
@@ -55,6 +63,8 @@ export function CajaPanel({ periodo }: { periodo?: { desde: string; hasta: strin
 			scope={cacheScope}
 			enabled={profileStatus === 'ready'}
 			periodoFijo={periodo}
+			periodoInicial={periodoInicial}
+			onRestablecerPeriodo={onRestablecerPeriodo}
 		/>
 	);
 }
@@ -62,26 +72,43 @@ function CajaContent({
 	scope,
 	enabled,
 	periodoFijo,
+	periodoInicial,
+	onRestablecerPeriodo,
 }: {
 	scope: string;
 	enabled: boolean;
 	periodoFijo?: { desde: string; hasta: string } | undefined;
+	periodoInicial?: { desde: string; hasta: string } | undefined;
+	onRestablecerPeriodo?: (() => void) | undefined;
 }) {
 	const periodo = usePeriodoCajaActual({ cacheScope: scope, enabled: enabled && !periodoFijo });
 	const [criteria, setCriteria] = useState<CriteriosCaja>({
 		...criteriosCajaIniciales,
-		...periodoFijo,
+		...(periodoFijo ?? periodoInicial),
 	});
-	const [initialized, setInitialized] = useState(!!periodoFijo);
+	const [initialized, setInitialized] = useState(Boolean(periodoFijo || periodoInicial));
 	const [search, setSearch] = useState('');
 	const desdeFijo = periodoFijo?.desde,
-		hastaFijo = periodoFijo?.hasta;
+		hastaFijo = periodoFijo?.hasta,
+		desdeInicial = periodoInicial?.desde,
+		hastaInicial = periodoInicial?.hasta;
 	useEffect(() => {
 		if (desdeFijo !== undefined && hastaFijo !== undefined) {
 			setCriteria((x) => ({ ...x, desde: desdeFijo, hasta: hastaFijo, pagina: 0 }));
 			setInitialized(true);
 		}
 	}, [desdeFijo, hastaFijo]);
+	useEffect(() => {
+		if (!periodoFijo && (desdeInicial !== undefined || hastaInicial !== undefined)) {
+			setCriteria((x) => ({
+				...x,
+				desde: desdeInicial ?? '',
+				hasta: hastaInicial ?? '',
+				pagina: 0,
+			}));
+			setInitialized(true);
+		}
+	}, [periodoFijo, desdeInicial, hastaInicial]);
 	useEffect(() => {
 		if (periodo.data && !initialized) {
 			setCriteria((old) => ({ ...old, ...periodo.data }));
@@ -130,7 +157,7 @@ function CajaContent({
 			{label}
 		</TableSortLabel>
 	);
-	if (!periodoFijo && periodo.isError) {
+	if (!periodoFijo && !initialized && periodo.isError) {
 		return (
 			<Alert
 				severity="error"
@@ -245,7 +272,12 @@ function CajaContent({
 						<Button
 							onClick={() => {
 								setSearch('');
-								setCriteria({ ...criteriosCajaIniciales, ...periodo.data, ...periodoFijo });
+								if (periodoFijo) {
+									setCriteria({ ...criteriosCajaIniciales, ...periodoFijo });
+									return;
+								}
+								setCriteria({ ...criteriosCajaIniciales, ...periodo.data });
+								onRestablecerPeriodo?.();
 							}}
 							disabled={!initialized}
 						>

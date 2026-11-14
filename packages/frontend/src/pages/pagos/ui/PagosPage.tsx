@@ -230,32 +230,6 @@ function PagosPanel({
 					Consultá cuotas y cobros, con su estado financiero y fiscal por separado.
 				</Typography>
 			</Box>
-			{tab === 'pagos' && (
-				<ExportGridButton<FilaCobranza, CriteriosCobranza>
-					nombreArchivo="pagos"
-					filtroSnapshot={input}
-					orden={{ campo: criteria.orden, direccion: criteria.direccion }}
-					columnas={columnasPagos}
-					claveFila={(p) => p.id}
-					disabled={
-						!enabled ||
-						invalidSocio ||
-						list.isFetching ||
-						list.isError ||
-						search !== criteria.buscar ||
-						receipt !== criteria.comprobante
-					}
-					obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
-						const p = await getPagosReporte(
-							{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
-							actorId,
-							signal,
-							{ revision: version, exportar: true },
-						);
-						return { filas: p.filas, total: p.total, version: p.revision };
-					}}
-				/>
-			)}
 			{confirmed && (
 				<Alert
 					severity="success"
@@ -520,6 +494,32 @@ function PagosPanel({
 							<strong>{monedaCobranza(list.data.deuda_filtrada)}</strong>. El total incluye todas
 							las páginas de esta consulta.
 						</Typography>
+					)}
+					{tab === 'pagos' && (
+						<ExportGridButton<FilaCobranza, CriteriosCobranza>
+							nombreArchivo="pagos"
+							filtroSnapshot={input}
+							orden={{ campo: criteria.orden, direccion: criteria.direccion }}
+							columnas={columnasPagos}
+							claveFila={(p) => p.id}
+							disabled={
+								!enabled ||
+								invalidSocio ||
+								list.isFetching ||
+								list.isError ||
+								search !== criteria.buscar ||
+								receipt !== criteria.comprobante
+							}
+							obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
+								const p = await getPagosReporte(
+									{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
+									actorId,
+									signal,
+									{ revision: version, exportar: true },
+								);
+								return { filas: p.filas, total: p.total, version: p.revision };
+							}}
+						/>
 					)}
 					{list.isError ? (
 						<Alert
