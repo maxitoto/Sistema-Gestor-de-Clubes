@@ -1,4 +1,9 @@
 // src/pages/index.ts
+
+export { ComunicacionDetallePage } from './comunicaciones/ui/ComunicacionDetallePage';
+export { ComunicacionesPage } from './comunicaciones/ui/ComunicacionesPage';
+export { PlantillasPage } from './comunicaciones/ui/PlantillasPage';
+export { RedactarComunicacionPage } from './comunicaciones/ui/RedactarComunicacionPage';
 export { DashboardPage } from './dashboard/ui/DashboardPage';
 export { DeportesPage } from './deportes/ui/DeportesPage';
 export { GastosPage } from './gastos';

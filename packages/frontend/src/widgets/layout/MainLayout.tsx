@@ -2,6 +2,7 @@ import AccountBalanceWalletOutlinedIcon from '@mui/icons-material/AccountBalance
 import Brightness4Icon from '@mui/icons-material/Brightness4';
 import Brightness7Icon from '@mui/icons-material/Brightness7';
 import DashboardOutlinedIcon from '@mui/icons-material/DashboardOutlined';
+import MailOutlineIcon from '@mui/icons-material/EmailOutlined';
 import GroupsOutlinedIcon from '@mui/icons-material/GroupsOutlined';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ManageAccountsOutlinedIcon from '@mui/icons-material/ManageAccountsOutlined';
@@ -56,6 +57,7 @@ export const MainLayout = () => {
 		{ to: '/socios', label: 'Socios', icon: <GroupsOutlinedIcon /> },
 		{ to: '/pagos', label: 'Cobranza', icon: <PaymentsOutlinedIcon /> },
 		{ to: '/gastos', label: 'Gastos e ingresos', icon: <AccountBalanceWalletOutlinedIcon /> },
+		{ to: '/comunicaciones', label: 'Comunicaciones', icon: <MailOutlineIcon /> },
 		...(perfil?.rol === 'admin'
 			? [
 					{ to: '/deportes', label: 'Deportes', icon: <SportsSoccerOutlinedIcon /> },
@@ -69,7 +71,9 @@ export const MainLayout = () => {
 			? 'Monitoreo fiscal'
 			: (navigation.find(
 					(item) =>
-						item.to === pathname || (item.to === '/socios' && pathname.startsWith('/socios/')),
+						item.to === pathname ||
+						(item.to === '/socios' && pathname.startsWith('/socios/')) ||
+						(item.to === '/comunicaciones' && pathname.startsWith('/comunicaciones/')),
 				)?.label ?? 'Gestión del club');
 	const sidebar = (
 		<Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
