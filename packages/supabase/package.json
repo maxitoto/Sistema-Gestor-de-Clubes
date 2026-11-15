@@ -26,7 +26,12 @@
     "lint": "bun run lint:functions && bun run lint:arch",
     "fiscal:perfil": "bun run scripts/configurar-perfil-fiscal-local.ts",
     "test": "bun test",
-    "test:deno": "bunx --bun deno test --allow-all --config functions/deno.json tests/*.deno.ts"
+    "test:deno": "bunx --bun deno test --allow-all --config functions/deno.json tests/*.deno.ts",
+    "test:integracion:seguridad": "bun run tests/integration/seguridad.ts && bun run tests/integration/seguridad-sesion.ts && python3 -B tests/integration/seguridad-auditoria.py",
+    "test:integracion:finanzas": "python3 -B tests/integration/concurrencia-financiera.py",
+    "test:integracion:fiscal": "python3 -B tests/integration/fiscal-concurrencia.py",
+    "test:integracion:correo": "bun run tests/integration/correo.ts",
+    "test:integracion": "bun run test:integracion:seguridad && bun run test:integracion:finanzas && bun run test:integracion:fiscal && bun run test:integracion:correo"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

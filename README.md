@@ -69,7 +69,7 @@ bun -e "console.log('FISCAL_MASTER_KEY=' + require('node:crypto').randomBytes(32
 Abrir `packages/supabase/functions/.env` y pegar los cuatro valores generados en sus variables correspondientes. Respecto al resto de las variables de la plantilla:
 
 - Mantener `ARCA_ENVIRONMENT=homologacion` y `ARCA_EXTERNAL_ENABLED=false` para iniciar en entorno local sin llamadas externas a ARCA (habilitar `ARCA_EXTERNAL_ENABLED=true` solo cuando se pruebe homologación real con certificado y clave privada cargados).
-- Los valores por defecto de correo local (`MAIL_PROVIDER`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `MAIL_PUBLIC_BASE_URL`), `ARCHIVOS_PUBLIC_BASE_URL` y `FISCAL_PUBLIC_BASE_URL` ya apuntan a Mailpit y al API local (`127.0.0.1:54321`); `RESEND_API_KEY` y `RESEND_WEBHOOK_SECRET` quedan opcionales. Ver [configuración del backend](packages/supabase/README.md).
+- Los valores por defecto de correo local (`MAIL_PROVIDER`, `MAIL_FROM`, `SMTP_HOST`, `SMTP_PORT`, `MAIL_PUBLIC_BASE_URL`), `ARCHIVOS_PUBLIC_BASE_URL` y `FISCAL_PUBLIC_BASE_URL` ya apuntan a Mailpit y al API local (`127.0.0.1:54321`); `RESEND_API_KEY` y `RESEND_WEBHOOK_SECRET` quedan opcionales para el uso diario con Mailpit (para ejecutar la suite de integración de correo que valida firmas Svix de `/webhook-resend`, generar un secreto local con `bun -e "console.log('RESEND_WEBHOOK_SECRET=whsec_' + require('node:crypto').randomBytes(32).toString('base64'))"`). Ver [configuración del backend](packages/supabase/README.md).
 
 ### 5. Crear el archivo `.env` del frontend
 
@@ -347,6 +347,12 @@ Ejecuta las suites en runtime Deno (`tests/*.deno.ts`: adaptador WSAA/WSFE, cons
 
 ```bash
 bun run test:deno
+```
+
+Con la pila local activa (`start:containers`), el bundle de frontend compilado (`packages/frontend/dist`) y las variables locales en `functions/.env`, ejecuta las suites de integración locales contra PostgreSQL, Auth, Storage, Edge Functions y Mailpit (`test:integracion:seguridad`, `test:integracion:finanzas`, `test:integracion:fiscal` y `test:integracion:correo`):
+
+```bash
+bun run test:integracion
 ```
 
 ### Flujo manual recomendado
