@@ -103,7 +103,7 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 			}
 			await asociarArchivo({ ...identity, storagePath: path }, request.signal);
 			if (!(await verify(path, request.signal))) {
-				throw new Error('La logo cargada todavía no figura en la configuración.');
+				throw new Error('El logo cargado todavía no figura en la configuración.');
 			}
 			if (current()) {
 				await confirmed();
@@ -133,7 +133,7 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 						setNeedsCheck(true);
 						setFeedback({
 							message:
-								'No pudimos confirmar si la logo quedó asociada. Verificá el resultado antes de guardar o cancelar.',
+								'No pudimos confirmar si el logo quedó asociado. Verificá el resultado antes de guardar o cancelar.',
 							success: false,
 						});
 					}
@@ -167,7 +167,7 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 			} else if (current()) {
 				setNeedsCheck(false);
 				setFeedback({
-					message: 'La logo no está asociada. Podés volver a guardar la carga o cancelarla.',
+					message: 'El logo no está asociado. Podés volver a guardar la carga o cancelarla.',
 					success: false,
 				});
 			}
@@ -312,7 +312,7 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 					sx={{ mt: 2 }}
 					action={<Button onClick={() => void photo.refetch()}>Reintentar</Button>}
 				>
-					No pudimos consultar la logo guardada.
+					No pudimos consultar el logo guardado.
 				</Alert>
 			)}
 			{feedback && (

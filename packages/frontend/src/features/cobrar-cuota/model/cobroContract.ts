@@ -47,7 +47,7 @@ export function validarSolicitudCobro(
 	}
 	const ref = referencia.trim();
 	if (ref.length > 255) {
-		throw new Error('La referencia admite hasta255 caracteres.');
+		throw new Error('La referencia admite hasta 255 caracteres.');
 	}
 	return {
 		cuotaId,

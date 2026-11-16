@@ -8,10 +8,13 @@ import {
 	DialogTitle,
 	Stack,
 } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
 import { useId } from 'react';
+import { getCuotasCobranza } from '#entities/cuota';
 import { bajaInscripcion, getInscripcion, type InscripcionHistorial } from '#entities/inscripcion';
 import { useAuth } from '#entities/session';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+import { describirDeudaDesvinculacion } from '../model/deudaDesvinculacion';
 
 export function DesvincularSocioDialog({
 	inscripcion,
@@ -24,8 +27,37 @@ export function DesvincularSocioDialog({
 	onClose: () => void;
 	onSaved: () => void;
 }) {
-	const { cacheScope, profileStatus, isSigningOut } = useAuth();
+	const { cacheScope, perfil, profileStatus, isSigningOut } = useAuth();
 	const titleId = useId();
+	const actorId = perfil?.id ?? '';
+	const deudaQuery = useQuery({
+		queryKey: [
+			'socio-deuda',
+			'desvincular',
+			cacheScope,
+			inscripcion.socio_id,
+			inscripcion.categoria_id,
+		],
+		enabled:
+			open &&
+			profileStatus === 'ready' &&
+			perfil?.estado === 'activo' &&
+			!isSigningOut &&
+			Boolean(actorId),
+		queryFn: ({ signal }) =>
+			getCuotasCobranza(
+				{
+					socio_id: inscripcion.socio_id,
+					categoria_id: inscripcion.categoria_id,
+					estado_cuota: 'pendiente',
+					pagina: 0,
+					limite: 20,
+				},
+				actorId,
+				signal,
+			),
+	});
+	const avisoDeuda = describirDeudaDesvinculacion(deudaQuery);
 	const mutation = useVerifiedMutation({
 		cacheScope,
 		enabled: profileStatus === 'ready' && !isSigningOut,
@@ -57,6 +89,13 @@ export function DesvincularSocioDialog({
 					<DialogContentText>
 						{inscripcion.categoria?.deporte?.nombre} · {inscripcion.categoria?.nombre}
 					</DialogContentText>
+					{avisoDeuda.estado === 'cargando' && (
+						<Alert severity="info">Consultando cuotas pendientes de esta actividad…</Alert>
+					)}
+					{avisoDeuda.estado === 'con_deuda' && (
+						<Alert severity="warning">{avisoDeuda.mensaje}</Alert>
+					)}
+					{avisoDeuda.estado === 'error' && <Alert severity="info">{avisoDeuda.mensaje}</Alert>}
 					<Alert severity="warning">
 						La inscripción quedará en el historial. Las cuotas emitidas se conservan y no se
 						compensan; dejará de generar cuotas futuras mientras no exista una inscripción activa.
