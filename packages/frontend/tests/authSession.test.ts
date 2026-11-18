@@ -6,6 +6,7 @@ import {
 } from '../src/entities/session/sessionGuards';
 import {
 	parsePasswordCallback,
+	resolveSetPasswordView,
 	validatePassword,
 } from '../src/features/set-password/model/passwordForm';
 
@@ -86,5 +87,113 @@ describe('formulario y callback de contraseña', () => {
 		]) {
 			expect(parsePasswordCallback(value)).toBeNull();
 		}
+	});
+});
+
+describe('resolución visual de cambio y establecimiento de contraseña', () => {
+	test('con sesión iniciada oculta el pedido de enlace y dirige Cancelar a socios', () => {
+		expect(
+			resolveSetPasswordView({
+				change: true,
+				hasCallback: false,
+				sessionMatches: true,
+				profileReady: true,
+				linkRequestFailed: false,
+			}),
+		).toEqual({
+			showForm: true,
+			sessionMismatchMessage: null,
+			showRequestNewLink: false,
+			cancelTo: '/socios',
+		});
+
+		expect(
+			resolveSetPasswordView({
+				change: true,
+				hasCallback: false,
+				sessionMatches: true,
+				profileReady: true,
+				linkRequestFailed: true,
+			}).showRequestNewLink,
+		).toBe(false);
+	});
+
+	test('si cambia la sesión durante el cambio voluntario usa mensaje acorde sin mencionar enlace', () => {
+		expect(
+			resolveSetPasswordView({
+				change: true,
+				hasCallback: false,
+				sessionMatches: false,
+				profileReady: true,
+				linkRequestFailed: false,
+			}),
+		).toEqual({
+			showForm: false,
+			sessionMismatchMessage: 'La sesión cambió. Volvé a iniciar el proceso con tu cuenta.',
+			showRequestNewLink: false,
+			cancelTo: '/socios',
+		});
+
+		expect(
+			resolveSetPasswordView({
+				change: true,
+				hasCallback: false,
+				sessionMatches: true,
+				profileReady: false,
+				linkRequestFailed: false,
+			}),
+		).toEqual({
+			showForm: false,
+			sessionMismatchMessage: null,
+			showRequestNewLink: false,
+			cancelTo: '/socios',
+		});
+	});
+
+	test('desde enlace de correo sólo muestra Solicitar otro enlace si falta el token o falló el envío', () => {
+		expect(
+			resolveSetPasswordView({
+				change: false,
+				hasCallback: true,
+				sessionMatches: false,
+				profileReady: false,
+				linkRequestFailed: false,
+			}),
+		).toEqual({
+			showForm: true,
+			sessionMismatchMessage: null,
+			showRequestNewLink: false,
+			cancelTo: '/login',
+		});
+
+		expect(
+			resolveSetPasswordView({
+				change: false,
+				hasCallback: false,
+				sessionMatches: false,
+				profileReady: false,
+				linkRequestFailed: false,
+			}),
+		).toEqual({
+			showForm: false,
+			sessionMismatchMessage: null,
+			showRequestNewLink: true,
+			cancelTo: '/login',
+		});
+
+		expect(
+			resolveSetPasswordView({
+				change: false,
+				hasCallback: true,
+				sessionMatches: false,
+				profileReady: false,
+				linkRequestFailed: true,
+			}),
+		).toEqual({
+			showForm: true,
+			sessionMismatchMessage: null,
+			showRequestNewLink: true,
+			cancelTo: '/login',
+		});
 	});
 });

@@ -14,7 +14,12 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '#entities/session';
 import { updatePassword } from '../api/password.api';
-import { PASSWORD_HELP, type PasswordCallback, validatePassword } from '../model/passwordForm';
+import {
+	PASSWORD_HELP,
+	type PasswordCallback,
+	resolveSetPasswordView,
+	validatePassword,
+} from '../model/passwordForm';
 
 export function SetPasswordForm({
 	callback,
@@ -32,9 +37,17 @@ export function SetPasswordForm({
 	const [visible, setVisible] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [done, setDone] = useState(false);
+	const [linkRequestFailed, setLinkRequestFailed] = useState(false);
 	const mountedRef = useRef(false);
 	const scopeRef = useRef(cacheScope);
 	scopeRef.current = cacheScope;
+	const view = resolveSetPasswordView({
+		change,
+		hasCallback: Boolean(callback),
+		sessionMatches: Boolean(initialId) && initialId === user?.id,
+		profileReady: profileStatus === 'ready',
+		linkRequestFailed,
+	});
 	useEffect(() => {
 		mountedRef.current = true;
 		return () => {
@@ -55,10 +68,7 @@ export function SetPasswordForm({
 	}, [callback, change]);
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
-		if (
-			saving ||
-			(change ? !initialId || initialId !== user?.id || profileStatus !== 'ready' : !callback)
-		) {
+		if (saving || !view.showForm) {
 			return;
 		}
 		const validation = validatePassword(password, confirmation);
@@ -88,6 +98,9 @@ export function SetPasswordForm({
 			}
 		} catch (reason) {
 			if (mountedRef.current && scopeRef.current === scope) {
+				if (!change) {
+					setLinkRequestFailed(true);
+				}
 				setError(
 					reason instanceof Error
 						? reason.message
@@ -123,12 +136,10 @@ export function SetPasswordForm({
 				) : (
 					<>
 						{error && <Alert severity="error">{error}</Alert>}
-						{change && initialId !== user?.id && (
-							<Alert severity="warning">
-								La sesión cambió. Abrí un enlace nuevo para continuar.
-							</Alert>
+						{view.sessionMismatchMessage && (
+							<Alert severity="warning">{view.sessionMismatchMessage}</Alert>
 						)}
-						{(change ? initialId === user?.id && profileStatus === 'ready' : !!callback) && (
+						{view.showForm && (
 							<Stack component="form" onSubmit={save} spacing={2}>
 								{change && (
 									<TextField
@@ -180,10 +191,12 @@ export function SetPasswordForm({
 								</Button>
 							</Stack>
 						)}
-						<Button component={Link} to="/recuperar-contrasena" disabled={saving}>
-							Solicitar otro enlace
-						</Button>
-						<Button component={Link} to={change ? '/socios' : '/login'} disabled={saving}>
+						{view.showRequestNewLink && (
+							<Button component={Link} to="/recuperar-contrasena" disabled={saving}>
+								Solicitar otro enlace
+							</Button>
+						)}
+						<Button component={Link} to={view.cancelTo} disabled={saving}>
 							Cancelar
 						</Button>
 					</>

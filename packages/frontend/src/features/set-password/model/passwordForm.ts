@@ -30,3 +30,33 @@ export function parsePasswordCallback(hash: string): PasswordCallback | null {
 	}
 	return { tokenHash, type };
 }
+
+export type SetPasswordViewState = {
+	showForm: boolean;
+	sessionMismatchMessage: string | null;
+	showRequestNewLink: boolean;
+	cancelTo: '/socios' | '/login';
+};
+
+/**
+ * Resuelve la visibilidad y mensajes del formulario compartido de contraseña
+ * diferenciando el cambio autenticado del establecimiento mediante enlace.
+ */
+export function resolveSetPasswordView(params: {
+	change: boolean;
+	hasCallback: boolean;
+	sessionMatches: boolean;
+	profileReady: boolean;
+	linkRequestFailed: boolean;
+}): SetPasswordViewState {
+	const showSessionMismatch = params.change && !params.sessionMatches;
+	return {
+		showForm: params.change ? params.sessionMatches && params.profileReady : params.hasCallback,
+		sessionMismatchMessage: showSessionMismatch
+			? 'La sesión cambió. Volvé a iniciar el proceso con tu cuenta.'
+			: null,
+		// En modo autenticado no existe enlace; con enlace vigente sólo se ofrece si falta o falló el envío.
+		showRequestNewLink: !params.change && (!params.hasCallback || params.linkRequestFailed),
+		cancelTo: params.change ? '/socios' : '/login',
+	};
+}
