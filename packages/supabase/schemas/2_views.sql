@@ -101,3 +101,41 @@ GRANT SELECT ON public.v_morosidad_por_deporte TO authenticated, service_role;
 
 GRANT SELECT ON public.v_socios_estado_pago    TO authenticated, service_role;
 GRANT SELECT ON public.v_pagos_etiqueta_fiscal TO authenticated, service_role;
+
+-- =================================================================================
+-- VISTAS OPERATIVAS DE COBRANZA (CU-05.1, RN-04, RN-10, RN-12, ND-12, ND-17)
+-- =================================================================================
+CREATE OR REPLACE VIEW public.v_cuotas_cobranza WITH (security_invoker=true) AS
+SELECT q.id,q.id AS cuota_id,p.id AS pago_id,p.comprobante_id,
+ s.id AS socio_id,s.numero_socio AS socio_numero,s.dni AS socio_dni,
+ s.nombre AS socio_nombre,s.apellido AS socio_apellido,s.estado::text AS socio_estado,
+ c.id AS categoria_id,c.nombre AS categoria_nombre,d.id AS deporte_id,d.nombre AS deporte_nombre,
+ q.periodo_mes,q.periodo_anio,q.monto,q.estado::text AS estado_cuota,
+ p.estado_pago::text,p.estado_fiscal::text,p.etiqueta_recibo,p.numero_comprobante,
+ q.created_at AS fecha,p.fecha_pago,p.medio_pago::text AS medio,p.referencia_pago AS referencia,
+ p.usuario_id,s.es_moroso,s.deuda_pendiente,
+ coalesce(q.estado='pendiente' AND q.created_at<now()-interval '30 days',false) AS cuota_en_mora
+FROM public.cuotas q
+JOIN public.v_socios_estado_pago s ON s.id=q.socio_id
+JOIN public.categorias c ON c.id=q.categoria_id
+JOIN public.deportes d ON d.id=c.deporte_id
+LEFT JOIN public.v_pagos_etiqueta_fiscal p ON p.cuota_id=q.id AND p.estado_pago='completado';
+
+CREATE OR REPLACE VIEW public.v_pagos_cobranza WITH (security_invoker=true) AS
+SELECT p.id,p.cuota_id,p.id AS pago_id,p.comprobante_id,
+ s.id AS socio_id,s.numero_socio AS socio_numero,s.dni AS socio_dni,
+ s.nombre AS socio_nombre,s.apellido AS socio_apellido,s.estado::text AS socio_estado,
+ c.id AS categoria_id,c.nombre AS categoria_nombre,d.id AS deporte_id,d.nombre AS deporte_nombre,
+ q.periodo_mes,q.periodo_anio,p.monto,q.estado::text AS estado_cuota,
+ p.estado_pago::text,p.estado_fiscal::text,p.etiqueta_recibo,p.numero_comprobante,
+ p.fecha_pago AS fecha,p.fecha_pago,p.medio_pago::text AS medio,p.referencia_pago AS referencia,
+ p.usuario_id,s.es_moroso,s.deuda_pendiente,
+ coalesce(q.estado='pendiente' AND q.created_at<now()-interval '30 days',false) AS cuota_en_mora
+FROM public.v_pagos_etiqueta_fiscal p
+JOIN public.cuotas q ON q.id=p.cuota_id
+JOIN public.v_socios_estado_pago s ON s.id=p.socio_id
+JOIN public.categorias c ON c.id=q.categoria_id
+JOIN public.deportes d ON d.id=c.deporte_id;
+
+GRANT SELECT ON public.v_cuotas_cobranza,public.v_pagos_cobranza TO authenticated,service_role;
+REVOKE ALL ON public.v_cuotas_cobranza,public.v_pagos_cobranza FROM anon;

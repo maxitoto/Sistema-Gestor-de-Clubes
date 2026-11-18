@@ -25,6 +25,7 @@ cuit VARCHAR(20) NOT NULL UNIQUE,
 domicilio_fiscal TEXT NOT NULL,
 email_contacto VARCHAR(255) NOT NULL,
 logo_url TEXT,
+logo_storage_path TEXT,
 punto_venta INTEGER NOT NULL,
 certificado_arca TEXT, -- Encriptado en aplicación
 certificado_key TEXT, -- Encriptado en aplicación
@@ -64,6 +65,7 @@ email VARCHAR(255),
 telefono VARCHAR(50),
 direccion TEXT,
 foto_url TEXT,
+foto_storage_path TEXT,
 estado estado_basico NOT NULL DEFAULT 'activo',
 acepta_comunicaciones BOOLEAN NOT NULL DEFAULT TRUE,
 email_invalido BOOLEAN NOT NULL DEFAULT FALSE,
@@ -214,6 +216,7 @@ CREATE TABLE gastos (
   ),
   descripcion TEXT,
   evidencia_url TEXT,
+  evidencia_storage_path TEXT,
   estado estado_gasto NOT NULL DEFAULT 'activo',
   motivo_anulacion TEXT,
   anulado_at TIMESTAMP WITH TIME ZONE,
@@ -320,3 +323,182 @@ CREATE TABLE public.email_eventos (
   recibido_en timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (proveedor,event_id)
 );
+
+
+-- ---------------------------------------------------------------------------------
+-- Cargas validadas de archivos privados
+-- ---------------------------------------------------------------------------------
+CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE TABLE private.archivos_cargas (
+  storage_path TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL CHECK (tipo IN ('socio-foto', 'club-logo', 'gasto-evidencia')),
+  entidad_id UUID NOT NULL,
+  actor_id UUID NOT NULL REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+  tipo_mime TEXT NOT NULL CHECK (tipo_mime IN ('image/jpeg', 'image/png', 'application/pdf')),
+  tamano BIGINT NOT NULL CHECK (tamano > 0 AND tamano <= 10485760),
+  estado TEXT NOT NULL DEFAULT 'pendiente' CHECK (estado IN ('pendiente', 'asociado', 'descartando', 'descartado')),
+  creado_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ---------------------------------------------------------------------------------
+-- Operaciones administrativas recuperables de usuarios y límites locales de acceso
+-- No almacena contraseñas, tokens de sesión ni enlaces de Auth.
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS private.usuarios_operaciones (
+  id uuid PRIMARY KEY,
+  actor_id uuid NOT NULL REFERENCES public.usuarios(id),
+  usuario_id uuid NOT NULL,
+  tipo text NOT NULL CHECK (tipo IN ('crear','editar','desactivar','reactivar','restablecer','reenviar')),
+  datos jsonb NOT NULL,
+  estado text NOT NULL DEFAULT 'ejecutando' CHECK (estado IN ('ejecutando','enviando','completo','enlace_pendiente','sesiones_pendientes','datos_pendientes','rechazado')),
+  lease uuid NOT NULL DEFAULT gen_random_uuid(),
+  lease_hasta timestamptz NOT NULL DEFAULT (clock_timestamp() + interval '2 minutes'),
+  enlace_enviado_en timestamptz,
+  identidad_creada boolean NOT NULL DEFAULT false,
+  clave_establecida boolean NOT NULL DEFAULT false,
+  revocacion_pendiente boolean NOT NULL DEFAULT false,
+  actualizado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE IF NOT EXISTS private.acceso_intentos (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tipo text NOT NULL,
+  ip_hash text NOT NULL,
+  email_hash text NOT NULL,
+  creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+-- ---------------------------------------------------------------------------------
+-- Registro idempotente de altas de gastos e invariantes de texto no vacío 
+-- ---------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS private.gasto_altas (
+ solicitud uuid PRIMARY KEY,
+ usuario_id uuid NOT NULL REFERENCES public.usuarios(id),
+ datos jsonb NOT NULL,
+ gasto_id uuid NOT NULL UNIQUE REFERENCES public.gastos(id),
+ creado_en timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+-- NOT VALID conserva legados sin iniciar una corrección masiva; sí protege toda escritura nueva.
+ALTER TABLE public.gastos ADD CONSTRAINT chk_gastos_concepto_no_vacio
+ CHECK (NULLIF(btrim(concepto),'') IS NOT NULL) NOT VALID;
+
+ALTER TABLE public.categorias_gasto ADD CONSTRAINT chk_categoria_gasto_nombre_no_vacio
+ CHECK(NULLIF(btrim(nombre),'') IS NOT NULL) NOT VALID;
+
+-- ---------------------------------------------------------------------------------
+-- Coordinación fiscal durable, series, receptores y caché cifrada de tickets WSAA
+-- ---------------------------------------------------------------------------------
+CREATE TABLE private.fiscal_configuracion(
+ club_id uuid PRIMARY KEY REFERENCES public.club(id) ON DELETE RESTRICT,
+ ambiente text NOT NULL CHECK(ambiente='homologacion'),
+ tipo_factura integer NOT NULL CHECK(tipo_factura BETWEEN 1 AND 999),
+ concepto integer NOT NULL CHECK(concepto BETWEEN 1 AND 3),
+ moneda text NOT NULL CHECK(moneda='PES'),
+ cotizacion numeric(18,6) NOT NULL CHECK(cotizacion=1.000000),
+ perfil_importes jsonb NOT NULL,
+ usar_periodo_cuota boolean NOT NULL,
+ vencimiento_pago text NOT NULL CHECK(vencimiento_pago IN('fecha_comprobante','fin_periodo')),
+ confirmado boolean NOT NULL DEFAULT false,
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK((concepto=1 AND NOT usar_periodo_cuota) OR (concepto IN(2,3) AND usar_periodo_cuota))
+);
+
+CREATE TABLE private.fiscal_receptores(
+ socio_id uuid PRIMARY KEY REFERENCES public.socios(id) ON DELETE RESTRICT,
+ doc_tipo integer NOT NULL CHECK(doc_tipo BETWEEN 1 AND 999),
+ doc_numero text NOT NULL CHECK(doc_numero~'^(0|[1-9]\d{0,19})$'),
+ condicion_iva_id integer NOT NULL CHECK(condicion_iva_id BETWEEN 1 AND 99),
+ confirmado boolean NOT NULL DEFAULT false,
+ updated_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+CREATE TABLE private.fiscal_series(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ cuit text NOT NULL CHECK(cuit~'^\d{11}$'),
+ ambiente text NOT NULL CHECK(ambiente='homologacion'),
+ punto_venta integer NOT NULL CHECK(punto_venta BETWEEN 1 AND 99999),
+ tipo_comprobante integer NOT NULL CHECK(tipo_comprobante BETWEEN 1 AND 999),
+ version bigint NOT NULL DEFAULT 0 CHECK(version>=0),
+ ejecucion_activa uuid,
+ ultimo_autorizado numeric(12,0),
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ UNIQUE(cuit,ambiente,punto_venta,tipo_comprobante)
+);
+
+CREATE TABLE private.fiscal_ejecuciones(
+ id uuid PRIMARY KEY,
+ comprobante_id uuid NOT NULL REFERENCES public.comprobantes(id) ON DELETE RESTRICT,
+ serie_id uuid NOT NULL REFERENCES private.fiscal_series(id) ON DELETE RESTRICT,
+ version bigint NOT NULL CHECK(version>0),
+ clase text NOT NULL CHECK(clase IN('inicial','conciliacion')),
+ estado text NOT NULL CHECK(estado IN('adquirida','preparada','posible_envio','desconocido','autorizado','rechazado','transitorio','incidencia')),
+ numero text CHECK(numero~'^[1-9]\d{0,11}$'),
+ solicitud jsonb,
+ posible_envio boolean NOT NULL DEFAULT false,
+ resultado jsonb,
+ iniciado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ cerrado_en timestamptz,
+ actualizado_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ recuperaciones integer NOT NULL DEFAULT 0 CHECK(recuperaciones>=0),
+ CHECK((numero IS NULL)=(solicitud IS NULL)),
+ CHECK(NOT posible_envio OR solicitud IS NOT NULL)
+);
+
+ALTER TABLE private.fiscal_series ADD CONSTRAINT fiscal_serie_ejecucion_fk FOREIGN KEY(ejecucion_activa)
+ REFERENCES private.fiscal_ejecuciones(id) ON DELETE RESTRICT DEFERRABLE INITIALLY DEFERRED;
+
+-- El índice original sólo distinguía el enum local factura/NC, no la serie fiscal.
+ALTER TABLE public.comprobantes ADD COLUMN emisor_cuit text,
+ ADD COLUMN ambiente_fiscal text,ADD COLUMN tipo_fiscal integer;
+ALTER TABLE public.comprobantes ADD CONSTRAINT comprobante_identidad_fiscal_completa CHECK(
+ (emisor_cuit IS NULL AND ambiente_fiscal IS NULL AND tipo_fiscal IS NULL) OR
+ (emisor_cuit IS NOT NULL AND ambiente_fiscal IS NOT NULL AND tipo_fiscal IS NOT NULL AND emisor_cuit~'^\d{11}$' AND ambiente_fiscal='homologacion' AND tipo_fiscal BETWEEN 1 AND 999));
+ALTER TABLE public.comprobantes DROP CONSTRAINT unique_comprobante_pv_tipo_num;
+
+-- Cache compartida: únicamente sobres cifrados, nunca token/sign en texto plano.
+CREATE TABLE private.wsaa_tickets(
+ clave text PRIMARY KEY CHECK(clave~'^[0-9a-f]{64}$'),
+ sobre text,vence_en timestamptz,
+ propietario uuid,version integer NOT NULL DEFAULT 0 CHECK(version>=0),lease_hasta timestamptz,
+ CHECK((sobre IS NULL)=(vence_en IS NULL)),CHECK((propietario IS NULL)=(lease_hasta IS NULL))
+);
+
+-- Regularización, Nota de Crédito y auditoría de acciones fiscales administrativas.
+ALTER TABLE private.fiscal_configuracion ADD COLUMN tipo_nota_credito integer CHECK(tipo_nota_credito BETWEEN 1 AND 999);
+ALTER TABLE private.fiscal_configuracion ADD CONSTRAINT tipo_nc_distinto_factura CHECK(tipo_nota_credito IS NULL OR tipo_nota_credito<>tipo_factura);
+ALTER TABLE private.fiscal_ejecuciones DROP CONSTRAINT fiscal_ejecuciones_clase_check;
+ALTER TABLE private.fiscal_ejecuciones ADD CONSTRAINT fiscal_ejecuciones_clase_check CHECK(clase IN('inicial','conciliacion','manual','automatico'));
+CREATE TABLE private.fiscal_auditoria(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),comprobante_id uuid NOT NULL REFERENCES public.comprobantes(id),
+ actor_id uuid REFERENCES public.usuarios(id),accion text NOT NULL CHECK(accion IN('reabrir','resolver_anulacion','forzar','registrar_externo')),
+ ejecucion_id uuid REFERENCES private.fiscal_ejecuciones(id),created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+
+-- Comunicaciones operativas e intenciones post-commit recuperables.
+ALTER TABLE public.email_logs ADD COLUMN autor_nombre_snapshot text;
+ALTER TABLE public.email_destinatarios ADD COLUMN nombre_snapshot text,ADD COLUMN apellido_snapshot text;
+CREATE TABLE private.correo_intenciones(
+ id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ evento text NOT NULL CHECK(evento IN('cobro_confirmado','comprobante_autorizado','anulacion_confirmada','reporte_mensual','alerta_fiscal')),
+ operacion_id uuid NOT NULL,comprobante_id uuid REFERENCES public.comprobantes(id) ON DELETE RESTRICT,
+ job_id uuid REFERENCES public.cuota_job_logs(id) ON DELETE RESTRICT,
+ socio_id uuid REFERENCES public.socios(id) ON DELETE RESTRICT,destinatario_usuario_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,
+ destinatario_snapshot text,nombre_snapshot text,apellido_snapshot text,creacion_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),version_documento text CHECK(version_documento IN('provisional','autorizado')),
+ version_clave text NOT NULL,fuente_documento jsonb,
+ actor_id uuid REFERENCES public.usuarios(id) ON DELETE RESTRICT,autor_nombre_snapshot text,
+ origen text NOT NULL CHECK(origen IN('manual','automatico')),
+ asunto_snapshot text NOT NULL,cuerpo_snapshot text NOT NULL,
+ estado text NOT NULL DEFAULT 'pendiente' CHECK(estado IN('pendiente','preparando','encolada','omitida')),
+ codigo text,reserva uuid,reservado_en timestamptz,proximo_intento_en timestamptz NOT NULL DEFAULT clock_timestamp(),
+ intentos integer NOT NULL DEFAULT 0 CHECK(intentos>=0),documento_path text,email_log_id uuid REFERENCES public.email_logs(id) ON DELETE RESTRICT,
+ created_at timestamptz NOT NULL DEFAULT clock_timestamp(),updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ CHECK((origen='manual' AND actor_id IS NOT NULL)OR(origen='automatico' AND actor_id IS NULL)),
+ CHECK((job_id IS NOT NULL AND comprobante_id IS NULL AND fuente_documento IS NULL AND version_documento IS NULL)
+ OR(job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NOT NULL AND version_documento IS NOT NULL)OR(evento='alerta_fiscal'AND job_id IS NULL AND comprobante_id IS NOT NULL AND fuente_documento IS NULL AND version_documento IS NULL))
+);
+ALTER TABLE public.email_destinatarios ADD COLUMN intencion_id uuid REFERENCES private.correo_intenciones(id) ON DELETE RESTRICT,ADD COLUMN documento_path text,ADD COLUMN despacho_iniciado boolean NOT NULL DEFAULT false,ADD COLUMN proximo_intento_documental timestamptz;
+-- Las reservas heredadas no tienen prueba de fase: conservarlas como posible transporte.
+UPDATE public.email_destinatarios SET despacho_iniciado=true WHERE estado_envio IN('procesando','incierto','aceptado');

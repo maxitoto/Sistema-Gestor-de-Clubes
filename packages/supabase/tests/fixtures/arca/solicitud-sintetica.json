@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "identidad": {
+    "cuit": "20123456786",
+    "ambiente": "homologacion",
+    "puntoVenta": 4,
+    "tipoComprobante": 11
+  },
+  "emisor": {
+    "nombre": "Club sintético & prueba",
+    "domicilio": "Domicilio ficticio 123"
+  },
+  "receptor": {
+    "nombre": "Persona sintética",
+    "domicilio": "Sin uso real"
+  },
+  "detalle": {
+    "Concepto": 1,
+    "DocTipo": 96,
+    "DocNro": "12345678",
+    "CondicionIVAReceptorId": 5,
+    "CbteDesde": "17",
+    "CbteHasta": "17",
+    "CbteFch": "20261024",
+    "ImpTotal": "1000.00",
+    "ImpTotConc": "0.00",
+    "ImpNeto": "1000.00",
+    "ImpOpEx": "0.00",
+    "ImpTrib": "0.00",
+    "ImpIVA": "0.00",
+    "MonId": "PES",
+    "MonCotiz": "1.000000"
+  }
+}

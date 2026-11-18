@@ -70,7 +70,21 @@ export type Database = {
 						foreignKeyName: 'categorias_deporte_id_fkey';
 						columns: ['deporte_id'];
 						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['deporte_id'];
+					},
+					{
+						foreignKeyName: 'categorias_deporte_id_fkey';
+						columns: ['deporte_id'];
+						isOneToOne: false;
 						referencedRelation: 'v_morosidad_por_deporte';
+						referencedColumns: ['deporte_id'];
+					},
+					{
+						foreignKeyName: 'categorias_deporte_id_fkey';
+						columns: ['deporte_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
 						referencedColumns: ['deporte_id'];
 					},
 				];
@@ -112,6 +126,7 @@ export type Database = {
 					domicilio_fiscal: string;
 					email_contacto: string;
 					id: string;
+					logo_storage_path: string | null;
 					logo_url: string | null;
 					nombre: string;
 					punto_venta: number;
@@ -126,6 +141,7 @@ export type Database = {
 					domicilio_fiscal: string;
 					email_contacto: string;
 					id?: string;
+					logo_storage_path?: string | null;
 					logo_url?: string | null;
 					nombre: string;
 					punto_venta: number;
@@ -139,6 +155,7 @@ export type Database = {
 					domicilio_fiscal?: string;
 					email_contacto?: string;
 					id?: string;
+					logo_storage_path?: string | null;
 					logo_url?: string | null;
 					nombre?: string;
 					punto_venta?: number;
@@ -148,11 +165,13 @@ export type Database = {
 			};
 			comprobantes: {
 				Row: {
+					ambiente_fiscal: string | null;
 					cae: string | null;
 					cae_vencimiento: string | null;
 					comprobante_origen_id: string | null;
 					created_at: string | null;
 					detalle_error_fiscal: string | null;
+					emisor_cuit: string | null;
 					estado_fiscal: Database['public']['Enums']['estado_fiscal'];
 					id: string;
 					intentos_reintento: number;
@@ -165,16 +184,19 @@ export type Database = {
 					punto_venta: number;
 					solicitud_fiscal: Json | null;
 					tipo: Database['public']['Enums']['tipo_comprobante'];
+					tipo_fiscal: number | null;
 					updated_at: string | null;
 					ventana_regularizacion_iniciada_en: string;
 				};
 				ComputedFields: never;
 				Insert: {
+					ambiente_fiscal?: string | null;
 					cae?: string | null;
 					cae_vencimiento?: string | null;
 					comprobante_origen_id?: string | null;
 					created_at?: string | null;
 					detalle_error_fiscal?: string | null;
+					emisor_cuit?: string | null;
 					estado_fiscal?: Database['public']['Enums']['estado_fiscal'];
 					id?: string;
 					intentos_reintento?: number;
@@ -187,15 +209,18 @@ export type Database = {
 					punto_venta?: number;
 					solicitud_fiscal?: Json | null;
 					tipo: Database['public']['Enums']['tipo_comprobante'];
+					tipo_fiscal?: number | null;
 					updated_at?: string | null;
 					ventana_regularizacion_iniciada_en?: string;
 				};
 				Update: {
+					ambiente_fiscal?: string | null;
 					cae?: string | null;
 					cae_vencimiento?: string | null;
 					comprobante_origen_id?: string | null;
 					created_at?: string | null;
 					detalle_error_fiscal?: string | null;
+					emisor_cuit?: string | null;
 					estado_fiscal?: Database['public']['Enums']['estado_fiscal'];
 					id?: string;
 					intentos_reintento?: number;
@@ -208,6 +233,7 @@ export type Database = {
 					punto_venta?: number;
 					solicitud_fiscal?: Json | null;
 					tipo?: Database['public']['Enums']['tipo_comprobante'];
+					tipo_fiscal?: number | null;
 					updated_at?: string | null;
 					ventana_regularizacion_iniciada_en?: string;
 				};
@@ -223,6 +249,20 @@ export type Database = {
 						foreignKeyName: 'comprobantes_comprobante_origen_id_fkey';
 						columns: ['comprobante_origen_id'];
 						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['comprobante_id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_comprobante_origen_id_fkey';
+						columns: ['comprobante_origen_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['comprobante_id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_comprobante_origen_id_fkey';
+						columns: ['comprobante_origen_id'];
+						isOneToOne: false;
 						referencedRelation: 'v_pagos_etiqueta_fiscal';
 						referencedColumns: ['comprobante_id'];
 					},
@@ -232,6 +272,27 @@ export type Database = {
 						isOneToOne: false;
 						referencedRelation: 'pagos';
 						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_pago_id_fkey';
+						columns: ['pago_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['pago_id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_pago_id_fkey';
+						columns: ['pago_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'comprobantes_pago_id_fkey';
+						columns: ['pago_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['pago_id'];
 					},
 					{
 						foreignKeyName: 'comprobantes_pago_id_fkey';
@@ -320,11 +381,39 @@ export type Database = {
 						referencedColumns: ['id'];
 					},
 					{
+						foreignKeyName: 'cuotas_categoria_id_fkey';
+						columns: ['categoria_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['categoria_id'];
+					},
+					{
+						foreignKeyName: 'cuotas_categoria_id_fkey';
+						columns: ['categoria_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['categoria_id'];
+					},
+					{
 						foreignKeyName: 'cuotas_socio_id_fkey';
 						columns: ['socio_id'];
 						isOneToOne: false;
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'cuotas_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'cuotas_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['socio_id'];
 					},
 					{
 						foreignKeyName: 'cuotas_socio_id_fkey';
@@ -373,18 +462,24 @@ export type Database = {
 			email_destinatarios: {
 				Row: {
 					aceptado_en: string | null;
+					apellido_snapshot: string | null;
 					asunto_snapshot: string | null;
 					created_at: string | null;
 					cuerpo_snapshot: string | null;
+					despacho_iniciado: boolean;
+					documento_path: string | null;
 					email: string | null;
 					email_log_id: string;
 					entrega_estado: string;
 					estado: Database['public']['Enums']['estado_email'];
 					estado_envio: string;
 					id: string;
+					intencion_id: string | null;
 					motivo: string | null;
+					nombre_snapshot: string | null;
 					proveedor: string | null;
 					provider_message_id: string | null;
+					proximo_intento_documental: string | null;
 					reserva_id: string | null;
 					reservado_en: string | null;
 					socio_id: string | null;
@@ -392,36 +487,48 @@ export type Database = {
 				ComputedFields: never;
 				Insert: {
 					aceptado_en?: string | null;
+					apellido_snapshot?: string | null;
 					asunto_snapshot?: string | null;
 					created_at?: string | null;
 					cuerpo_snapshot?: string | null;
+					despacho_iniciado?: boolean;
+					documento_path?: string | null;
 					email?: string | null;
 					email_log_id: string;
 					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
 					estado_envio?: string;
 					id?: string;
+					intencion_id?: string | null;
 					motivo?: string | null;
+					nombre_snapshot?: string | null;
 					proveedor?: string | null;
 					provider_message_id?: string | null;
+					proximo_intento_documental?: string | null;
 					reserva_id?: string | null;
 					reservado_en?: string | null;
 					socio_id?: string | null;
 				};
 				Update: {
 					aceptado_en?: string | null;
+					apellido_snapshot?: string | null;
 					asunto_snapshot?: string | null;
 					created_at?: string | null;
 					cuerpo_snapshot?: string | null;
+					despacho_iniciado?: boolean;
+					documento_path?: string | null;
 					email?: string | null;
 					email_log_id?: string;
 					entrega_estado?: string;
 					estado?: Database['public']['Enums']['estado_email'];
 					estado_envio?: string;
 					id?: string;
+					intencion_id?: string | null;
 					motivo?: string | null;
+					nombre_snapshot?: string | null;
 					proveedor?: string | null;
 					provider_message_id?: string | null;
+					proximo_intento_documental?: string | null;
 					reserva_id?: string | null;
 					reservado_en?: string | null;
 					socio_id?: string | null;
@@ -440,6 +547,20 @@ export type Database = {
 						isOneToOne: false;
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'email_destinatarios_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'email_destinatarios_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['socio_id'];
 					},
 					{
 						foreignKeyName: 'email_destinatarios_socio_id_fkey';
@@ -502,6 +623,7 @@ export type Database = {
 			email_logs: {
 				Row: {
 					asunto: string;
+					autor_nombre_snapshot: string | null;
 					cuerpo: string;
 					destinatarios_count: number;
 					estado: Database['public']['Enums']['estado_email'];
@@ -518,6 +640,7 @@ export type Database = {
 				ComputedFields: never;
 				Insert: {
 					asunto: string;
+					autor_nombre_snapshot?: string | null;
 					cuerpo: string;
 					destinatarios_count?: number;
 					estado?: Database['public']['Enums']['estado_email'];
@@ -533,6 +656,7 @@ export type Database = {
 				};
 				Update: {
 					asunto?: string;
+					autor_nombre_snapshot?: string | null;
 					cuerpo?: string;
 					destinatarios_count?: number;
 					estado?: Database['public']['Enums']['estado_email'];
@@ -572,6 +696,7 @@ export type Database = {
 					created_at: string;
 					descripcion: string | null;
 					estado: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path: string | null;
 					evidencia_url: string | null;
 					fecha: string;
 					id: string;
@@ -591,6 +716,7 @@ export type Database = {
 					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path?: string | null;
 					evidencia_url?: string | null;
 					fecha?: string;
 					id?: string;
@@ -609,6 +735,7 @@ export type Database = {
 					created_at?: string;
 					descripcion?: string | null;
 					estado?: Database['public']['Enums']['estado_gasto'];
+					evidencia_storage_path?: string | null;
 					evidencia_url?: string | null;
 					fecha?: string;
 					id?: string;
@@ -684,11 +811,39 @@ export type Database = {
 						referencedColumns: ['id'];
 					},
 					{
+						foreignKeyName: 'inscripciones_categoria_id_fkey';
+						columns: ['categoria_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['categoria_id'];
+					},
+					{
+						foreignKeyName: 'inscripciones_categoria_id_fkey';
+						columns: ['categoria_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['categoria_id'];
+					},
+					{
 						foreignKeyName: 'inscripciones_socio_id_fkey';
 						columns: ['socio_id'];
 						isOneToOne: false;
 						referencedRelation: 'socios';
 						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'inscripciones_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['socio_id'];
+					},
+					{
+						foreignKeyName: 'inscripciones_socio_id_fkey';
+						columns: ['socio_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_pagos_cobranza';
+						referencedColumns: ['socio_id'];
 					},
 					{
 						foreignKeyName: 'inscripciones_socio_id_fkey';
@@ -769,6 +924,20 @@ export type Database = {
 						referencedColumns: ['id'];
 					},
 					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['cuota_id'];
+					},
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['id'];
+					},
+					{
 						foreignKeyName: 'pagos_usuario_id_fkey';
 						columns: ['usuario_id'];
 						isOneToOne: false;
@@ -826,6 +995,7 @@ export type Database = {
 					fecha_alta: string;
 					fecha_baja: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path: string | null;
 					foto_url: string | null;
 					id: string;
 					nombre: string;
@@ -851,6 +1021,7 @@ export type Database = {
 					fecha_alta?: string;
 					fecha_baja?: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path?: string | null;
 					foto_url?: string | null;
 					id?: string;
 					nombre: string;
@@ -875,6 +1046,7 @@ export type Database = {
 					fecha_alta?: string;
 					fecha_baja?: string | null;
 					fecha_nacimiento?: string;
+					foto_storage_path?: string | null;
 					foto_url?: string | null;
 					id?: string;
 					nombre?: string;
@@ -944,6 +1116,50 @@ export type Database = {
 				ComputedFields: never;
 				Relationships: [];
 			};
+			v_cuotas_cobranza: {
+				Row: {
+					categoria_id: string;
+					categoria_nombre: string;
+					comprobante_id: string | null;
+					cuota_en_mora: boolean | null;
+					cuota_id: string;
+					deporte_id: string;
+					deporte_nombre: string;
+					deuda_pendiente: number | null;
+					es_moroso: boolean | null;
+					estado_cuota: string | null;
+					estado_fiscal: string | null;
+					estado_pago: string | null;
+					etiqueta_recibo: string | null;
+					fecha: string | null;
+					fecha_pago: string | null;
+					id: string;
+					medio: string | null;
+					monto: number;
+					numero_comprobante: string | null;
+					pago_id: string | null;
+					periodo_anio: number;
+					periodo_mes: number;
+					referencia: string | null;
+					socio_apellido: string;
+					socio_dni: string;
+					socio_estado: string | null;
+					socio_id: string;
+					socio_nombre: string;
+					socio_numero: number;
+					usuario_id: string | null;
+				};
+				ComputedFields: never;
+				Relationships: [
+					{
+						foreignKeyName: 'pagos_usuario_id_fkey';
+						columns: ['usuario_id'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
+				];
+			};
 			v_morosidad_por_deporte: {
 				Row: {
 					cuotas_morosas: number | null;
@@ -953,6 +1169,71 @@ export type Database = {
 				};
 				ComputedFields: never;
 				Relationships: [];
+			};
+			v_pagos_cobranza: {
+				Row: {
+					categoria_id: string;
+					categoria_nombre: string;
+					comprobante_id: string;
+					cuota_en_mora: boolean | null;
+					cuota_id: string;
+					deporte_id: string;
+					deporte_nombre: string;
+					deuda_pendiente: number | null;
+					es_moroso: boolean | null;
+					estado_cuota: string | null;
+					estado_fiscal: string | null;
+					estado_pago: string | null;
+					etiqueta_recibo: string | null;
+					fecha: string;
+					fecha_pago: string;
+					id: string;
+					medio: string | null;
+					monto: number;
+					numero_comprobante: string | null;
+					pago_id: string;
+					periodo_anio: number;
+					periodo_mes: number;
+					referencia: string | null;
+					socio_apellido: string;
+					socio_dni: string;
+					socio_estado: string | null;
+					socio_id: string;
+					socio_nombre: string;
+					socio_numero: number;
+					usuario_id: string;
+				};
+				ComputedFields: never;
+				Relationships: [
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'cuotas';
+						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['cuota_id'];
+					},
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['id'];
+					},
+					{
+						foreignKeyName: 'pagos_usuario_id_fkey';
+						columns: ['usuario_id'];
+						isOneToOne: false;
+						referencedRelation: 'usuarios';
+						referencedColumns: ['id'];
+					},
+				];
 			};
 			v_pagos_etiqueta_fiscal: {
 				Row: {
@@ -987,6 +1268,20 @@ export type Database = {
 						referencedColumns: ['id'];
 					},
 					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['cuota_id'];
+					},
+					{
+						foreignKeyName: 'pagos_cuota_id_fkey';
+						columns: ['cuota_id'];
+						isOneToOne: false;
+						referencedRelation: 'v_cuotas_cobranza';
+						referencedColumns: ['id'];
+					},
+					{
 						foreignKeyName: 'pagos_usuario_id_fkey';
 						columns: ['usuario_id'];
 						isOneToOne: false;
@@ -1016,6 +1311,7 @@ export type Database = {
 					fecha_alta: string;
 					fecha_baja: string | null;
 					fecha_nacimiento: string;
+					foto_storage_path: string | null;
 					foto_url: string | null;
 					id: string;
 					nombre: string;
@@ -1037,8 +1333,36 @@ export type Database = {
 			};
 		};
 		Functions: {
+			acceso_limitar: {
+				Args: { p_email_hash: string; p_ip_hash: string; p_tipo: string };
+				Returns: boolean;
+			};
+			adquirir_ticket_wsaa: { Args: { p_clave: string; p_propietario: string }; Returns: Json };
 			anular_gasto: { Args: { p_gasto_id: string; p_motivo: string }; Returns: undefined };
 			anular_pago: { Args: { p_motivo: string; p_pago_id: string }; Returns: string };
+			archivo_autorizar_carga: {
+				Args: { p_entidad_id: string; p_tipo: string };
+				Returns: undefined;
+			};
+			archivo_finalizar_descarte: {
+				Args: { p_actor_id: string; p_storage_path: string };
+				Returns: undefined;
+			};
+			archivo_registrar_validado: {
+				Args: {
+					p_actor_id: string;
+					p_entidad_id: string;
+					p_mime: string;
+					p_storage_path: string;
+					p_tamano: number;
+					p_tipo: string;
+				};
+				Returns: undefined;
+			};
+			archivo_reservar_descarte: {
+				Args: { p_actor_id: string; p_entidad_id: string; p_storage_path: string; p_tipo: string };
+				Returns: undefined;
+			};
 			baja_categoria: { Args: { p_categoria_id: string }; Returns: undefined };
 			baja_deporte: { Args: { p_deporte_id: string }; Returns: undefined };
 			baja_inscripcion: { Args: { p_inscripcion_id: string }; Returns: undefined };
@@ -1075,8 +1399,60 @@ export type Database = {
 				};
 				Returns: string;
 			};
+			confirmar_documento_intencion: {
+				Args: { p_id: string; p_path: string; p_reserva: string };
+				Returns: undefined;
+			};
 			confirmar_inscripcion: {
 				Args: { p_categoria_id: string; p_socio_id: string };
+				Returns: Json;
+			};
+			confirmar_resultado_fiscal: {
+				Args: { p_ejecucion_id: string; p_resultado: Json; p_version: number };
+				Returns: Json;
+			};
+			confirmar_resultado_fiscal_con_actor: {
+				Args: { p_actor_id: string; p_ejecucion_id: string; p_resultado: Json; p_version: number };
+				Returns: Json;
+			};
+			consultar_alta_gasto: { Args: { p_solicitud: string }; Returns: string };
+			consultar_caja: { Args: { p_criterios?: Json }; Returns: Json };
+			consultar_candidatos_correo: {
+				Args: {
+					p_busqueda?: string;
+					p_categoria_id?: string;
+					p_deporte_id?: string;
+					p_estado_pago?: string;
+					p_incluir_desuscriptos?: boolean;
+					p_page?: number;
+					p_page_size?: number;
+					p_tipo?: string;
+					p_todos?: boolean;
+				};
+				Returns: Json;
+			};
+			consultar_cobranza: { Args: { p_criterios?: Json; p_vista: string }; Returns: Json };
+			consultar_dashboard: { Args: { p_anio: number; p_mes: number }; Returns: Json };
+			consultar_ejecucion_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			consultar_eventos_correo_log: { Args: { p_log_id: string }; Returns: Json };
+			consultar_grilla_reporte: {
+				Args: { p_criterios?: Json; p_exportar?: boolean; p_grilla: string; p_revision?: string };
+				Returns: Json;
+			};
+			consultar_monitoreo_fiscal: {
+				Args: {
+					p_busqueda?: string;
+					p_desde?: string;
+					p_estado?: string;
+					p_hasta?: string;
+					p_page?: number;
+					p_page_size?: number;
+					p_tipo?: string;
+				};
+				Returns: Json;
+			};
+			consultar_notificacion_operacion: {
+				Args: { p_comprobante_id?: string; p_job_id?: string };
 				Returns: Json;
 			};
 			crear_comunicacion: { Args: { p_solicitud: Json }; Returns: string };
@@ -1101,7 +1477,10 @@ export type Database = {
 				}[];
 			};
 			desuscribir_correo: { Args: { p_destinatario: string }; Returns: undefined };
+			desuscribir_correo_confirmado: { Args: { p_destinatario: string }; Returns: Json };
+			encolar_intencion_correo: { Args: { p_id: string; p_reserva: string }; Returns: Json };
 			es_socio_moroso: { Args: { p_socio_id: string }; Returns: boolean };
+			expirar_comprobante_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
 			fecha_actual_club: { Args: Record<PropertyKey, never>; Returns: string };
 			finalizar_correo: {
 				Args: {
@@ -1115,6 +1494,42 @@ export type Database = {
 			};
 			generar_cuotas_mes_actual: { Args: Record<PropertyKey, never>; Returns: Json };
 			generar_cuotas_mes_manual: { Args: Record<PropertyKey, never>; Returns: Json };
+			guardar_ticket_wsaa: {
+				Args: {
+					p_clave: string;
+					p_propietario: string;
+					p_sobre: string;
+					p_vencimiento: string;
+					p_version: number;
+				};
+				Returns: undefined;
+			};
+			iniciar_ejecucion_fiscal: {
+				Args: { p_comprobante_id: string; p_ejecucion_id: string; p_modo: string };
+				Returns: Json;
+			};
+			iniciar_ejecucion_fiscal_administrativa: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_modo: string;
+				};
+				Returns: Json;
+			};
+			leer_contexto_fiscal: { Args: { p_comprobante_id: string }; Returns: Json };
+			leer_documento_correo: {
+				Args: { p_destinatario_id: string; p_reserva_id: string };
+				Returns: Json;
+			};
+			listar_candidatos_fiscales: { Args: { p_limite?: number }; Returns: Json };
+			marcar_despacho_correo: { Args: { p_id: string; p_reserva: string }; Returns: Json };
+			marcar_envio_fiscal: { Args: { p_ejecucion_id: string; p_version: number }; Returns: Json };
+			posponer_correo_documental: { Args: { p_id: string; p_reserva: string }; Returns: undefined };
+			preparar_solicitud_fiscal: {
+				Args: { p_ejecucion_id: string; p_numero: string; p_solicitud: Json; p_version: number };
+				Returns: Json;
+			};
 			previsualizar_inscripcion: {
 				Args: { p_categoria_id: string; p_socio_id: string };
 				Returns: {
@@ -1127,7 +1542,36 @@ export type Database = {
 				}[];
 			};
 			reabrir_regularizacion_fiscal: { Args: { p_comprobante_id: string }; Returns: undefined };
+			reabrir_sin_envio_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
+			};
+			reabrir_verificado_fiscal: {
+				Args: {
+					p_actor_id?: string;
+					p_comprobante_id: string;
+					p_ejecucion_id?: string;
+					p_version?: number;
+				};
+				Returns: Json;
+			};
 			reactivar_socio: { Args: { p_socio_id: string }; Returns: undefined };
+			reclamar_intenciones_correo: { Args: { p_limite?: number }; Returns: Json };
+			registrar_autorizacion_verificada_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_resultado: Json;
+					p_version: number;
+				};
+				Returns: Json;
+			};
 			registrar_evento_correo: {
 				Args: {
 					p_bounce_tipo?: string;
@@ -1138,22 +1582,49 @@ export type Database = {
 				};
 				Returns: undefined;
 			};
+			registrar_fallo_intencion: {
+				Args: { p_codigo: string; p_id: string; p_reserva: string };
+				Returns: undefined;
+			};
+			registrar_gasto_idempotente: {
+				Args: { p_datos: Json; p_solicitud: string };
+				Returns: string;
+			};
+			registrar_incidencia_fiscal: {
+				Args: { p_ejecucion_id: string; p_motivo: string; p_version: number };
+				Returns: Json;
+			};
+			registrar_pdf_comprobante: {
+				Args: {
+					p_comprobante_id: string;
+					p_fuente_esperada: Json;
+					p_storage_path: string;
+					p_tipo_version: string;
+				};
+				Returns: Json;
+			};
 			reservar_correos: {
 				Args: { p_proveedor: string };
 				Returns: {
 					aceptado_en: string | null;
+					apellido_snapshot: string | null;
 					asunto_snapshot: string | null;
 					created_at: string | null;
 					cuerpo_snapshot: string | null;
+					despacho_iniciado: boolean;
+					documento_path: string | null;
 					email: string | null;
 					email_log_id: string;
 					entrega_estado: string;
 					estado: Database['public']['Enums']['estado_email'];
 					estado_envio: string;
 					id: string;
+					intencion_id: string | null;
 					motivo: string | null;
+					nombre_snapshot: string | null;
 					proveedor: string | null;
 					provider_message_id: string | null;
+					proximo_intento_documental: string | null;
 					reserva_id: string | null;
 					reservado_en: string | null;
 					socio_id: string | null;
@@ -1165,9 +1636,64 @@ export type Database = {
 					isSetofReturn: true;
 				};
 			};
+			resolver_anulacion_fiscal: {
+				Args: { p_actor_id?: string; p_ejecucion_id: string; p_resultado: Json; p_version: number };
+				Returns: Json;
+			};
+			resolver_anulacion_sin_envio_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
+			};
+			resolver_rechazo_anulado_fiscal: {
+				Args: {
+					p_actor_id: string;
+					p_comprobante_id: string;
+					p_ejecucion_id: string;
+					p_version: number;
+				};
+				Returns: Json;
+			};
 			tramo_proporcional: {
 				Args: { p_anio: number; p_fecha: string; p_mes: number };
 				Returns: number;
+			};
+			usuarios_enlace_pendiente: {
+				Args: { p_actor: string; p_usuario_id: string };
+				Returns: boolean;
+			};
+			usuarios_operacion_guardar: {
+				Args: {
+					p_actor: string;
+					p_enlace_enviado?: boolean;
+					p_estado: string;
+					p_lease: string;
+					p_operacion_id: string;
+					p_revocacion_pendiente?: boolean;
+				};
+				Returns: undefined;
+			};
+			usuarios_operacion_leer: {
+				Args: { p_actor: string; p_operacion_id?: string; p_usuario_id?: string };
+				Returns: Json;
+			};
+			usuarios_operacion_reservar: {
+				Args: {
+					p_actor: string;
+					p_datos: Json;
+					p_operacion_id: string;
+					p_tipo: string;
+					p_usuario_id: string;
+				};
+				Returns: Json;
+			};
+			usuarios_revocar_sesiones: {
+				Args: { p_actor: string; p_usuario_id: string };
+				Returns: undefined;
 			};
 		};
 		Enums: {

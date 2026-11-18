@@ -30,7 +30,7 @@ export const AuthLayout = () => {
 				</IconButton>
 			</Box>
 
-			<Box sx={{ flexGrow: 1, display: 'flex' }}>
+			<Box sx={{ flexGrow: 1, display: 'flex', px: 2, py: 10 }}>
 				<Outlet />
 			</Box>
 		</Box>

@@ -1,16 +1,16 @@
 // src/app/providers/AuthProvider.tsx
 
-import type { Session, SignInWithPasswordCredentials } from '@supabase/supabase-js';
+import { AuthError, type Session, type SignInWithPasswordCredentials } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
 	AuthContext,
 	activityKey,
-	INACTIVITY_MS,
-	inactivityExpired,
 	type ProfileStatus,
 	RequestGeneration,
+	SessionActivity,
 } from '#entities/session';
+import { requestLogin } from '#shared/api/access.api';
 import { clearStoredSession, supabase } from '#shared/api/supabaseClient';
 import type { Tables } from '#shared/types';
 
@@ -23,6 +23,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const [epoch, setEpoch] = useState(0);
 	const [revision, setRevision] = useState(0);
 	const [isSigningOut, setIsSigningOut] = useState(false);
+
 	const identityRef = useRef<string | null>(null);
 	const signingOutRef = useRef(false);
 	const locallyClosedRef = useRef(false);
@@ -30,6 +31,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const generationRef = useRef(new RequestGeneration());
 	const profileRequestRef = useRef<AbortController | null>(null);
 	const lastRoleRef = useRef<string | null>(null);
+	const loginRequestRef = useRef<AbortController | null>(null);
+	const loginGenerationRef = useRef(new RequestGeneration());
 
 	const clearProtectedData = useCallback(() => {
 		void queryClient.cancelQueries();
@@ -43,6 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				return;
 			}
 			signingOutRef.current = true;
+			loginGenerationRef.current.next();
+			loginRequestRef.current?.abort();
 			locallyClosedRef.current = true;
 			setIsSigningOut(true);
 			generationRef.current.next();
@@ -132,6 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		});
 		return () => {
 			mountedRef.current = false;
+			loginGenerationRef.current.next();
+			loginRequestRef.current?.abort();
 			window.clearTimeout(initialTimeout);
 			generationRef.current.next();
 			profileRequestRef.current?.abort();
@@ -155,7 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 			try {
 				const { data, error } = await supabase
 					.from('usuarios')
-					.select('*')
+					.select('id,nombre,apellido,email,rol,estado,created_at,updated_at')
 					.eq('id', userId)
 					.abortSignal(controller.signal)
 					.maybeSingle();
@@ -242,21 +249,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		} catch {
 			/* Sigue funcionando el temporizador de esta pestaña. */
 		}
+		const activityClock = new SessionActivity(lastActivity, Date.now());
 		let timeout = 0;
 		const check = () => {
 			window.clearTimeout(timeout);
-			if (inactivityExpired(lastActivity)) {
+			if (activityClock.expired(Date.now())) {
 				void logout('La sesión finalizó después de 30 minutos sin actividad. Ingrese nuevamente.');
 				return false;
 			}
-			timeout = window.setTimeout(check, Math.max(1, INACTIVITY_MS - (Date.now() - lastActivity)));
+			timeout = window.setTimeout(check, Math.max(1, activityClock.remaining(Date.now())));
 			return true;
 		};
-		const activity = () => {
-			if (!check() || document.visibilityState !== 'visible') {
+		const activity = (event: Event) => {
+			if (
+				!check() ||
+				!activityClock.interact(Date.now(), document.visibilityState === 'visible', event.isTrusted)
+			) {
 				return;
 			}
-			lastActivity = Date.now();
+			lastActivity = activityClock.lastActivity;
 			try {
 				localStorage.setItem(key, String(lastActivity));
 			} catch {
@@ -273,9 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				return;
 			}
 			const timestamp = Number(event.newValue);
-			if (timestamp > lastActivity && timestamp <= Date.now()) {
-				lastActivity = timestamp;
-			}
+			activityClock.synchronize(timestamp, Date.now());
 			check();
 		};
 		const visible = () => {
@@ -304,8 +313,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const login = async (credentials: SignInWithPasswordCredentials) => {
 		locallyClosedRef.current = false;
 		setMessage(null);
-		const { error } = await supabase.auth.signInWithPassword(credentials);
-		return { error };
+		const attempt = loginGenerationRef.current.next();
+		const controller = new AbortController();
+		loginRequestRef.current?.abort();
+		loginRequestRef.current = controller;
+		try {
+			if (!('email' in credentials) || !credentials.email) {
+				return { error: new AuthError('Ingresá un correo electrónico válido.', 400) };
+			}
+			const nextSession = await requestLogin(
+				credentials.email,
+				credentials.password,
+				controller.signal,
+			);
+			if (
+				!mountedRef.current ||
+				locallyClosedRef.current ||
+				!loginGenerationRef.current.isCurrent(attempt)
+			) {
+				return { error: new AuthError('El intento de acceso fue cancelado.', 499) };
+			}
+			const { error } = await supabase.auth.setSession({
+				access_token: nextSession.access_token,
+				refresh_token: nextSession.refresh_token,
+			});
+			return { error };
+		} catch (reason) {
+			const status =
+				reason &&
+				typeof reason === 'object' &&
+				'status' in reason &&
+				typeof reason.status === 'number'
+					? reason.status
+					: 503;
+			return {
+				error: new AuthError(
+					reason instanceof Error ? reason.message : 'No pudimos iniciar sesión.',
+					status,
+				),
+			};
+		}
 	};
 
 	return (

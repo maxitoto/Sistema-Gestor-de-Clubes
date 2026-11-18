@@ -24,5 +24,5 @@ export function clearStoredSession(): void {
 }
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
-	auth: { storageKey },
+	auth: { storageKey, detectSessionInUrl: false },
 });

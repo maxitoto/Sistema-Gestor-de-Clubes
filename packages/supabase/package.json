@@ -10,6 +10,8 @@
     "start:containers": "bunx supabase start --workdir ..",
     "correos:local": "bun --env-file=functions/.env scripts/procesar-correos-local.ts",
     "correos:una-vez": "bun --env-file=functions/.env scripts/procesar-correos-local.ts --once",
+    "fiscal:local": "bun --env-file=functions/.env scripts/procesar-fiscal-local.ts",
+    "fiscal:una-vez": "bun --env-file=functions/.env scripts/procesar-fiscal-local.ts --once",
     "stop": "bunx supabase stop --workdir ..",
     "db:reset": "bunx supabase db reset --workdir ..",
     "db:push": "bunx supabase db push --workdir ..",
@@ -17,16 +19,29 @@
     "newEdge": "bunx supabase functions new --workdir ..",
     "lint:arch": "bunx --bun depcruise functions",
     "lint:functions": "bunx --bun deno lint functions/",
-    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts",
+    "typecheck:functions": "bunx --bun deno check --config functions/deno.json functions/comunicaciones/index.ts functions/monitoreo/index.ts functions/arca/index.ts functions/archivos/index.ts functions/acceso/index.ts functions/usuarios/index.ts functions/configuracion/index.ts functions/credenciales/index.ts functions/fiscal-worker/index.ts",
     "format:functions": "bunx --bun deno fmt functions/",
     "lint:functionsfix": "bun run format:functions",
     "lint:fix": "bun run format:functions && bun run lint",
-    "lint": "bun run lint:functions && bun run lint:arch"
+    "lint": "bun run lint:functions && bun run lint:arch",
+    "fiscal:perfil": "bun run scripts/configurar-perfil-fiscal-local.ts",
+    "test": "bun test",
+    "test:deno": "bunx --bun deno test --allow-all --config functions/deno.json tests/*.deno.ts",
+    "test:integracion:seguridad": "bun run tests/integration/seguridad.ts && bun run tests/integration/seguridad-sesion.ts && python3 -B tests/integration/seguridad-auditoria.py",
+    "test:integracion:finanzas": "python3 -B tests/integration/concurrencia-financiera.py",
+    "test:integracion:fiscal": "python3 -B tests/integration/fiscal-concurrencia.py",
+    "test:integracion:correo": "bun run tests/integration/correo.ts",
+    "test:integracion": "bun run test:integracion:seguridad && bun run test:integracion:finanzas && bun run test:integracion:fiscal && bun run test:integracion:correo"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
     "deno-bin": "2.2.7",
     "dependency-cruiser": "18.3.1",
     "typescript": "6"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4",
+    "pdf-lib": "1.17.1",
+    "pngjs": "7.0.0"
   }
 }

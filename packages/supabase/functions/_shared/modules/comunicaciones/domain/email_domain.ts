@@ -18,6 +18,19 @@ export function validarSolicitud(raw: unknown): SolicitudCorreo {
     throw new CorreoInvalido("Solicitud inválida.");
   }
   const r = raw as Record<string, unknown>;
+  if (
+    Object.keys(r).some((k) =>
+      ![
+        "requestId",
+        "tipo",
+        "asunto",
+        "cuerpo",
+        "sociosIds",
+        "plantillaId",
+        "incluirDesuscriptos",
+      ].includes(k)
+    )
+  ) throw new CorreoInvalido("La solicitud contiene campos no admitidos.");
   if (!uuidValido(r.requestId)) {
     throw new CorreoInvalido("requestId debe ser UUID.");
   }
@@ -86,10 +99,17 @@ export function escaparHtml(value: string): string {
   );
 }
 
-export function formatearCuerpoCorreo(texto: string, bajaUrl: string): string {
-  return `<main style="font-family:Arial,sans-serif;color:#222"><h2>Club Los Andes</h2><p>${
+export function formatearCuerpoCorreo(
+  texto: string,
+  bajaUrl: string | null,
+): string {
+  return `<main style="font-family:Arial,sans-serif;color:#222"><h2>Comunicaciones del club</h2><p>${
     escaparHtml(texto).replace(/\r?\n/g, "<br>")
-  }</p><hr><p><a href="${
-    escaparHtml(bajaUrl)
-  }">Dejar de recibir comunicaciones generales</a></p><small>La baja no impide los avisos de deuda previstos por el club.</small></main>`;
+  }</p>${
+    bajaUrl
+      ? `<hr><p><a href="${
+        escaparHtml(bajaUrl)
+      }">Dejar de recibir comunicaciones generales</a></p><small>La baja no impide los avisos de deuda previstos por el club.</small>`
+      : ""
+  }</main>`;
 }

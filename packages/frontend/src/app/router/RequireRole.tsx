@@ -14,7 +14,7 @@ export const RequireRole = ({ roles }: Props) => {
 	const { perfil } = useAuth();
 
 	if (!perfil || !roles.includes(perfil.rol)) {
-		return <Navigate to="/dashboard" replace />;
+		return <Navigate to="/socios" replace />;
 	}
 
 	return <Outlet />;

@@ -1,17 +1,57 @@
 import nodemailer from "nodemailer";
+import { Buffer } from "node:buffer";
 import { requiredEnv } from "./env.ts";
 
+export type AdjuntoPdf = {
+  bytes: Uint8Array;
+  nombre: string;
+  tipo: "application/pdf";
+};
 export type MensajeIndividual = {
   destinatarioId: string;
   to: string;
   subject: string;
   text: string;
   html: string;
+  adjuntos?: AdjuntoPdf[];
 };
 export class EnvioFallido extends Error {
   constructor(public readonly incierto: boolean, message: string) {
     super(message);
   }
+}
+
+/** Sólo bytes PDF internos; nunca una URL o ruta suministrada por el operador. */
+export function validarAdjuntosPdf(
+  adjuntos: AdjuntoPdf[] | undefined,
+): AdjuntoPdf[] {
+  if (adjuntos === undefined) return [];
+  if (!Array.isArray(adjuntos) || adjuntos.length > 1) {
+    throw new EnvioFallido(
+      false,
+      "Sólo se admite un comprobante PDF por mensaje.",
+    );
+  }
+  for (const a of adjuntos) {
+    if (
+      !a || Object.keys(a).sort().join(",") !== "bytes,nombre,tipo" ||
+      !(a.bytes instanceof Uint8Array) || a.tipo !== "application/pdf" ||
+      typeof a.nombre !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,149}\.pdf$/.test(a.nombre) ||
+      a.nombre.includes("..") || a.bytes.length < 100 ||
+      a.bytes.length > 10485760 ||
+      new TextDecoder().decode(a.bytes.subarray(0, 5)) !== "%PDF-"
+    ) {
+      throw new EnvioFallido(false, "El adjunto privado no es un PDF válido.");
+    }
+  }
+  return adjuntos;
+}
+export function adjuntosResend(adjuntos: AdjuntoPdf[] | undefined) {
+  return validarAdjuntosPdf(adjuntos).map((a) => ({
+    filename: a.nombre,
+    content: Buffer.from(a.bytes).toString("base64"),
+  }));
 }
 
 export function mailProvider(): "resend" | "mailpit" {
@@ -40,9 +80,15 @@ export function validarConfiguracionCorreo() {
   return provider;
 }
 
+/** EDNS sólo puede ocurrir antes de abrir el canal SMTP; DATA/timeout siguen siendo inciertos. */
+export function falloPrevioMailpit(error: unknown): boolean {
+  return !!error && typeof error === "object" && "code" in error &&
+    error.code === "EDNS";
+}
 // Un mensaje tiene exactamente un destinatario. No se expone una lista en To/CC.
 export async function sendEmail(message: MensajeIndividual): Promise<string> {
   const from = requiredEnv("MAIL_FROM");
+  const adjuntos = validarAdjuntosPdf(message.adjuntos);
   if (/[\r\n]/.test(message.to + message.subject + from)) {
     throw new EnvioFallido(false, "Cabecera inválida.");
   }
@@ -63,6 +109,7 @@ export async function sendEmail(message: MensajeIndividual): Promise<string> {
           subject: message.subject,
           text: message.text,
           html: message.html,
+          ...(adjuntos.length ? { attachments: adjuntosResend(adjuntos) } : {}),
         }),
       });
     } catch {
@@ -87,14 +134,22 @@ export async function sendEmail(message: MensajeIndividual): Promise<string> {
     }
     return result.id;
   }
-  const transport = nodemailer.createTransport({
-    host: requiredEnv("SMTP_HOST"),
-    port: Number(requiredEnv("SMTP_PORT")),
-    secure: false,
-    ignoreTLS: true,
-    connectionTimeout: 10000,
-    socketTimeout: 15000,
-  });
+  let transport: ReturnType<typeof nodemailer.createTransport>;
+  try {
+    transport = nodemailer.createTransport({
+      host: requiredEnv("SMTP_HOST"),
+      port: Number(requiredEnv("SMTP_PORT")),
+      secure: false,
+      ignoreTLS: true,
+      connectionTimeout: 10000,
+      socketTimeout: 15000,
+    });
+  } catch {
+    throw new EnvioFallido(
+      false,
+      "No se pudo iniciar el transporte local de correo.",
+    );
+  }
   try {
     const result = await transport.sendMail({
       from,
@@ -102,19 +157,41 @@ export async function sendEmail(message: MensajeIndividual): Promise<string> {
       subject: message.subject,
       text: message.text,
       html: message.html,
+      attachments: adjuntos.map((a) => ({
+        filename: a.nombre,
+        content: Buffer.from(a.bytes),
+        contentType: a.tipo,
+        contentDisposition: "attachment",
+      })),
+      disableFileAccess: true,
+      disableUrlAccess: true,
       messageId: `<${message.destinatarioId}@correo.club.local>`,
     });
     if (!result.accepted?.length) {
       throw new EnvioFallido(false, "Mailpit rechazó el destinatario.");
     }
+    if (typeof result.messageId !== "string" || !result.messageId) {
+      throw new EnvioFallido(
+        true,
+        "Mailpit no devolvió una referencia verificable de aceptación.",
+      );
+    }
     return result.messageId;
   } catch (error) {
     if (error instanceof EnvioFallido) throw error;
+    if (falloPrevioMailpit(error)) {
+      throw new EnvioFallido(
+        false,
+        "No se pudo resolver el destino local de correo.",
+      );
+    }
     throw new EnvioFallido(
       true,
       "No se pudo confirmar la aceptación por Mailpit.",
     );
   } finally {
-    transport.close();
+    try {
+      transport.close();
+    } catch { /* La limpieza no borra una aceptación ya confirmada. */ }
   }
 }

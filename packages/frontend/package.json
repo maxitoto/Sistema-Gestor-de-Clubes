@@ -11,7 +11,8 @@
 		"lint:arch": "bunx --bun depcruise src",
 		"lint": "biome check . && bun run lint:arch",
 		"lint:fix": "biome check --write .",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "bun test"
 	},
 	"dependencies": {
 		"@emotion/react": "11.14.0",

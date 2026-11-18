@@ -1,17 +1,20 @@
-// src/modules/comuniciones/model/useEmail.ts
-
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '#entities/session';
-import { dispararAvisoManual, getEmailTemplates } from '../api/email.api';
-
+import { type AvisoPayload, dispararAvisoManual, getEmailTemplates } from '../api/email.api';
 export function useAvisoManual() {
-	return useMutation({ mutationFn: dispararAvisoManual, retry: false });
+	const { perfil } = useAuth();
+	return useMutation({
+		mutationFn: ({ payload, signal }: { payload: AvisoPayload; signal?: AbortSignal }) =>
+			dispararAvisoManual(payload, perfil?.id ?? '', signal),
+		retry: false,
+	});
 }
 export function useEmailTemplates() {
-	const { cacheScope, profileStatus } = useAuth();
+	const { perfil, cacheScope, profileStatus, isSigningOut } = useAuth();
 	return useQuery({
 		queryKey: ['email-templates', cacheScope],
-		queryFn: ({ signal }) => getEmailTemplates(signal),
-		enabled: profileStatus === 'ready',
+		queryFn: ({ signal }) => getEmailTemplates(perfil?.id ?? '', signal),
+		enabled: profileStatus === 'ready' && !isSigningOut,
+		retry: 1,
 	});
 }

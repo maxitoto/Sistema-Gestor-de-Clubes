@@ -253,5 +253,107 @@ ON public.club TO authenticated;
 
 GRANT EXECUTE ON FUNCTION public.fecha_actual_club() TO authenticated;
 
+-- permisos de tabla, funciones y columnas de referencias de archivos privados.
+REVOKE ALL ON private.archivos_cargas FROM PUBLIC, anon, authenticated;
+GRANT ALL ON private.archivos_cargas TO service_role;
+
+REVOKE ALL ON FUNCTION private.archivo_prefijo(text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION private.validar_archivo_asociado() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_autorizar_carga(text, uuid) FROM PUBLIC, anon, service_role;
+REVOKE ALL ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.archivo_finalizar_descarte(uuid, text) FROM PUBLIC, anon, authenticated;
+
+GRANT EXECUTE ON FUNCTION public.archivo_autorizar_carga(text, uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.archivo_registrar_validado(text, uuid, uuid, text, text, bigint) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_reservar_descarte(text, uuid, uuid, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.archivo_finalizar_descarte(uuid, text) TO service_role;
+
+GRANT UPDATE (foto_storage_path) ON public.socios TO authenticated;
+GRANT SELECT (logo_storage_path), UPDATE (logo_storage_path) ON public.club TO authenticated;
+GRANT UPDATE (evidencia_storage_path) ON public.gastos TO authenticated;
+
+-- RLS y permisos de operaciones administrativas de usuarios y límites de acceso.
+ALTER TABLE private.usuarios_operaciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.usuarios_operaciones FROM PUBLIC, anon, authenticated, service_role;
+
+ALTER TABLE private.acceso_intentos ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.acceso_intentos FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION private.usuarios_registrar_credencial_inicial() FROM PUBLIC, anon, authenticated, service_role;
+REVOKE ALL ON FUNCTION private.usuarios_exigir_admin(uuid, uuid) FROM PUBLIC, anon, authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.usuarios_operacion_reservar(uuid, uuid, text, uuid, jsonb),
+  public.usuarios_operacion_leer(uuid, uuid, uuid),
+  public.usuarios_operacion_guardar(uuid, uuid, uuid, text, boolean, boolean),
+  public.usuarios_revocar_sesiones(uuid, uuid),
+  public.usuarios_enlace_pendiente(uuid, uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.acceso_limitar(text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.acceso_limitar(text, text, text) TO service_role;
+
+-- RLS, permisos de tablas/funciones y privilegios de columna (Cobranza, Caja y Gastos).
+ALTER TABLE private.gasto_altas ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.gasto_altas FROM PUBLIC,anon,authenticated,service_role;
+
+REVOKE ALL ON FUNCTION public.consultar_cobranza(text,jsonb) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.consultar_cobranza(text,jsonb) TO authenticated,service_role;
+
+REVOKE ALL ON FUNCTION public.consultar_caja(jsonb) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_caja(jsonb) TO authenticated;
+
+REVOKE ALL ON FUNCTION public.registrar_gasto_idempotente(uuid,jsonb),public.consultar_alta_gasto(uuid)
+ FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.registrar_gasto_idempotente(uuid,jsonb),public.consultar_alta_gasto(uuid)TO authenticated;
+
+REVOKE ALL ON FUNCTION private.gastos_bloquear_categoria_activa() FROM PUBLIC,anon,authenticated,service_role;
+
+REVOKE INSERT,UPDATE,DELETE ON public.categorias_gasto FROM PUBLIC,anon,authenticated;
+GRANT INSERT(nombre,descripcion) ON public.categorias_gasto TO authenticated;
+GRANT UPDATE(nombre,descripcion,estado) ON public.categorias_gasto TO authenticated;
+
+-- RLS y permisos de coordinación fiscal durable, caché WSAA y publicación PDF.
+ALTER TABLE private.fiscal_configuracion ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private.fiscal_receptores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private.fiscal_series ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private.fiscal_ejecuciones ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private.wsaa_tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE private.fiscal_auditoria ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.fiscal_configuracion,private.fiscal_receptores,private.fiscal_series,private.fiscal_ejecuciones,private.wsaa_tickets,private.fiscal_auditoria FROM PUBLIC,anon,authenticated;
+GRANT ALL ON private.fiscal_configuracion,private.fiscal_receptores,private.fiscal_series,private.fiscal_ejecuciones,private.wsaa_tickets,private.fiscal_auditoria TO service_role;
+REVOKE ALL ON FUNCTION private.fiscal_objeto_cerrado(jsonb,text[],text[]),private.fiscal_fecha_valida(text,boolean),private.fiscal_perfil_valido(jsonb),private.fiscal_ejecucion_json(uuid),private.fiscal_bloquear_ejecucion(uuid,bigint,boolean),private.fiscal_solicitud_valida(jsonb),private.fiscal_codigos_validos(jsonb),private.fiscal_preservar_snapshot(),private.trg_socios_auto_receptor_fiscal(),private.fiscal_proximo(timestamptz,timestamptz),private.fiscal_elegible(public.comprobantes,public.pagos),private.fiscal_actor_admin(uuid),private.fiscal_crear_nc(public.comprobantes) FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_contexto_fiscal(uuid),public.iniciar_ejecucion_fiscal(uuid,text,uuid),public.preparar_solicitud_fiscal(uuid,bigint,text,jsonb),public.marcar_envio_fiscal(uuid,bigint),public.confirmar_resultado_fiscal(uuid,bigint,jsonb),public.registrar_incidencia_fiscal(uuid,bigint,text),public.adquirir_ticket_wsaa(text,uuid),public.guardar_ticket_wsaa(text,uuid,integer,text,timestamptz),public.registrar_pdf_comprobante(uuid,text,text,jsonb),public.expirar_comprobante_fiscal(uuid),public.listar_candidatos_fiscales(integer),public.resolver_anulacion_fiscal(uuid,bigint,jsonb,uuid),public.reabrir_verificado_fiscal(uuid,uuid,bigint,uuid),public.reabrir_regularizacion_fiscal(uuid),public.registrar_autorizacion_verificada_fiscal(uuid,uuid,bigint,jsonb,uuid),public.iniciar_ejecucion_fiscal_administrativa(uuid,text,uuid,uuid),public.reabrir_sin_envio_fiscal(uuid,uuid,bigint,uuid),public.resolver_rechazo_anulado_fiscal(uuid,uuid,bigint,uuid),public.resolver_anulacion_sin_envio_fiscal(uuid,uuid,bigint,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.consultar_ejecucion_fiscal(uuid),public.leer_contexto_fiscal(uuid),public.iniciar_ejecucion_fiscal(uuid,text,uuid),public.preparar_solicitud_fiscal(uuid,bigint,text,jsonb),public.marcar_envio_fiscal(uuid,bigint),public.confirmar_resultado_fiscal(uuid,bigint,jsonb),public.registrar_incidencia_fiscal(uuid,bigint,text),public.adquirir_ticket_wsaa(text,uuid),public.guardar_ticket_wsaa(text,uuid,integer,text,timestamptz),public.registrar_pdf_comprobante(uuid,text,text,jsonb),public.expirar_comprobante_fiscal(uuid),public.listar_candidatos_fiscales(integer),public.resolver_anulacion_fiscal(uuid,bigint,jsonb,uuid),public.reabrir_verificado_fiscal(uuid,uuid,bigint,uuid),public.reabrir_regularizacion_fiscal(uuid),public.registrar_autorizacion_verificada_fiscal(uuid,uuid,bigint,jsonb,uuid),public.iniciar_ejecucion_fiscal_administrativa(uuid,text,uuid,uuid),public.reabrir_sin_envio_fiscal(uuid,uuid,bigint,uuid),public.resolver_rechazo_anulado_fiscal(uuid,uuid,bigint,uuid),public.resolver_anulacion_sin_envio_fiscal(uuid,uuid,bigint,uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) FROM PUBLIC,anon;
+GRANT EXECUTE ON FUNCTION public.consultar_monitoreo_fiscal(integer,integer,text,text,text,date,date) TO authenticated,service_role;
+
+-- RLS, permisos de tablas/funciones y privilegios de columna.
+REVOKE INSERT,UPDATE,DELETE ON public.plantillas_correo FROM PUBLIC,anon,authenticated;
+GRANT INSERT(nombre_interno,asunto,cuerpo,estado),UPDATE(nombre_interno,asunto,cuerpo,estado) ON public.plantillas_correo TO authenticated;
+ALTER TABLE private.correo_intenciones ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON private.correo_intenciones FROM PUBLIC,anon,authenticated;
+GRANT SELECT,INSERT,UPDATE ON private.correo_intenciones TO service_role;
+REVOKE ALL ON FUNCTION private.correo_nombres_snapshot(),private.correo_fuente_documento(uuid),private.correo_capturar_comprobante(),private.correo_capturar_job(),private.correo_intencion_inmutable(),private.correo_actor_actual(),private.correo_proyectar_actor_fiscal(),private.correo_alerta_fiscal(),private.correo_snapshot_inmutable() FROM PUBLIC,anon,authenticated;
+REVOKE ALL ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.reclamar_intenciones_correo(integer),public.confirmar_documento_intencion(uuid,uuid,text),public.registrar_fallo_intencion(uuid,uuid,text),public.encolar_intencion_correo(uuid,uuid),public.desuscribir_correo_confirmado(uuid),public.leer_documento_correo(uuid,uuid),public.marcar_despacho_correo(uuid,uuid),public.posponer_correo_documental(uuid,uuid),public.confirmar_resultado_fiscal_con_actor(uuid,bigint,jsonb,uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_notificacion_operacion(uuid,uuid),public.consultar_eventos_correo_log(uuid),public.consultar_candidatos_correo(integer,integer,text,text,uuid,uuid,text,boolean,boolean) TO authenticated;
+-- El navegador sólo puede leer el contrato humano del historial, nunca la cola técnica.
+REVOKE SELECT ON public.email_logs,public.email_destinatarios FROM PUBLIC,anon,authenticated;
+GRANT SELECT(id,origen,tipo,asunto,cuerpo,destinatarios_count,estado,fecha_envio,autor_nombre_snapshot) ON public.email_logs TO authenticated;
+GRANT SELECT(id,email_log_id,email,nombre_snapshot,apellido_snapshot,estado_envio,entrega_estado,motivo,asunto_snapshot,cuerpo_snapshot,aceptado_en,created_at) ON public.email_destinatarios TO authenticated;
+
+-- Permisos de reportes de grillas y dashboard conciliable.
+REVOKE ALL ON FUNCTION private.filas_grilla_reporte(text,jsonb) FROM PUBLIC,anon,authenticated,service_role;
+REVOKE ALL ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_grilla_reporte(text,jsonb,text,boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.consultar_dashboard(integer,integer) FROM PUBLIC,anon,service_role;
+GRANT EXECUTE ON FUNCTION public.consultar_dashboard(integer,integer) TO authenticated;
+
 -- 11. Recarga de la cache de PostgREST.
 NOTIFY pgrst, 'reload schema';

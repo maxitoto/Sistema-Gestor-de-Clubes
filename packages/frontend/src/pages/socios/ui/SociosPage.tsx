@@ -1,5 +1,5 @@
-// src/modules/socios/pages/SociosPage.tsx
+import { SociosPanel } from '#widgets/socios-panel';
 
 export function SociosPage() {
-	return <h1>Gestión de Socios</h1>;
+	return <SociosPanel />;
 }
