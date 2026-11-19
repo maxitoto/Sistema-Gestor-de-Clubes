@@ -11,7 +11,9 @@ import {
 } from "../functions/_shared/modules/fiscal/application/PuertoDocumentos.ts";
 import {
   datosQr,
+  etiquetaCondicionIva,
   GeneradorPdf,
+  tituloTipoFiscal,
 } from "../functions/_shared/modules/fiscal/infrastructure/documentos/GeneradorPdf.ts";
 import {
   fuenteDocumento,
@@ -260,4 +262,21 @@ Deno.test("Storage confirma y pierde respuesta: recuperación compara bytes sin 
     uploads === 2 && downloads === 2 && objects.size === 1 &&
       a.every((byte, index) => byte === objects.get(path)![index]),
   );
+});
+
+Deno.test("encabezado fiscal y condición frente al IVA del receptor se derivan del snapshot", async () => {
+  assert(
+    tituloTipoFiscal("factura", 11) === "FACTURA C (Cód. 11)" &&
+      tituloTipoFiscal("nota_credito", 13) === "NOTA DE CRÉDITO C (Cód. 13)" &&
+      tituloTipoFiscal("factura", 51) === "FACTURA - TIPO FISCAL 51",
+  );
+  assert(
+    etiquetaCondicionIva(5) === "Consumidor Final" &&
+      etiquetaCondicionIva(1) === "IVA Responsable Inscripto" &&
+      etiquetaCondicionIva(99) === "Código ARCA 99",
+  );
+  const authorized = await renderer.generar(
+    modeloDocumento(fuenteDocumento(true)),
+  );
+  assert((await PDFDocument.load(authorized)).getPageCount() === 1);
 });
