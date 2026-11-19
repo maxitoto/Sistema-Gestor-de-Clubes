@@ -4,6 +4,7 @@ import {
 	fechaBuenosAires,
 	fechaCalendarioValida,
 	formularioSocioInicial,
+	normalizarDocumentoSocio,
 	validarSocioForm,
 } from '../src/features/create-socio/model/socioForm';
 
@@ -147,6 +148,21 @@ describe('Alta de socio: contrato de calendario y datos', () => {
 					'contacto_emergencia_telefono',
 				].sort(),
 			);
+		}
+	});
+	test('normaliza puntos y espacios en DNI numérico sin alterar documentos especiales', () => {
+		expect(normalizarDocumentoSocio(' 30.123.456 ')).toBe('30123456');
+		expect(normalizarDocumentoSocio(' 7.654.321 ')).toBe('7654321');
+		expect(normalizarDocumentoSocio('30 123 456')).toBe('30123456');
+		expect(normalizarDocumentoSocio('07.123.456')).toBe('7123456');
+		expect(normalizarDocumentoSocio('00001')).toBe('00001');
+		expect(normalizarDocumentoSocio(' 000123ABC ')).toBe('000123ABC');
+		expect(normalizarDocumentoSocio('DOC / 00-X')).toBe('DOC / 00-X');
+
+		const result = validarSocioForm({ ...adult(), dni: ' 30.123.456 ' }, now);
+		expect(result.valid).toBe(true);
+		if (result.valid) {
+			expect(result.payload.dni).toBe('30123456');
 		}
 	});
 });

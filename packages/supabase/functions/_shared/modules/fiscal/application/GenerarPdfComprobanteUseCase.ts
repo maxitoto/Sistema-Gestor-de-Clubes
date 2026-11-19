@@ -244,7 +244,7 @@ export async function rutaDocumento(modelo: ModeloDocumento): Promise<string> {
   const hash = new Uint8Array(
     await crypto.subtle.digest(
       "SHA-256",
-      new TextEncoder().encode(canonico({ plantilla: 4, contenido: modelo })),
+      new TextEncoder().encode(canonico({ plantilla: 5, contenido: modelo })),
     ),
   );
   const digest = [...hash].map((byte) => byte.toString(16).padStart(2, "0"))

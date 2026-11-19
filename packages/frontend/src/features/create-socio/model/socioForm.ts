@@ -4,5 +4,6 @@ export {
 	fechaBuenosAires,
 	fechaCalendarioValida,
 	formularioSocioInicial,
+	normalizarDocumentoSocio,
 	validarSocioForm,
 } from '#entities/socio';

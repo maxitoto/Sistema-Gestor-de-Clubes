@@ -23,6 +23,7 @@ export {
 	fechaCalendarioValida,
 	formularioDesdeSocio,
 	formularioSocioInicial,
+	normalizarDocumentoSocio,
 	payloadEdicionSocio,
 	validarSocioForm,
 } from './model/socioForm';

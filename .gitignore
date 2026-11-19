@@ -24,3 +24,12 @@ yarn-error.log*
 # IA
 *.txt
 .atl
+
+# Credenciales fiscales y cachés locales
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+*.csr
+.cache/

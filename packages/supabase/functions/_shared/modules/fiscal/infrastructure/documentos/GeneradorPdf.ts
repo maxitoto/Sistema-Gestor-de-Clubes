@@ -15,6 +15,34 @@ const blue = rgb(0.12, 0.29, 0.7),
   ink = rgb(0.12, 0.17, 0.25),
   muted = rgb(0.36, 0.41, 0.49),
   border = rgb(0.85, 0.88, 0.92);
+const TITULOS_COMPROBANTE: Record<number, string> = {
+  1: "FACTURA A (Cód. 1)",
+  3: "NOTA DE CRÉDITO A (Cód. 3)",
+  6: "FACTURA B (Cód. 6)",
+  8: "NOTA DE CRÉDITO B (Cód. 8)",
+  11: "FACTURA C (Cód. 11)",
+  13: "NOTA DE CRÉDITO C (Cód. 13)",
+};
+const CONDICIONES_IVA: Record<number, string> = {
+  1: "IVA Responsable Inscripto",
+  4: "IVA Sujeto Exento",
+  5: "Consumidor Final",
+  6: "Responsable Monotributo",
+};
+/** Devuelve el encabezado visible del tipo de comprobante fiscal autorizado. */
+export function tituloTipoFiscal(
+  tipoDocumento: ModeloDocumento["tipoDocumento"],
+  tipoComprobante: number,
+): string {
+  return TITULOS_COMPROBANTE[tipoComprobante] ??
+    `${
+      tipoDocumento === "nota_credito" ? "NOTA DE CRÉDITO" : "FACTURA"
+    } - TIPO FISCAL ${tipoComprobante}`;
+}
+/** Traduce el código oficial de condición frente al IVA del receptor. */
+export function etiquetaCondicionIva(condicionIvaId: number): string {
+  return CONDICIONES_IVA[condicionIvaId] ?? `Código ARCA ${condicionIvaId}`;
+}
 const moneda = (value: string) =>
   new Intl.NumberFormat("es-AR", {
     minimumFractionDigits: 2,
@@ -181,11 +209,10 @@ export class GeneradorPdf implements PuertoGeneradorPdf {
     } else {
       const fiscal = modelo.fiscal!;
       line(
-        `${
-          modelo.tipoDocumento === "nota_credito"
-            ? "NOTA DE CRÉDITO"
-            : "FACTURA"
-        } - TIPO FISCAL ${fiscal.solicitud.identidad.tipoComprobante}`,
+        tituloTipoFiscal(
+          modelo.tipoDocumento,
+          fiscal.solicitud.identidad.tipoComprobante,
+        ),
         18,
         true,
         blue,
@@ -247,6 +274,16 @@ export class GeneradorPdf implements PuertoGeneradorPdf {
     line("RECEPTOR", 10, true, blue);
     parrafo(modelo.receptor.nombre, 14, true);
     parrafo(`Documento: ${modelo.receptor.documento}`, 10);
+    if (modelo.fiscal) {
+      line(
+        `Condición frente al IVA: ${
+          etiquetaCondicionIva(
+            modelo.fiscal.solicitud.detalle.CondicionIVAReceptorId,
+          )
+        }`,
+        10,
+      );
+    }
     if (modelo.receptor.domicilio) parrafo(modelo.receptor.domicilio, 10);
     separator();
     line(

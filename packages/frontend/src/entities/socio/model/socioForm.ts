@@ -68,12 +68,27 @@ export function edadSocio(fechaNacimiento: string, hoy = fechaBuenosAires()): nu
 	);
 }
 
+/**
+ * Limpia puntos o espacios en DNIs numéricos formateados (ej. "30.123.456" -> "30123456")
+ * sin alterar documentos extranjeros o códigos alfanuméricos.
+ */
+export function normalizarDocumentoSocio(raw: string): string {
+	const trimmed = raw.trim();
+	if (/^\d+(?:[.\s]\d+)+$/.test(trimmed)) {
+		const soloDigitos = trimmed.replace(/[.\s]/g, '').replace(/^0+/, '');
+		if (soloDigitos.length >= 1 && soloDigitos.length <= 8) {
+			return soloDigitos;
+		}
+	}
+	return trimmed;
+}
+
 export function validarSocioForm(
 	form: SocioForm,
 	now = new Date(),
 ): { valid: true; payload: CrearSocioPayload } | { valid: false; errors: SocioFormErrors } {
 	const errors: SocioFormErrors = {};
-	const dni = form.dni.trim();
+	const dni = normalizarDocumentoSocio(form.dni);
 	const nombre = form.nombre.trim();
 	const apellido = form.apellido.trim();
 	const nacimiento = form.fecha_nacimiento.trim();

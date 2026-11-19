@@ -3964,12 +3964,33 @@ CREATE TRIGGER comprobante_snapshot_fiscal_inmutable BEFORE UPDATE ON public.com
 -- ---------------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION private.trg_socios_auto_receptor_fiscal()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
+DECLARE
+  v_digitos text;
+  v_limpio text;
+  v_doc_tipo integer;
+  v_doc_numero text;
 BEGIN
+  IF NEW.dni ~ '^[0-9.\s-]+$' THEN
+    v_digitos := pg_catalog.regexp_replace(NEW.dni, '\D', '', 'g');
+    v_limpio := pg_catalog.ltrim(v_digitos, '0');
+    IF pg_catalog.length(v_limpio) BETWEEN 1 AND 8 THEN
+      v_doc_tipo := 96;
+      v_doc_numero := v_limpio;
+    ELSE
+      v_doc_tipo := 99;
+      v_doc_numero := '0';
+    END IF;
+  ELSE
+    v_doc_tipo := 99;
+    v_doc_numero := '0';
+  END IF;
+
   INSERT INTO private.fiscal_receptores (socio_id, doc_tipo, doc_numero, condicion_iva_id, confirmado, updated_at)
-  VALUES (NEW.id, 96, NEW.dni, 5, true, clock_timestamp())
+  VALUES (NEW.id, v_doc_tipo, v_doc_numero, 5, true, pg_catalog.clock_timestamp())
   ON CONFLICT (socio_id) DO UPDATE SET
+    doc_tipo = EXCLUDED.doc_tipo,
     doc_numero = EXCLUDED.doc_numero,
-    updated_at = clock_timestamp();
+    updated_at = pg_catalog.clock_timestamp();
   RETURN NEW;
 END;
 $$;
