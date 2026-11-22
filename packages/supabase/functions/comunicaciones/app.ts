@@ -110,6 +110,7 @@ export interface DependenciasComunicaciones {
   humano(req: Request): SupabaseClient;
   tecnico(): SupabaseClient;
   env(name: string): string;
+  urlBaja?: () => string;
   proveedor(): "resend" | "mailpit";
   enviar(message: MensajeIndividual): Promise<string>;
   preparar(db: SupabaseClient, limiteTemporal: number): Promise<unknown>;
@@ -128,15 +129,32 @@ function parametros(url: URL, allowed: string[]) {
     }
   }
 }
+type EstadoBaja =
+  | "confirmar"
+  | "confirmada"
+  | "ya_confirmada"
+  | "direccion_antigua"
+  | "no_disponible"
+  | "invalido"
+  | "error";
+
+function responderBaja(req: Request, estado: EstadoBaja, status = 200) {
+  if (req.headers.get("accept")?.toLowerCase().includes("application/json")) {
+    return new Response(JSON.stringify({ estado }), {
+      status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+      },
+    });
+  }
+  return paginaBaja(estado, status);
+}
+
 export function paginaBaja(
-  estado:
-    | "confirmar"
-    | "confirmada"
-    | "ya_confirmada"
-    | "direccion_antigua"
-    | "no_disponible"
-    | "invalido"
-    | "error",
+  estado: EstadoBaja,
   status = 200,
 ) {
   const content = {
@@ -265,20 +283,21 @@ export function crearManejadorComunicaciones(deps: DependenciasComunicaciones) {
     if (
       !uuidValido(id) ||
       !await verificarBaja(id, signature, deps.env("MAIL_UNSUBSCRIBE_SECRET"))
-    ) return paginaBaja("invalido", 400);
+    ) return responderBaja(req, "invalido", 400);
     // Sólo POST ejecuta una mutación; GET es seguro ante inspección automática del enlace.
-    if (req.method === "GET") return paginaBaja("confirmar");
+    if (req.method === "GET") return responderBaja(req, "confirmar");
     const { data, error } = await deps.tecnico().rpc(
       "desuscribir_correo_confirmado",
       { p_destinatario: id },
     );
-    if (error) return paginaBaja("error", 503);
+    if (error) return responderBaja(req, "error", 503);
     if (
       !data ||
       !["confirmada", "ya_confirmada", "direccion_antigua", "no_disponible"]
         .includes(data.resultado)
-    ) return paginaBaja("error", 503);
-    return paginaBaja(
+    ) return responderBaja(req, "error", 503);
+    return responderBaja(
+      req,
       data.resultado,
       data.resultado === "no_disponible" ? 404 : 200,
     );
@@ -318,9 +337,10 @@ export function crearManejadorComunicaciones(deps: DependenciasComunicaciones) {
       if (error) throw new AppError("No se pudo reservar la cola.", 503);
       const row = data?.[0];
       if (!row) break;
-      const link = new URL(
-        deps.env("MAIL_PUBLIC_BASE_URL").replace(/\/$/, "") + "/desuscribir",
-      );
+      const baseBaja = deps.urlBaja
+        ? deps.urlBaja()
+        : deps.env("MAIL_PUBLIC_BASE_URL").replace(/\/$/, "") + "/desuscribir";
+      const link = new URL(baseBaja);
       link.searchParams.set("id", row.id);
       link.searchParams.set(
         "firma",

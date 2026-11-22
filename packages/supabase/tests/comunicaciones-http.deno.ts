@@ -21,6 +21,7 @@ function setup(
     autorizar?: () => Promise<unknown>;
     adjunto?: DependenciasComunicaciones["adjunto"];
     enviar?: DependenciasComunicaciones["enviar"];
+    urlBaja?: DependenciasComunicaciones["urlBaja"];
   } = {},
 ) {
   const calls: {
@@ -74,6 +75,7 @@ function setup(
         : n === "MAIL_PUBLIC_BASE_URL"
         ? "http://127.0.0.1:54321/functions/v1/comunicaciones"
         : secret,
+    ...(options.urlBaja ? { urlBaja: options.urlBaja } : {}),
     proveedor: () => "mailpit",
     enviar: async (message) => {
       calls.send++;
@@ -436,6 +438,86 @@ Deno.test("enlace alterado devuelve página de error sin mutar", async () => {
   assert(
     r.status === 400 && (await r.text()).includes("Enlace inválido") &&
       !x.calls.tecnico,
+  );
+});
+Deno.test("desuscribir negocia JSON para frontend sin mutar en GET y confirma en POST", async () => {
+  const sig = await firmarBaja(id, secret);
+  const x = setup({
+    rpc: () => ({ data: { resultado: "confirmada" }, error: null }),
+  });
+  const getRes = await x.handle(
+    req("/desuscribir?id=" + id + "&firma=" + sig, undefined, {
+      Accept: "application/json",
+    }),
+  );
+  assert(
+    getRes.status === 200 &&
+      getRes.headers.get("content-type")?.includes("application/json") &&
+      getRes.headers.get("access-control-allow-origin") === "*" &&
+      (await getRes.json()).estado === "confirmar" && !x.calls.tecnico,
+  );
+  const badRes = await x.handle(
+    req("/desuscribir?id=" + id + "&firma=alterada", undefined, {
+      Accept: "application/json",
+    }),
+  );
+  assert(badRes.status === 400 && (await badRes.json()).estado === "invalido");
+  const postRes = await x.handle(
+    req("/desuscribir?id=" + id + "&firma=" + sig, "", {
+      Accept: "application/json",
+    }, "POST"),
+  );
+  assert(
+    postRes.status === 200 &&
+      (await postRes.json()).estado === "confirmada" &&
+      x.calls.rpc[0] === "desuscribir_correo_confirmado",
+  );
+});
+Deno.test("procesarCola usa urlBaja del frontend cuando está configurada", async () => {
+  let cuerpoTexto = "";
+  let cuerpoHtml = "";
+  let reservado = false;
+  const x = setup({
+    urlBaja: () => "https://club-los-andes.pages.dev/desuscribir",
+    rpc: (name) => {
+      if (name === "reservar_correos") {
+        if (reservado) return { data: [], error: null };
+        reservado = true;
+        return {
+          data: [{
+            id,
+            reserva_id: rv,
+            email: "socio@example.test",
+            asunto_snapshot: "Novedad",
+            cuerpo_snapshot: "Hola",
+            intencion_id: null,
+            documento_path: null,
+          }],
+          error: null,
+        };
+      }
+      if (name === "marcar_despacho_correo") {
+        return { data: { iniciado: true }, error: null };
+      }
+      return { data: null, error: null };
+    },
+    enviar: (msg) => {
+      cuerpoTexto = msg.text;
+      cuerpoHtml = msg.html;
+      return Promise.resolve("msg-ok");
+    },
+  });
+  const res = await x.handle(
+    req("/procesar-cola", "{}", { "x-mail-worker-secret": secret }, "POST"),
+  );
+  assert(
+    res.status === 200 &&
+      cuerpoTexto.includes(
+        "https://club-los-andes.pages.dev/desuscribir?id=" + id + "&firma=",
+      ) &&
+      cuerpoHtml.includes(
+        "https://club-los-andes.pages.dev/desuscribir?id=" + id + "&amp;firma=",
+      ),
   );
 });
 async function firmado(body: string, secondsOffset = 0) {
