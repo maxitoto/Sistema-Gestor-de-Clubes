@@ -13,6 +13,7 @@ export {
   EnvioFallido,
   mailProvider,
   sendEmail,
+  urlBaseBajaCorreo,
   validarConfiguracionCorreo,
 } from "./mailer.ts";
 export type { AdjuntoPdf, MensajeIndividual } from "./mailer.ts";

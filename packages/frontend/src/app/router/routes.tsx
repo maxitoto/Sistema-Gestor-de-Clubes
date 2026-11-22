@@ -4,6 +4,7 @@ import {
 	ComunicacionesPage,
 	DashboardPage,
 	DeportesPage,
+	DesuscribirPage,
 	GastosPage,
 	LoginPage,
 	MonitoreoFiscalPage,
@@ -28,6 +29,7 @@ export const routerConfig = createBrowserRouter([
 			{ path: '/login', element: <LoginPage /> },
 			{ path: '/recuperar-contrasena', element: <RecoverPasswordPage /> },
 			{ path: '/establecer-contrasena', element: <SetPasswordPage /> },
+			{ path: '/desuscribir', element: <DesuscribirPage /> },
 		],
 	},
 	{

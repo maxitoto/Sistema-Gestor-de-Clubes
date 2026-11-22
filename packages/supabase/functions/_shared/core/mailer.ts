@@ -62,6 +62,40 @@ export function mailProvider(): "resend" | "mailpit" {
   return value;
 }
 
+export function validarUrlBajaOpcional(raw: string | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("La URL pública de baja es inválida.");
+  }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(
+    parsed.hostname,
+  );
+  if (
+    (parsed.protocol !== "https:" &&
+      !(parsed.protocol === "http:" && loopback)) ||
+    parsed.username || parsed.password || parsed.search || parsed.hash ||
+    parsed.pathname !== "/desuscribir"
+  ) {
+    throw new Error(
+      "La URL pública de baja debe usar HTTPS (o loopback local) y terminar en /desuscribir.",
+    );
+  }
+  return parsed.toString();
+}
+
+export function urlBaseBajaCorreo(): string {
+  const custom = validarUrlBajaOpcional(
+    Deno.env.get("MAIL_UNSUBSCRIBE_BASE_URL"),
+  );
+  if (custom) return custom;
+  return requiredEnv("MAIL_PUBLIC_BASE_URL").replace(/\/$/, "") +
+    "/desuscribir";
+}
+
 export function validarConfiguracionCorreo() {
   const provider = mailProvider();
   requiredEnv("MAIL_FROM");
@@ -74,6 +108,7 @@ export function validarConfiguracionCorreo() {
   if (provider === "resend" && base.protocol !== "https:") {
     throw new Error("La URL pública de correo debe usar HTTPS.");
   }
+  validarUrlBajaOpcional(Deno.env.get("MAIL_UNSUBSCRIBE_BASE_URL"));
   if (requiredEnv("MAIL_UNSUBSCRIBE_SECRET").length < 32) {
     throw new Error("Secreto de baja demasiado corto.");
   }

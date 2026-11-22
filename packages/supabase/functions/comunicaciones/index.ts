@@ -4,6 +4,7 @@ import {
   requiredEnv,
   requireRol,
   sendEmail,
+  urlBaseBajaCorreo,
   validarConfiguracionCorreo,
 } from "@core/index.ts";
 import {
@@ -18,6 +19,7 @@ export const handleRequest = crearManejadorComunicaciones({
   humano: createEdgeClient,
   tecnico: createMailAdmin,
   env: requiredEnv,
+  urlBaja: urlBaseBajaCorreo,
   proveedor: validarConfiguracionCorreo,
   enviar: sendEmail,
   preparar: (db, limite) =>

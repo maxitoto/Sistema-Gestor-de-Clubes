@@ -6,6 +6,7 @@ export { PlantillasPage } from './comunicaciones/ui/PlantillasPage';
 export { RedactarComunicacionPage } from './comunicaciones/ui/RedactarComunicacionPage';
 export { DashboardPage } from './dashboard/ui/DashboardPage';
 export { DeportesPage } from './deportes/ui/DeportesPage';
+export { DesuscribirPage } from './desuscribir/ui/DesuscribirPage';
 export { GastosPage } from './gastos';
 export { LoginPage } from './login/ui/LoginPage';
 export { MonitoreoFiscalPage } from './monitoreo-fiscal';

@@ -3,6 +3,7 @@ import {
   EnvioFallido,
   falloPrevioMailpit,
   validarAdjuntosPdf,
+  validarUrlBajaOpcional,
 } from "../functions/_shared/core/mailer.ts";
 function assert(v: unknown) {
   if (!v) throw new Error("Falló un contrato de adjunto");
@@ -54,4 +55,34 @@ Deno.test("EDNS es previo al SMTP, timeout DATA mantiene incertidumbre", () => {
   assert(!falloPrevioMailpit({ code: "ETIMEDOUT", command: "DATA" }));
   assert(!falloPrevioMailpit({ code: "ESOCKET", command: "DATA" }));
   assert(!falloPrevioMailpit(new Error("Fallo sin fase conocida")));
+});
+
+Deno.test("validarUrlBajaOpcional admite HTTPS o loopback en /desuscribir y rechaza rutas inválidas", () => {
+  assert(validarUrlBajaOpcional(undefined) === null);
+  assert(validarUrlBajaOpcional("   ") === null);
+  assert(
+    validarUrlBajaOpcional("https://club.pages.dev/desuscribir") ===
+      "https://club.pages.dev/desuscribir",
+  );
+  assert(
+    validarUrlBajaOpcional("http://localhost:3000/desuscribir") ===
+      "http://localhost:3000/desuscribir",
+  );
+  for (
+    const invalida of [
+      "http://club.pages.dev/desuscribir",
+      "https://club.pages.dev/otra-ruta",
+      "https://club.pages.dev/desuscribir?x=1",
+      "https://user:pass@club.pages.dev/desuscribir",
+      "no-es-url",
+    ]
+  ) {
+    let fallo = false;
+    try {
+      validarUrlBajaOpcional(invalida);
+    } catch {
+      fallo = true;
+    }
+    assert(fallo);
+  }
 });
