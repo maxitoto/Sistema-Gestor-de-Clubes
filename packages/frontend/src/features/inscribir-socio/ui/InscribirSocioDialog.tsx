@@ -152,7 +152,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						</Alert>
 					)}
 					{operation.feedback && <Alert severity="warning">{operation.feedback}</Alert>}
-					{operation.pendingTicket && !result && (
+					{operation.pendingTicket && !result && !operation.isPending && (
 						<Alert
 							severity="warning"
 							action={
@@ -264,7 +264,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							No pudimos consultar el importe y los cargos. Actualizalos antes de confirmar.
 						</Alert>
 					)}
-					{preview && !result && !operation.pendingTicket && (
+					{preview && !result && (!operation.pendingTicket || operation.isPending) && (
 						<>
 							{!preview.detalle ? (
 								<Alert

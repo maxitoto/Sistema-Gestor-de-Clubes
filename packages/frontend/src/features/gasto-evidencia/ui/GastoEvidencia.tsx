@@ -285,7 +285,7 @@ export function GastoEvidencia({
 									</Button>
 								</>
 							)}
-							{(needsCheck || path) && (
+							{!busy && (needsCheck || path) && (
 								<Button disabled={!enabled || busy} onClick={() => void execute('check')}>
 									Consultar resultado
 								</Button>
