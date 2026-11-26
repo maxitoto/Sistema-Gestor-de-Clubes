@@ -1,13 +1,16 @@
-import { Alert, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material';
+import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined';
+import { Alert, Button, Chip, CircularProgress, Paper, Stack, Typography } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { getEstadoFiscal, guardarCredencialesFiscales } from '#entities/club';
 import { useAuth } from '#entities/session';
+import { formatIsoDateArg } from '#shared/lib/datePresets';
 
 export function UpdateFiscalCredentials() {
 	const { cacheScope } = useAuth();
 	return <FiscalEditor key={cacheScope} />;
 }
+
 function FiscalEditor() {
 	const { cacheScope, profileStatus, isSigningOut, perfil } = useAuth();
 	const enabled = profileStatus === 'ready' && !isSigningOut && perfil?.rol === 'admin';
@@ -29,6 +32,7 @@ function FiscalEditor() {
 		controllerRef = useRef<AbortController | null>(null),
 		lockRef = useRef(false);
 	accessRef.current = enabled;
+
 	useEffect(() => {
 		activeRef.current = true;
 		return () => {
@@ -36,10 +40,26 @@ function FiscalEditor() {
 			controllerRef.current?.abort();
 		};
 	}, []);
+
 	const current = () => activeRef.current && accessRef.current;
+
 	const save = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!enabled || lockRef.current || requiresCheck || !certificado || !clave) {
+			return;
+		}
+		if (certificado.size > 65_536 || clave.size > 32_768 || !certificado.size || !clave.size) {
+			setFeedback({
+				message: 'El certificado admite hasta 64 KB y la clave privada hasta 32 KB.',
+				success: false,
+			});
+			return;
+		}
+		if (!/\.crt$/i.test(certificado.name) || !/\.key$/i.test(clave.name)) {
+			setFeedback({
+				message: 'Los archivos deben tener extensión .crt (certificado) y .key (clave privada).',
+				success: false,
+			});
 			return;
 		}
 		lockRef.current = true;
@@ -48,18 +68,12 @@ function FiscalEditor() {
 		const request = new AbortController();
 		controllerRef.current = request;
 		try {
-			if (certificado.size > 65_536 || clave.size > 32_768 || !certificado.size || !clave.size) {
-				throw new Error('Certificado: hasta 64 KB; clave: hasta 32 KB.');
-			}
-			if (!/\.crt$/i.test(certificado.name) || !/\.key$/i.test(clave.name)) {
-				throw new Error('Los archivos del certificado deben ser .crt y .key');
-			}
 			const result = await guardarCredencialesFiscales({ certificado, clave }, request.signal);
 			if (current()) {
 				queryClient.setQueryData(key, result);
 				setCertificado(null);
 				setClave(null);
-				setFeedback({ message: 'Credenciales de homologación guardadas.', success: true });
+				setFeedback({ message: 'Certificados ARCA de homologación guardados.', success: true });
 			}
 		} catch (error) {
 			if (current()) {
@@ -68,7 +82,7 @@ function FiscalEditor() {
 					message:
 						error instanceof Error
 							? `${error.message} Consultá el estado guardado antes de volver a enviar.`
-							: 'No se pudo confirmar el guardado. Consultá el estado antes de volver a enviar.',
+							: 'No pudimos confirmar el guardado. Consultá el estado antes de volver a enviar.',
 					success: false,
 				});
 			}
@@ -79,6 +93,7 @@ function FiscalEditor() {
 			}
 		}
 	};
+
 	const check = async () => {
 		if (!enabled || lockRef.current) {
 			return;
@@ -94,7 +109,7 @@ function FiscalEditor() {
 				setRequiresCheck(false);
 				setFeedback({
 					message:
-						'Estado actualizado. Si necesitás reemplazar la pareja, revisá los archivos y volvé a guardar.',
+						'Estado actualizado. Si necesitás reemplazar los certificados, elegí ambos archivos y volvé a guardar.',
 					success: false,
 				});
 			}
@@ -102,7 +117,7 @@ function FiscalEditor() {
 			if (current()) {
 				setFeedback({
 					message:
-						'No se pudo consultar el estado guardado. Volvé a intentar cuando se recupere la conexión.',
+						'No pudimos consultar el estado guardado. Volvé a intentar cuando se recupere la conexión.',
 					success: false,
 				});
 			}
@@ -113,100 +128,171 @@ function FiscalEditor() {
 			}
 		}
 	};
+
+	const statusChip = !query.data
+		? null
+		: !query.data.configurado
+			? { label: 'Sin configurar', color: 'default' as const }
+			: query.data.alerta === 'vencido'
+				? { label: 'Vencido', color: 'error' as const }
+				: query.data.alerta === 'por_vencer'
+					? { label: 'Por vencer', color: 'warning' as const }
+					: { label: 'Vigente', color: 'success' as const };
+
 	return (
 		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-			<Typography variant="h6" component="h2" sx={{ mb: 1 }}>
-				Credenciales fiscales · Homologación
-			</Typography>
-			<Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-				Cargá el certificado y su clave correspondiente. Los archivos guardados no se pueden
-				descargar desde esta pantalla.
-			</Typography>
-			{query.isPending && <CircularProgress size={22} aria-label="Consultando estado fiscal" />}
-			{query.isError && (
-				<Alert
-					severity="warning"
-					action={
-						<Button onClick={() => void check()} disabled={busy}>
-							Reintentar
-						</Button>
-					}
+			<Stack spacing={2}>
+				<Stack
+					direction="row"
+					spacing={1}
+					useFlexGap
+					sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
 				>
-					No pudimos consultar el estado de las credenciales.
-				</Alert>
-			)}
-			{query.data && (
-				<Alert
-					severity={
-						query.data.alerta === 'vencido'
-							? 'error'
-							: query.data.alerta === 'por_vencer'
-								? 'warning'
-								: 'info'
-					}
-					sx={{ mb: 2 }}
-				>
-					{query.data.configurado
-						? `Certificado cargado. Vencimiento: ${query.data.vencimiento}. ${query.data.alerta === 'vencido' ? 'Requiere renovación.' : query.data.alerta === 'por_vencer' ? 'Restan 30 días o menos para su vencimiento.' : ''}`
-						: 'Todavía no hay credenciales fiscales cargadas.'}
-				</Alert>
-			)}
-			<Stack component="form" onSubmit={(event) => void save(event)} spacing={2}>
-				<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-					<Button component="label" variant="outlined" disabled={!enabled || busy || requiresCheck}>
-						Elegir certificado CRT
-						<input
-							type="file"
-							accept=".crt"
-							hidden
-							onChange={(event) => {
-								setCertificado(event.target.files?.[0] ?? null);
-								event.target.value = '';
-							}}
-						/>
-					</Button>
-					<Button component="label" variant="outlined" disabled={!enabled || busy || requiresCheck}>
-						Elegir clave KEY
-						<input
-							type="file"
-							accept=".key"
-							hidden
-							onChange={(event) => {
-								setClave(event.target.files?.[0] ?? null);
-								event.target.value = '';
-							}}
-						/>
-					</Button>
+					<Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+						<Chip size="small" color="primary" label="Paso 1" />
+						<Typography variant="h6" component="h2">
+							Certificados ARCA (Homologación)
+						</Typography>
+					</Stack>
+					{statusChip && <Chip size="small" color={statusChip.color} label={statusChip.label} />}
 				</Stack>
-				{certificado && (
-					<Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-						Certificado: {certificado.name}
-					</Typography>
-				)}
-				{clave && (
-					<Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-						Clave: {clave.name}
-					</Typography>
-				)}
+
 				<Typography variant="body2" color="text.secondary">
-					El vencimiento se obtiene automáticamente del certificado al guardar.
+					Cargá el certificado digital (.crt) y su clave privada (.key). Por seguridad, los archivos
+					guardados no se pueden volver a descargar.
 				</Typography>
-				{feedback && (
-					<Alert severity={feedback.success ? 'success' : 'warning'}>{feedback.message}</Alert>
+
+				{query.isPending && (
+					<Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+						<CircularProgress size={18} aria-label="Consultando estado fiscal" />
+						<Typography variant="body2" color="text.secondary">
+							Consultando estado de credenciales…
+						</Typography>
+					</Stack>
 				)}
-				<Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-					{requiresCheck && (
-						<Button onClick={() => void check()} disabled={busy}>
-							Consultar estado guardado
-						</Button>
-					)}
-					<Button
-						type="submit"
-						variant="contained"
-						disabled={!enabled || busy || requiresCheck || !certificado || !clave}
+
+				{query.isError && (
+					<Alert
+						severity="warning"
+						action={
+							<Button size="small" color="inherit" onClick={() => void check()} disabled={busy}>
+								Reintentar
+							</Button>
+						}
 					>
-						{busy ? 'Procesando…' : 'Guardar pareja'}
-					</Button>
+						No pudimos consultar el estado de los certificados.
+					</Alert>
+				)}
+
+				{query.data && (
+					<Alert
+						severity={
+							!query.data.configurado
+								? 'info'
+								: query.data.alerta === 'vencido'
+									? 'error'
+									: query.data.alerta === 'por_vencer'
+										? 'warning'
+										: 'success'
+						}
+					>
+						{query.data.configurado
+							? `Certificado activo · Vencimiento: ${formatIsoDateArg(query.data.vencimiento)}. ${
+									query.data.alerta === 'vencido'
+										? 'Requiere renovación inmediata.'
+										: query.data.alerta === 'por_vencer'
+											? 'Restan 30 días o menos para su vencimiento.'
+											: ''
+								}`
+							: 'Todavía no hay certificados fiscales ARCA cargados.'}
+					</Alert>
+				)}
+
+				<Stack component="form" onSubmit={(event) => void save(event)} spacing={2}>
+					<Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+						<Button
+							component="label"
+							variant="outlined"
+							size="small"
+							startIcon={<UploadFileOutlinedIcon />}
+							disabled={!enabled || busy || requiresCheck}
+						>
+							Elegir certificado (.crt)
+							<input
+								type="file"
+								accept=".crt"
+								hidden
+								onChange={(event) => {
+									setCertificado(event.target.files?.[0] ?? null);
+									setFeedback(null);
+									event.target.value = '';
+								}}
+							/>
+						</Button>
+						<Button
+							component="label"
+							variant="outlined"
+							size="small"
+							startIcon={<UploadFileOutlinedIcon />}
+							disabled={!enabled || busy || requiresCheck}
+						>
+							Elegir clave privada (.key)
+							<input
+								type="file"
+								accept=".key"
+								hidden
+								onChange={(event) => {
+									setClave(event.target.files?.[0] ?? null);
+									setFeedback(null);
+									event.target.value = '';
+								}}
+							/>
+						</Button>
+					</Stack>
+
+					{(certificado || clave) && (
+						<Stack spacing={0.5} sx={{ p: 1.5, borderRadius: 1.5, bgcolor: 'action.hover' }}>
+							{certificado && (
+								<Typography variant="caption" sx={{ overflowWrap: 'anywhere' }}>
+									<strong>Certificado:</strong> {certificado.name}
+								</Typography>
+							)}
+							{clave && (
+								<Typography variant="caption" sx={{ overflowWrap: 'anywhere' }}>
+									<strong>Clave privada:</strong> {clave.name}
+								</Typography>
+							)}
+						</Stack>
+					)}
+
+					<Typography variant="caption" color="text.secondary">
+						La fecha de vencimiento se lee automáticamente del certificado al guardar.
+					</Typography>
+
+					{feedback && (
+						<Alert severity={feedback.success ? 'success' : 'warning'}>{feedback.message}</Alert>
+					)}
+
+					<Stack
+						direction="row"
+						spacing={1}
+						useFlexGap
+						sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}
+					>
+						{requiresCheck && (
+							<Button variant="outlined" onClick={() => void check()} disabled={busy}>
+								Consultar estado guardado
+							</Button>
+						)}
+						<Button
+							type="submit"
+							variant="contained"
+							startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+							disabled={!enabled || busy || requiresCheck || !certificado || !clave}
+						>
+							{busy ? 'Guardando…' : 'Guardar certificados ARCA'}
+						</Button>
+					</Stack>
 				</Stack>
 			</Stack>
 		</Paper>

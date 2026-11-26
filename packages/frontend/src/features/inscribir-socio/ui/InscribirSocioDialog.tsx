@@ -27,6 +27,7 @@ import { useCategoriasActivasPorDeporte } from '#entities/categoria';
 import { useDeportes } from '#entities/deporte';
 import { useAuth } from '#entities/session';
 import type { SocioListado } from '#entities/socio';
+import { InfoTooltip } from '#shared/ui';
 import { leerIntentoInscripcion } from '../model/intentoInscripcion';
 import { useInscribirSocio } from '../model/useInscribirSocio';
 
@@ -37,6 +38,7 @@ export interface InscribirSocioDialogProps {
 }
 
 const money = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
+const formatPeriodo = (mes: number, anio: number) => `${String(mes).padStart(2, '0')}/${anio}`;
 
 export function InscribirSocioDialog(props: InscribirSocioDialogProps) {
 	const { cacheScope } = useAuth();
@@ -89,20 +91,27 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 		Boolean(selectedCategoria && preview?.detalle) &&
 		!previewQuery.isFetching &&
 		approved;
+
 	const close = () => {
 		if (!operation.isPending) {
 			onClose();
 		}
 	};
+
 	return (
 		<Dialog open={open} fullWidth maxWidth="sm" aria-labelledby={titleId} onClose={close}>
-			<DialogTitle id={titleId} sx={{ px: { xs: 2, sm: 3 }, pt: 3, pb: 2 }}>
+			<DialogTitle id={titleId} sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 2 }}>
 				Inscribir a actividad
-				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-					Seleccioná un deporte y una categoría para el socio.
+				<Typography
+					component="span"
+					variant="body2"
+					color="text.secondary"
+					sx={{ display: 'block', mt: 0.5, fontWeight: 400 }}
+				>
+					Seleccioná deporte y categoría para calcular la cuota inicial proporcional.
 				</Typography>
 			</DialogTitle>
-			<DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 3 }}>
+			<DialogContent dividers sx={{ px: { xs: 2, sm: 3 }, py: 2.5 }}>
 				<Stack spacing={2.5}>
 					<Stack
 						direction="row"
@@ -113,7 +122,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							bgcolor: 'action.hover',
 							border: '1px solid',
 							borderColor: 'divider',
-							borderRadius: 2,
+							borderRadius: 1.5,
 						}}
 					>
 						<Avatar
@@ -126,17 +135,21 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							<Typography sx={{ overflowWrap: 'anywhere', fontWeight: 700 }}>
 								{socio.apellido}, {socio.nombre}
 							</Typography>
-							<Typography variant="body2" color="text.secondary">
-								Socio n.º {socio.numero_socio}
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ fontVariantNumeric: 'tabular-nums' }}
+							>
+								Socio #{socio.numero_socio}
 							</Typography>
 						</Box>
 						<Chip
 							label={socio.estado === 'activo' ? 'Activo' : 'Inactivo'}
 							size="small"
 							color={socio.estado === 'activo' ? 'success' : 'default'}
-							variant="outlined"
 						/>
 					</Stack>
+
 					{socio.estado !== 'activo' && (
 						<Alert severity="warning">
 							El socio debe estar activo para confirmar una inscripción.
@@ -157,6 +170,8 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							severity="warning"
 							action={
 								<Button
+									size="small"
+									color="inherit"
 									onClick={() => void operation.checkResult()}
 									disabled={operation.isPending || !operation.enabled}
 								>
@@ -164,21 +179,26 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 								</Button>
 							}
 						>
-							Hay un intento pendiente de verificar para este socio. Cerrar o recargar la pantalla
-							conserva el seguimiento. Consultá el resultado antes de volver a inscribir.
+							Hay un intento pendiente de verificar para este socio. Consultá el resultado antes de
+							volver a inscribir.
 						</Alert>
 					)}
+
 					{catalogLoading && (
-						<Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-							<CircularProgress size={20} />
-							<Typography>Cargando deportes y categorías…</Typography>
-						</Box>
+						<Stack direction="row" spacing={1.5} role="status" sx={{ alignItems: 'center' }}>
+							<CircularProgress size={18} />
+							<Typography variant="body2" color="text.secondary">
+								Cargando deportes y categorías…
+							</Typography>
+						</Stack>
 					)}
 					{catalogError && (
 						<Alert
 							severity="error"
 							action={
 								<Button
+									size="small"
+									color="inherit"
 									onClick={() => {
 										void deportes.refetch();
 										if (deporteId) {
@@ -186,15 +206,17 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 										}
 									}}
 								>
-									Reintentar catálogo
+									Reintentar
 								</Button>
 							}
 						>
 							No pudimos cargar los deportes o las categorías activas.
 						</Alert>
 					)}
+
 					<TextField
 						select
+						size="small"
 						label="Deporte"
 						value={deporteId}
 						disabled={!enabled || blocked || socio.estado !== 'activo'}
@@ -206,8 +228,10 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						fullWidth
 					>
 						<MenuItem value="">Seleccioná un deporte</MenuItem>
-						{deporteId && !selectedDeporte && blocked && (
-							<MenuItem value={deporteId}>Deporte del intento pendiente</MenuItem>
+						{deporteId && !selectedDeporte && (
+							<MenuItem value={deporteId}>
+								{deportes.isPending ? 'Cargando deporte…' : 'Deporte seleccionado'}
+							</MenuItem>
 						)}
 						{(deportes.data ?? []).map((item) => (
 							<MenuItem key={item.id} value={item.id}>
@@ -215,8 +239,10 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							</MenuItem>
 						))}
 					</TextField>
+
 					<TextField
 						select
+						size="small"
 						label="Categoría deportiva"
 						value={categoriaId}
 						disabled={!enabled || blocked || !deporteId || socio.estado !== 'activo'}
@@ -227,8 +253,10 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						fullWidth
 					>
 						<MenuItem value="">Seleccioná una categoría</MenuItem>
-						{categoriaId && !selectedCategoria && blocked && (
-							<MenuItem value={categoriaId}>Categoría del intento pendiente</MenuItem>
+						{categoriaId && !selectedCategoria && (
+							<MenuItem value={categoriaId}>
+								{categorias.isPending ? 'Cargando categoría…' : 'Categoría seleccionada'}
+							</MenuItem>
 						)}
 						{(categorias.data ?? []).map((item) => (
 							<MenuItem key={item.id} value={item.id}>
@@ -236,6 +264,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							</MenuItem>
 						))}
 					</TextField>
+
 					{!catalogLoading && !catalogError && deportes.data?.length === 0 && (
 						<Alert severity="info">No hay deportes activos disponibles.</Alert>
 					)}
@@ -246,30 +275,42 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						!operation.pendingTicket && (
 							<Alert severity="info">Este deporte no tiene categorías activas disponibles.</Alert>
 						)}
+
 					{previewQuery.isFetching && !result && (
-						<Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-							<CircularProgress size={20} />
-							<Typography>Consultando cuota inicial y cargos del mes…</Typography>
-						</Box>
+						<Stack direction="row" spacing={1.5} role="status" sx={{ alignItems: 'center' }}>
+							<CircularProgress size={18} />
+							<Typography variant="body2" color="text.secondary">
+								Calculando cuota inicial y cargos del mes…
+							</Typography>
+						</Stack>
 					)}
 					{previewQuery.isError && !result && (
 						<Alert
 							severity="error"
 							action={
-								<Button onClick={() => void previewQuery.refetch()}>
-									Actualizar previsualización
+								<Button size="small" color="inherit" onClick={() => void previewQuery.refetch()}>
+									Reintentar
 								</Button>
 							}
 						>
-							No pudimos consultar el importe y los cargos. Actualizalos antes de confirmar.
+							No pudimos calcular el importe inicial. Actualizalo antes de confirmar.
 						</Alert>
 					)}
+
 					{preview && !result && (!operation.pendingTicket || operation.isPending) && (
 						<>
 							{!preview.detalle ? (
 								<Alert
 									severity="warning"
-									action={<Button onClick={() => void previewQuery.refetch()}>Actualizar</Button>}
+									action={
+										<Button
+											size="small"
+											color="inherit"
+											onClick={() => void previewQuery.refetch()}
+										>
+											Actualizar
+										</Button>
+									}
 								>
 									No hay un importe disponible para confirmar. Verificá que socio, categoría y
 									deporte sigan activos.
@@ -283,7 +324,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 											p: 2,
 											border: '1px solid',
 											borderColor: 'divider',
-											borderRadius: 2,
+											borderRadius: 1.5,
 											bgcolor: 'action.hover',
 										}}
 									>
@@ -292,81 +333,98 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 											spacing={1}
 											sx={{ mb: 1, alignItems: 'center', justifyContent: 'space-between' }}
 										>
-											<Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-												Cuota inicial proporcional
-											</Typography>
+											<Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+												<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+													Cuota inicial proporcional
+												</Typography>
+												<InfoTooltip
+													label="Cómo se calcula el prorrateo"
+													title="Alta del día 1 al 10: 100% del arancel. Del día 11 al 20: 50%. Del día 21 al fin de mes: 25%."
+												/>
+											</Stack>
 											<Chip
 												size="small"
-												color="primary"
-												variant="outlined"
-												label={`${preview.detalle.tramo_pct}%`}
+												color="info"
+												label={`Tramo ${preview.detalle.tramo_pct}%`}
 											/>
 										</Stack>
-										<Typography variant="h5" color="primary.main" sx={{ fontWeight: 700 }}>
+										<Typography
+											variant="h5"
+											color="primary.main"
+											sx={{ fontWeight: 800, fontVariantNumeric: 'tabular-nums' }}
+										>
 											{money.format(preview.detalle.monto_proporcional)}
 										</Typography>
-										<Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-											Fecha de alta: {preview.fecha.split('-').reverse().join('/')} · Buenos Aires
-										</Typography>
-										{selectedCategoria && (
-											<Typography variant="body2" color="text.secondary">
-												Arancel mensual: {money.format(selectedCategoria.arancel_mensual)}
-											</Typography>
-										)}
-										<Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-											Se aplica el 100% del día 1 al 10, el 50% del 11 al 20 y el 25% del 21 al fin
-											de mes. Revisá el importe antes de confirmar.
+										<Typography
+											variant="caption"
+											color="text.secondary"
+											sx={{ display: 'block', mt: 0.75, fontVariantNumeric: 'tabular-nums' }}
+										>
+											Fecha de alta: {preview.fecha.split('-').reverse().join('/')} (Buenos Aires)
+											{selectedCategoria
+												? ` · Arancel mensual completo: ${money.format(selectedCategoria.arancel_mensual)}`
+												: ''}
 										</Typography>
 									</Box>
 									{preview.detalle.advertencia_edad && (
 										<Alert severity="warning">
-											La edad ({preview.detalle.edad_socio_anios} años) está fuera del rango de la
-											categoría ({preview.detalle.rango_min} a {preview.detalle.rango_max} años).
-											Esta advertencia permite confirmar igualmente.
+											La edad ({preview.detalle.edad_socio_anios} años) está fuera del rango
+											sugerido de la categoría ({preview.detalle.rango_min} a{' '}
+											{preview.detalle.rango_max} años). Podés confirmar la inscripción igualmente.
 										</Alert>
 									)}
 								</>
 							)}
-							<Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-								Cuotas del mes · {preview.periodo.mes}/{preview.periodo.anio}
-							</Typography>
-							{preview.cargos.length === 0 ? (
-								<Typography color="text.secondary">
-									No hay cuotas guardadas en este período.
+
+							<Stack spacing={1.25}>
+								<Typography
+									variant="subtitle2"
+									sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+								>
+									Cuotas del mes · {formatPeriodo(preview.periodo.mes, preview.periodo.anio)}
 								</Typography>
-							) : (
-								<>
-									<TableContainer
-										sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2 }}
-									>
-										<Table size="small" aria-label="Cargos del período de inscripción">
-											<TableHead sx={{ bgcolor: 'action.hover' }}>
-												<TableRow>
-													<TableCell>Categoría</TableCell>
-													<TableCell>Importe</TableCell>
-													<TableCell>Estado</TableCell>
-												</TableRow>
-											</TableHead>
-											<TableBody>
-												{preview.cargos.map((cargo) => (
-													<TableRow key={cargo.cuota_id}>
-														<TableCell>{cargo.categoria_nombre}</TableCell>
-														<TableCell>{money.format(cargo.monto)}</TableCell>
-														<TableCell>
-															{cargo.estado === 'pagada' ? 'Pagada' : 'Pendiente'}
-														</TableCell>
+								{preview.cargos.length === 0 ? (
+									<Typography variant="body2" color="text.secondary">
+										El socio todavía no tiene cuotas emitidas en este período.
+									</Typography>
+								) : (
+									<>
+										<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
+											<Table size="small" aria-label="Cargos del período de inscripción">
+												<TableHead>
+													<TableRow>
+														<TableCell>Categoría</TableCell>
+														<TableCell align="right">Importe</TableCell>
+														<TableCell>Estado</TableCell>
 													</TableRow>
-												))}
-											</TableBody>
-										</Table>
-									</TableContainer>
-									<Alert severity="warning">
-										Las cuotas de otras categorías se conservan y no se compensan. Esta inscripción
-										puede agregar un cargo al mes. Si ya existe la cuota de esta categoría, se
-										reutiliza.
-									</Alert>
-								</>
-							)}
+												</TableHead>
+												<TableBody>
+													{preview.cargos.map((cargo) => (
+														<TableRow key={cargo.cuota_id}>
+															<TableCell>{cargo.categoria_nombre}</TableCell>
+															<TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+																{money.format(cargo.monto)}
+															</TableCell>
+															<TableCell>
+																<Chip
+																	size="small"
+																	color={cargo.estado === 'pagada' ? 'success' : 'warning'}
+																	label={cargo.estado === 'pagada' ? 'Pagada' : 'Pendiente'}
+																/>
+															</TableCell>
+														</TableRow>
+													))}
+												</TableBody>
+											</Table>
+										</TableContainer>
+										<Typography variant="caption" color="text.secondary">
+											Las cuotas de otras categorías se conservan y no se compensan. Si ya existe
+											una cuota de esta misma categoría para este mes, se reutiliza.
+										</Typography>
+									</>
+								)}
+							</Stack>
+
 							{preview.detalle && (
 								<FormControlLabel
 									control={
@@ -383,26 +441,26 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							)}
 						</>
 					)}
+
 					{result && (
 						<Alert severity={result.origen === 'confirmada' ? 'success' : 'info'}>
-							<Typography variant="subtitle1">
-								{result.origen === 'confirmada' ? 'Inscripción confirmada' : 'Resultado recuperado'}
+							<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+								{result.origen === 'confirmada'
+									? 'Inscripción confirmada'
+									: 'Resultado de inscripción recuperado'}
 							</Typography>
-							<Typography>
-								Fecha de alta: {result.inscripcion.fecha_alta.split('-').reverse().join('/')}{' '}
-								(Buenos Aires).
+							<Typography variant="body2" sx={{ mt: 0.5, fontVariantNumeric: 'tabular-nums' }}>
+								Fecha de alta: {result.inscripcion.fecha_alta.split('-').reverse().join('/')} ·
+								Período {formatPeriodo(result.cuota.periodo_mes, result.cuota.periodo_anio)}:{' '}
+								<strong>{money.format(result.cuota.monto)}</strong> (
+								{result.cuota.estado === 'pagada' ? 'Pagada' : 'Pendiente'}).
 							</Typography>
-							<Typography>
-								Cuota del período {result.cuota.periodo_mes}/{result.cuota.periodo_anio}:{' '}
-								{money.format(result.cuota.monto)} —{' '}
-								{result.cuota.estado === 'pagada' ? 'Pagada' : 'Pendiente'}.
-							</Typography>
-							<Typography>
+							<Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
 								{result.cuotaCreada === null
-									? 'La inscripción y su cuota están registradas. Se recuperó el resultado anterior.'
+									? 'La inscripción y su cuota ya estaban registradas; se recuperó el resultado anterior.'
 									: result.cuotaCreada
-										? 'Se creó la cuota inicial.'
-										: 'Se reutilizó una cuota existente del período.'}
+										? 'Se generó la cuota inicial en estado pendiente.'
+										: 'Se reutilizó la cuota existente de este período.'}
 							</Typography>
 						</Alert>
 					)}
@@ -425,7 +483,7 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 							operation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
 						}
 					>
-						{operation.isPending ? 'Verificando…' : 'Confirmar inscripción'}
+						{operation.isPending ? 'Confirmando…' : 'Confirmar inscripción'}
 					</Button>
 				)}
 			</DialogActions>

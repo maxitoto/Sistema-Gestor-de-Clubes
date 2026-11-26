@@ -25,10 +25,10 @@ export function validarPlantilla(p: TextoPlantilla): string | null {
 }
 export function vistaPreviaCorreo(text: string, values: Record<string, string> = {}) {
 	const defaults: Record<string, string> = {
-		nombre: 'Persona sintética',
-		apellido: 'De ejemplo',
-		deporte: 'Actividad de ejemplo',
-		deuda: '$ 1.000,00',
+		nombre: 'Lucía',
+		apellido: 'Fernández',
+		deporte: 'Fútbol',
+		deuda: '$ 18.500,00',
 	};
 	return text.replace(
 		/\{\{(nombre|apellido|deporte|deuda)\}\}/g,

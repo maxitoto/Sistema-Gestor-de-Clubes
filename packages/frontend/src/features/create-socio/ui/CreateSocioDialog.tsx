@@ -80,7 +80,12 @@ export function CreateSocioDialog({
 			>
 				<DialogTitle id={titleId} sx={{ px: { xs: 2, sm: 3 }, pt: 3, pb: 2 }}>
 					Alta de socio
-					<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+					<Typography
+						component="span"
+						variant="body2"
+						color="text.secondary"
+						sx={{ display: 'block', mt: 0.5 }}
+					>
 						Completá la ficha personal. Los campos con * son obligatorios.
 					</Typography>
 				</DialogTitle>

@@ -1,8 +1,16 @@
-import { Alert, Box, Button, Paper, Stack, Typography } from '@mui/material';
+import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined';
+import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
+import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '#entities/session';
 import { asociarArchivo, descartarArchivo, leerArchivo, subirArchivo } from '#shared/api';
+
+type FeedbackState = {
+	message: string;
+	severity: 'success' | 'warning' | 'error' | 'info';
+};
+
 export function GastoEvidencia({
 	gastoId,
 	editable,
@@ -45,9 +53,12 @@ export function GastoEvidencia({
 	});
 	const [busy, setBusy] = useState(false);
 	const [needsCheck, setNeedsCheck] = useState(false);
-	const [feedback, setFeedback] = useState<string | null>(
+	const [feedback, setFeedback] = useState<FeedbackState | null>(
 		initialFile
-			? 'Gasto registrado. Guardá la evidencia seleccionada para completar el adjunto.'
+			? {
+					severity: 'info',
+					message: 'Gasto registrado. Guardá la evidencia seleccionada para completar el adjunto.',
+				}
 			: null,
 	);
 	const mountedRef = useRef(false);
@@ -57,6 +68,7 @@ export function GastoEvidencia({
 	const lockRef = useRef(false);
 	const pathRef = useRef(path);
 	pathRef.current = path;
+
 	useEffect(() => {
 		mountedRef.current = true;
 		return () => {
@@ -64,6 +76,7 @@ export function GastoEvidencia({
 			requestRef.current?.abort();
 		};
 	}, []);
+
 	useEffect(() => {
 		if (!file || file.type === 'application/pdf') {
 			setPreview(null);
@@ -73,6 +86,7 @@ export function GastoEvidencia({
 		setPreview(url);
 		return () => URL.revokeObjectURL(url);
 	}, [file]);
+
 	const current = (scope: string) => mountedRef.current && accessRef.current === scope;
 	const remember = (value: string | null) => {
 		pathRef.current = value;
@@ -85,6 +99,7 @@ export function GastoEvidencia({
 			}
 		} catch {}
 	};
+
 	const confirmed = async (scope: string) => {
 		if (!current(scope)) {
 			return;
@@ -92,12 +107,13 @@ export function GastoEvidencia({
 		remember(null);
 		setFile(null);
 		setNeedsCheck(false);
-		setFeedback('Evidencia guardada en el gasto.');
+		setFeedback({ severity: 'success', message: 'Evidencia guardada en el gasto.' });
 		await client.invalidateQueries({ queryKey: key });
 		if (current(scope)) {
 			onUpdated();
 		}
 	};
+
 	const execute = async (mode: 'save' | 'check' | 'cancel') => {
 		const scope = accessRef.current;
 		if (
@@ -127,7 +143,10 @@ export function GastoEvidencia({
 					remember(null);
 					setFile(null);
 					setNeedsCheck(false);
-					setFeedback('La selección pendiente se quitó; el gasto sigue registrado.');
+					setFeedback({
+						severity: 'info',
+						message: 'La selección pendiente se quitó; el gasto sigue registrado.',
+					});
 					onPendingCleared?.();
 				}
 				return;
@@ -157,11 +176,12 @@ export function GastoEvidencia({
 				await confirmed(scope);
 			} else {
 				setNeedsCheck(false);
-				setFeedback(
-					editable
+				setFeedback({
+					severity: 'warning',
+					message: editable
 						? 'El archivo está cargado pero no asociado. Podés guardar esa misma carga o quitarla.'
-						: 'El archivo no quedó asociado y la ventana de edición terminó. Quitá la carga pendiente; el gasto permanece registrado.',
-				);
+						: 'El archivo no quedó asociado y el plazo de edición terminó. Quitá la carga pendiente; el gasto permanece registrado.',
+				});
 			}
 		} catch (error) {
 			if (!current(scope)) {
@@ -178,23 +198,28 @@ export function GastoEvidencia({
 						return;
 					}
 					setNeedsCheck(false);
-					setFeedback(
-						editable
+					setFeedback({
+						severity: 'warning',
+						message: editable
 							? 'Gasto registrado; evidencia pendiente. Reintentá guardar la misma carga o quitala.'
-							: 'Gasto registrado; no pudo asociarse la evidencia dentro de su ventana. Podés quitar la carga pendiente.',
-					);
+							: 'Gasto registrado; no pudo asociarse la evidencia dentro del día de carga. Podés quitar la carga pendiente.',
+					});
 				} catch {
 					setNeedsCheck(true);
-					setFeedback(
-						'No pudimos confirmar si el archivo quedó asociado. Consultá el resultado antes de guardar o quitar la carga.',
-					);
+					setFeedback({
+						severity: 'warning',
+						message:
+							'No pudimos confirmar si el archivo quedó asociado. Consultá el resultado antes de guardar o quitar la carga.',
+					});
 				}
 			} else {
-				setFeedback(
-					error instanceof Error
-						? error.message
-						: 'No se pudo cargar el archivo. El gasto sigue registrado.',
-				);
+				setFeedback({
+					severity: 'error',
+					message:
+						error instanceof Error
+							? error.message
+							: 'No se pudo cargar el archivo. El gasto sigue registrado.',
+				});
 			}
 		} finally {
 			if (current(scope)) {
@@ -203,16 +228,21 @@ export function GastoEvidencia({
 			}
 		}
 	};
+
 	return (
 		<Paper variant="outlined" sx={{ p: 2.5 }}>
 			<Stack spacing={2}>
-				<Typography component="h3" variant="h6">
-					Evidencia del gasto
+				<Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>
+					Comprobante o evidencia del gasto
 				</Typography>
 				{query.isError ? (
 					<Alert
 						severity="warning"
-						action={<Button onClick={() => void query.refetch()}>Reintentar</Button>}
+						action={
+							<Button size="small" color="inherit" onClick={() => void query.refetch()}>
+								Reintentar
+							</Button>
+						}
 					>
 						No pudimos consultar el adjunto.
 					</Alert>
@@ -223,25 +253,31 @@ export function GastoEvidencia({
 						target="_blank"
 						rel="noopener noreferrer"
 						variant="outlined"
+						size="small"
+						endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
 						sx={{ alignSelf: 'flex-start' }}
 					>
 						Ver evidencia guardada
 					</Button>
 				) : (
-					<Typography color="text.secondary">Este gasto no tiene evidencia adjunta.</Typography>
+					<Typography variant="body2" color="text.secondary">
+						Este gasto no tiene evidencia adjunta.
+					</Typography>
 				)}
 				{!editable && (
-					<Typography variant="body2" color="text.secondary">
-						La evidencia sólo puede modificarse mientras el gasto esté activo y dentro de su día de
+					<Typography variant="caption" color="text.secondary">
+						La evidencia solo puede modificarse mientras el gasto esté activo y dentro de su día de
 						carga.
 					</Typography>
 				)}
 				{(editable || path || file) && (
 					<>
-						<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+						<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 							<Button
 								component="label"
 								variant="outlined"
+								size="small"
+								startIcon={<AttachFileOutlinedIcon />}
 								disabled={!enabled || !editable || busy || !!path}
 							>
 								Elegir archivo
@@ -260,7 +296,10 @@ export function GastoEvidencia({
 											selected.size <= 0 ||
 											selected.size > 10 * 1024 * 1024
 										) {
-											setFeedback('Elegí un archivo JPG, PNG o PDF de hasta 10 MB.');
+											setFeedback({
+												severity: 'error',
+												message: 'Elegí un archivo JPG, PNG o PDF de hasta 10 MB.',
+											});
 											return;
 										}
 										setFile(selected);
@@ -272,27 +311,36 @@ export function GastoEvidencia({
 								<>
 									<Button
 										variant="contained"
+										size="small"
+										startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
 										disabled={!enabled || !editable || busy || needsCheck}
 										onClick={() => void execute('save')}
 									>
-										Guardar evidencia
+										{busy ? 'Guardando…' : 'Guardar evidencia'}
 									</Button>
 									<Button
+										size="small"
+										color="inherit"
 										disabled={!enabled || busy || needsCheck}
 										onClick={() => void execute('cancel')}
 									>
-										Quitar selección pendiente
+										Quitar selección
 									</Button>
 								</>
 							)}
 							{!busy && (needsCheck || path) && (
-								<Button disabled={!enabled || busy} onClick={() => void execute('check')}>
+								<Button
+									size="small"
+									variant="outlined"
+									disabled={!enabled || busy}
+									onClick={() => void execute('check')}
+								>
 									Consultar resultado
 								</Button>
 							)}
 						</Stack>
 						<Typography variant="caption" color="text.secondary">
-							JPG, PNG o PDF de hasta 10 MB.
+							Formatos admitidos: JPG, PNG o PDF de hasta 10 MB.
 						</Typography>
 						{file && (
 							<Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
@@ -309,12 +357,15 @@ export function GastoEvidencia({
 									maxHeight: 220,
 									objectFit: 'contain',
 									alignSelf: 'flex-start',
+									borderRadius: 1,
+									border: 1,
+									borderColor: 'divider',
 								}}
 							/>
 						)}
 					</>
 				)}
-				{feedback && <Alert severity="info">{feedback}</Alert>}
+				{feedback && <Alert severity={feedback.severity}>{feedback.message}</Alert>}
 			</Stack>
 		</Paper>
 	);

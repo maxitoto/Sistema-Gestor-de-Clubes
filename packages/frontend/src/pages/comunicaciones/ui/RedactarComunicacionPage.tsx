@@ -1,9 +1,13 @@
+import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import {
 	Alert,
+	Box,
 	Button,
 	Checkbox,
 	Chip,
+	CircularProgress,
 	FormControlLabel,
+	InputAdornment,
 	MenuItem,
 	Paper,
 	Stack,
@@ -30,11 +34,14 @@ import { useDeportes } from '#entities/deporte';
 import { useAuth } from '#entities/session';
 import { SendEmailPanel } from '#features/send-email';
 import { monedaCobranza } from '#shared/types/cobranza';
+import { EmptyState, PageHeader } from '#shared/ui';
 import { ComunicacionesTabs } from './ComunicacionesTabs';
+
 export function RedactarComunicacionPage() {
 	const { cacheScope } = useAuth();
 	return <Redactar key={cacheScope} />;
 }
+
 function Redactar() {
 	const { perfil, cacheScope, profileStatus, isSigningOut } = useAuth(),
 		actor = perfil?.id ?? '';
@@ -49,6 +56,7 @@ function Redactar() {
 		[error, setError] = useState<string | null>(null);
 	const aliveRef = useRef(true),
 		allAbortRef = useRef<AbortController | null>(null);
+
 	useEffect(() => {
 		aliveRef.current = true;
 		return () => {
@@ -56,11 +64,13 @@ function Redactar() {
 			allAbortRef.current?.abort();
 		};
 	}, []);
+
 	const clear = useCallback(() => {
 			setSelected({});
 			setFull(null);
 		}, []),
 		onPending = useCallback((v: boolean) => setBusy(v), []);
+
 	const update = (next: Partial<CriteriosCandidatos>) => {
 		clear();
 		setError(null);
@@ -68,6 +78,7 @@ function Redactar() {
 		setAllBusy(false);
 		setC((x) => ({ ...x, ...next, page: 1 }));
 	};
+
 	useEffect(() => {
 		const t = setTimeout(() => {
 			setC((x) => ({ ...x, busqueda: search, page: 1 }));
@@ -76,6 +87,7 @@ function Redactar() {
 		}, 300);
 		return () => clearTimeout(t);
 	}, [search]);
+
 	const enabled = profileStatus === 'ready' && !isSigningOut;
 	const q = useQuery({
 		queryKey: ['comunicaciones-candidatos', cacheScope, c],
@@ -84,6 +96,16 @@ function Redactar() {
 		retry: 1,
 		refetchOnWindowFocus: false,
 	});
+
+	useEffect(() => {
+		if (q.data) {
+			const ultima = Math.max(1, Math.ceil(q.data.total / c.pageSize));
+			if (c.page > ultima) {
+				setC((x) => ({ ...x, page: ultima }));
+			}
+		}
+	}, [q.data, c.page, c.pageSize]);
+
 	const deportes = useDeportes({ cacheScope, enabled, soloActivos: false }),
 		categorias = useCategorias(c.deporteId || null, { cacheScope, enabled, soloActivas: false });
 	const pending = busy || allBusy || q.isFetching || search !== c.busqueda;
@@ -91,6 +113,7 @@ function Redactar() {
 		ids = full?.ids ?? Object.keys(selected),
 		elegibles = full?.elegibles ?? rows.filter((x) => x.elegible).length,
 		excluidos = full?.excluidos ?? rows.filter((x) => !x.elegible).length;
+
 	const all = async () => {
 		if (pending) {
 			return;
@@ -119,12 +142,13 @@ function Redactar() {
 			}
 		}
 	};
+
 	const toggle = (row: CandidatoCorreo) => {
 		if (pending || full) {
 			return;
 		}
 		if (!selected[row.id] && Object.keys(selected).length >= 1000) {
-			setError('El límite es de 1000 socios.');
+			setError('El límite es de 1000 socios por envío.');
 			return;
 		}
 		setSelected((prev) => {
@@ -137,6 +161,7 @@ function Redactar() {
 			return next;
 		});
 	};
+
 	const page = () => {
 		if (!q.data || pending) {
 			return;
@@ -152,286 +177,377 @@ function Redactar() {
 		setFull(null);
 		setSelected(next);
 	};
+
 	return (
-		<>
-			<Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-				Redactar comunicación
-			</Typography>
+		<Stack spacing={3}>
+			<PageHeader
+				title="Redactar comunicación"
+				subtitle="Elegí primero los destinatarios y luego redactá el mensaje con vista previa."
+			/>
+
 			<ComunicacionesTabs />
-			<Stack spacing={3}>
-				<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-					<Stack spacing={2}>
+
+			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+				<Stack spacing={2.25}>
+					<Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+						<Chip size="small" color="primary" label="Paso 1" />
 						<Typography component="h2" variant="h6">
-							Destinatarios y tipo de comunicación
+							Destinatarios y tipo de envío
 						</Typography>
-						<Stack
-							direction={{ xs: 'column', sm: 'row' }}
-							spacing={2}
-							useFlexGap
-							sx={{ flexWrap: 'wrap' }}
+					</Stack>
+
+					<Box
+						sx={{
+							display: 'grid',
+							gridTemplateColumns: {
+								xs: '1fr',
+								sm: 'repeat(2, minmax(0, 1fr))',
+								lg: 'repeat(5, minmax(0, 1fr))',
+							},
+							gap: 1.5,
+						}}
+					>
+						<TextField
+							size="small"
+							select
+							label="Tipo de comunicación"
+							value={c.tipo}
+							disabled={busy}
+							onChange={(e) =>
+								update({
+									tipo: e.target.value === 'deuda' ? 'deuda' : 'general',
+									incluirDesuscriptos: false,
+								})
+							}
 						>
-							<TextField
-								select
-								label="Tipo de comunicación"
-								value={c.tipo}
-								disabled={busy}
-								onChange={(e) =>
-									update({
-										tipo: e.target.value === 'deuda' ? 'deuda' : 'general',
-										incluirDesuscriptos: false,
-									})
-								}
-								sx={{ minWidth: 210 }}
-							>
-								<MenuItem value="general">Comunicación general</MenuItem>
-								<MenuItem value="deuda">Aviso de deuda</MenuItem>
-							</TextField>
-							<TextField
-								select
-								label="Deporte"
-								value={c.deporteId}
-								disabled={busy || deportes.isLoading}
-								onChange={(e) => update({ deporteId: e.target.value, categoriaId: '' })}
-								sx={{ minWidth: 180 }}
-							>
-								<MenuItem value="">Todos</MenuItem>
-								{deportes.data?.map((d) => (
-									<MenuItem key={d.id} value={d.id}>
-										{d.nombre}
-										{d.estado === 'inactivo' ? ' (inactivo)' : ''}
-									</MenuItem>
-								))}
-							</TextField>
-							<TextField
-								select
-								label="Categoría"
-								value={c.categoriaId}
-								disabled={busy || !c.deporteId || categorias.isLoading}
-								onChange={(e) => update({ categoriaId: e.target.value })}
-								sx={{ minWidth: 180 }}
-							>
-								<MenuItem value="">Todas</MenuItem>
-								{categorias.data?.map((d) => (
-									<MenuItem key={d.id} value={d.id}>
-										{d.nombre}
-										{d.estado === 'inactivo' ? ' (inactiva)' : ''}
-									</MenuItem>
-								))}
-							</TextField>
-							<TextField
-								select
-								label="Estado de pago global"
-								value={c.estadoPago}
-								disabled={busy}
-								onChange={(e) =>
-									update({ estadoPago: e.target.value as CriteriosCandidatos['estadoPago'] })
-								}
-								sx={{ minWidth: 200 }}
-							>
-								<MenuItem value="todos">Todos</MenuItem>
-								<MenuItem value="moroso">Con mora mayor a 30 días</MenuItem>
-								<MenuItem value="aldia">Sin mora</MenuItem>
-							</TextField>
-							<TextField
-								label="Nombre, apellido, DNI o correo"
-								value={search}
-								disabled={busy}
-								onChange={(e) => {
-									clear();
-									setSearch(e.target.value);
-								}}
-								sx={{ minWidth: 220 }}
-							/>
+							<MenuItem value="general">Comunicación general</MenuItem>
+							<MenuItem value="deuda">Aviso de deuda</MenuItem>
+						</TextField>
+
+						<TextField
+							size="small"
+							select
+							label="Deporte"
+							value={c.deporteId}
+							disabled={busy || deportes.isLoading}
+							onChange={(e) => update({ deporteId: e.target.value, categoriaId: '' })}
+						>
+							<MenuItem value="">Todos los deportes</MenuItem>
+							{deportes.data?.map((d) => (
+								<MenuItem key={d.id} value={d.id}>
+									{d.nombre}
+									{d.estado === 'inactivo' ? ' (inactivo)' : ''}
+								</MenuItem>
+							))}
+						</TextField>
+
+						<TextField
+							size="small"
+							select
+							label="Categoría"
+							value={c.categoriaId}
+							disabled={busy || !c.deporteId || categorias.isLoading}
+							onChange={(e) => update({ categoriaId: e.target.value })}
+						>
+							<MenuItem value="">Todas las categorías</MenuItem>
+							{categorias.data?.map((d) => (
+								<MenuItem key={d.id} value={d.id}>
+									{d.nombre}
+									{d.estado === 'inactivo' ? ' (inactiva)' : ''}
+								</MenuItem>
+							))}
+						</TextField>
+
+						<TextField
+							size="small"
+							select
+							label="Estado de pago"
+							value={c.estadoPago}
+							disabled={busy}
+							onChange={(e) =>
+								update({ estadoPago: e.target.value as CriteriosCandidatos['estadoPago'] })
+							}
+						>
+							<MenuItem value="todos">Todos</MenuItem>
+							<MenuItem value="moroso">Con mora (+30 días)</MenuItem>
+							<MenuItem value="aldia">Al día</MenuItem>
+						</TextField>
+
+						<TextField
+							size="small"
+							label="Buscar socio"
+							placeholder="Apellido, DNI o correo…"
+							value={search}
+							disabled={busy}
+							onChange={(e) => {
+								clear();
+								setSearch(e.target.value);
+							}}
+							slotProps={{
+								input: {
+									startAdornment: (
+										<InputAdornment position="start">
+											<SearchOutlinedIcon fontSize="small" color="action" />
+										</InputAdornment>
+									),
+								},
+							}}
+						/>
+					</Box>
+
+					{(deportes.isError || categorias.isError) && (
+						<Alert severity="warning">
+							No pudimos cargar parte del catálogo. Podés consultar todos los socios o reintentar.
+						</Alert>
+					)}
+
+					{c.tipo === 'deuda' && (
+						<FormControlLabel
+							control={
+								<Checkbox
+									checked={c.incluirDesuscriptos}
+									disabled={busy}
+									onChange={(e) => update({ incluirDesuscriptos: e.target.checked })}
+								/>
+							}
+							label="Incluir desuscriptos solo para avisar sobre deuda pendiente"
+						/>
+					)}
+
+					<Typography variant="caption" color="text.secondary">
+						Las comunicaciones generales requieren socio activo, correo válido y suscripción activa.
+						Los avisos de deuda también incluyen inactivos con saldo pendiente.
+					</Typography>
+
+					{error && <Alert severity="warning">{error}</Alert>}
+
+					{q.isLoading ? (
+						<Stack
+							direction="row"
+							spacing={1.5}
+							sx={{ py: 4, justifyContent: 'center', alignItems: 'center' }}
+						>
+							<CircularProgress size={20} />
+							<Typography variant="body2" color="text.secondary">
+								Calculando candidatos…
+							</Typography>
 						</Stack>
-						{(deportes.isError || categorias.isError) && (
-							<Alert severity="warning">
-								No se pudo cargar parte del catálogo. Podés consultar todos los socios o volver a
-								intentar.
-							</Alert>
-						)}
-						{c.tipo === 'deuda' && (
-							<FormControlLabel
-								control={
-									<Checkbox
-										checked={c.incluirDesuscriptos}
-										disabled={busy}
-										onChange={(e) => update({ incluirDesuscriptos: e.target.checked })}
-									/>
-								}
-								label="Incluir desuscriptos sólo para avisar una deuda pendiente"
-							/>
-						)}
-						<Typography color="text.secondary">
-							Los generales requieren socio activo, correo utilizable y suscripción. La deuda
-							también incluye inactivos con saldo pendiente. La mora se calcula con toda la deuda
-							del socio.
-						</Typography>
-						{error && <Alert severity="warning">{error}</Alert>}
-						{q.isLoading && <Typography>Calculando candidatos…</Typography>}
-						{q.isError && (
-							<Alert
-								severity="error"
-								action={<Button onClick={() => void q.refetch()}>Reintentar</Button>}
+					) : q.isError ? (
+						<Alert
+							severity="error"
+							action={
+								<Button size="small" color="inherit" onClick={() => void q.refetch()}>
+									Reintentar
+								</Button>
+							}
+						>
+							{q.error.message}
+						</Alert>
+					) : q.data ? (
+						<>
+							<Stack
+								direction={{ xs: 'column', md: 'row' }}
+								spacing={1.5}
+								sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between' }}
 							>
-								{q.error.message}
-							</Alert>
-						)}
-						{q.data && (
-							<>
-								<Stack
-									direction={{ xs: 'column', sm: 'row' }}
-									spacing={1}
-									useFlexGap
-									sx={{ flexWrap: 'wrap' }}
-								>
-									<Chip label={`${q.data.total} candidatos`} />
-									<Chip color="success" label={`${q.data.elegibles} elegibles`} />
-									<Chip label={`${q.data.excluidos} excluidos`} />
+								<Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
+									<Chip size="small" label={`${q.data.total} candidatos`} />
+									<Chip size="small" color="success" label={`${q.data.elegibles} elegibles`} />
+									<Chip size="small" color="default" label={`${q.data.excluidos} excluidos`} />
+								</Stack>
+								<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 									<Button
+										size="small"
+										variant="outlined"
 										disabled={pending || Boolean(full) || !q.data.candidatos.length}
 										onClick={page}
 									>
 										Seleccionar esta página
 									</Button>
 									<Button
+										size="small"
+										variant="outlined"
 										disabled={pending || q.data.total === 0 || q.data.total > 1000}
 										onClick={() => void all()}
 									>
-										Seleccionar todos los filtrados
+										{allBusy ? 'Seleccionando…' : 'Seleccionar todos los filtrados'}
 									</Button>
-									<Button disabled={busy || !ids.length} onClick={clear}>
-										Limpiar selección
-									</Button>
+									{ids.length > 0 && (
+										<Button size="small" color="inherit" disabled={busy} onClick={clear}>
+											Limpiar selección
+										</Button>
+									)}
 								</Stack>
-								{q.data.total > 1000 && (
-									<Alert severity="info">
-										Hay más de 1000 candidatos. Acotá los filtros o seleccioná hasta 1000 socios; no
-										se dividirá el envío automáticamente.
-									</Alert>
-								)}
-								{full && (
-									<Alert severity="info">
-										Seleccionados todos los {full.ids.length} socios del filtro, incluidas sus
-										exclusiones. Para modificar socios individuales, limpiá la selección.
-									</Alert>
-								)}
-								<TableContainer>
-									<Table aria-label="Candidatos de comunicación" sx={{ minWidth: 800 }}>
-										<TableHead>
-											<TableRow>
-												<TableCell>Seleccionar</TableCell>
-												<TableCell>Socio</TableCell>
-												<TableCell>Correo</TableCell>
-												<TableCell>Actividad y deuda pendiente</TableCell>
-												<TableCell>Elegibilidad</TableCell>
-											</TableRow>
-										</TableHead>
-										<TableBody>
-											{q.data.candidatos.map((row) => (
-												<TableRow key={row.id}>
-													<TableCell>
-														<Checkbox
-															checked={full ? full.ids.includes(row.id) : Boolean(selected[row.id])}
-															disabled={pending || Boolean(full)}
-															onChange={() => toggle(row)}
-															slotProps={{
-																input: {
-																	'aria-label': `Seleccionar a ${row.apellido}, ${row.nombre}, DNI ${row.dni}`,
-																},
-															}}
-														/>
-													</TableCell>
-													<TableCell>
-														<Typography sx={{ fontWeight: 600 }}>
-															{row.apellido}, {row.nombre}
-														</Typography>
-														<Typography variant="body2">
-															DNI {row.dni}
-															{row.estado === 'inactivo' ? ' · Inactivo' : ''}
-														</Typography>
-													</TableCell>
-													<TableCell>
-														{row.email ?? 'Sin correo'}
-														<Typography variant="caption" sx={{ display: 'block' }}>
-															{row.email_invalido
-																? 'Dirección inválida'
-																: row.acepta_comunicaciones
-																	? 'Suscripto'
-																	: 'Desuscripto'}
-														</Typography>
-													</TableCell>
-													<TableCell>
-														{row.deportes || 'Sin actividad asociada'}
-														<Typography variant="body2">
-															{monedaCobranza(row.deuda_pendiente)}
-														</Typography>
-													</TableCell>
-													<TableCell>
-														<Chip
-															size="small"
-															color={row.elegible ? 'success' : 'default'}
-															label={row.elegible ? 'Elegible' : 'Excluido'}
-														/>
-														{row.motivo && (
-															<Typography variant="caption" sx={{ display: 'block' }}>
-																{row.motivo}
-															</Typography>
-														)}
-													</TableCell>
-												</TableRow>
-											))}
-											{!q.data.candidatos.length && (
-												<TableRow>
-													<TableCell colSpan={5}>
-														No hay socios que coincidan con los criterios.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Table>
-								</TableContainer>
-								<TablePagination
-									component="div"
-									count={q.data.total}
-									page={c.page - 1}
-									rowsPerPage={c.pageSize}
-									rowsPerPageOptions={[20, 50, 100]}
-									labelRowsPerPage="Candidatos por página"
-									labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-									onPageChange={(_, p) => {
-										if (!busy) {
-											setC({ ...c, page: p + 1 });
-										}
-									}}
-									onRowsPerPageChange={(e) => {
-										if (!busy) {
-											setC({ ...c, page: 1, pageSize: Number(e.target.value) as 20 | 50 | 100 });
-										}
-									}}
+							</Stack>
+
+							{q.data.total > 1000 && (
+								<Alert severity="info">
+									Hay más de 1000 candidatos. Acotá los filtros o seleccioná hasta 1000 socios por
+									envío.
+								</Alert>
+							)}
+							{full && (
+								<Alert severity="info">
+									Seleccionaste los {full.ids.length} socios del filtro actual (incluidas sus
+									exclusiones). Para elegir individualmente, limpiá la selección.
+								</Alert>
+							)}
+
+							{!q.data.candidatos.length ? (
+								<EmptyState
+									title="No hay socios que coincidan con estos criterios"
+									description="Probá ampliando los filtros de deporte, estado de pago o búsqueda."
 								/>
-							</>
-						)}
-						<Typography sx={{ fontWeight: 600 }}>
-							{ids.length} seleccionados · {elegibles} elegibles · {excluidos} excluidos
+							) : (
+								<>
+									<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
+										<Table
+											size="small"
+											aria-label="Candidatos de comunicación"
+											sx={{ minWidth: 780 }}
+										>
+											<TableHead>
+												<TableRow>
+													<TableCell sx={{ width: 56 }}>Sel.</TableCell>
+													<TableCell>Socio</TableCell>
+													<TableCell>Correo</TableCell>
+													<TableCell>Actividad</TableCell>
+													<TableCell align="right">Deuda pendiente</TableCell>
+													<TableCell>Elegibilidad</TableCell>
+												</TableRow>
+											</TableHead>
+											<TableBody>
+												{q.data.candidatos.map((row) => (
+													<TableRow key={row.id}>
+														<TableCell>
+															<Checkbox
+																size="small"
+																checked={
+																	full ? full.ids.includes(row.id) : Boolean(selected[row.id])
+																}
+																disabled={pending || Boolean(full)}
+																onChange={() => toggle(row)}
+																slotProps={{
+																	input: {
+																		'aria-label': `Seleccionar a ${row.apellido}, ${row.nombre}, DNI ${row.dni}`,
+																	},
+																}}
+															/>
+														</TableCell>
+														<TableCell>
+															<Typography variant="body2" sx={{ fontWeight: 600 }}>
+																{row.apellido}, {row.nombre}
+															</Typography>
+															<Typography
+																variant="caption"
+																color="text.secondary"
+																sx={{ fontVariantNumeric: 'tabular-nums' }}
+															>
+																DNI {row.dni}
+																{row.estado === 'inactivo' ? ' · Inactivo' : ''}
+															</Typography>
+														</TableCell>
+														<TableCell>
+															<Typography variant="body2">{row.email ?? 'Sin correo'}</Typography>
+															<Typography
+																variant="caption"
+																color={row.email_invalido ? 'error.main' : 'text.secondary'}
+																sx={{ display: 'block' }}
+															>
+																{row.email_invalido
+																	? 'Dirección inválida'
+																	: row.acepta_comunicaciones
+																		? 'Suscripto'
+																		: 'Desuscripto'}
+															</Typography>
+														</TableCell>
+														<TableCell>{row.deportes || 'Sin actividad vigente'}</TableCell>
+														<TableCell
+															align="right"
+															sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+														>
+															{monedaCobranza(row.deuda_pendiente)}
+														</TableCell>
+														<TableCell>
+															<Chip
+																size="small"
+																color={row.elegible ? 'success' : 'default'}
+																label={row.elegible ? 'Elegible' : 'Excluido'}
+															/>
+															{row.motivo && (
+																<Typography
+																	variant="caption"
+																	color="text.secondary"
+																	sx={{ display: 'block', mt: 0.25 }}
+																>
+																	{row.motivo}
+																</Typography>
+															)}
+														</TableCell>
+													</TableRow>
+												))}
+											</TableBody>
+										</Table>
+									</TableContainer>
+									<TablePagination
+										component="div"
+										count={q.data.total}
+										page={Math.min(
+											c.page - 1,
+											Math.max(0, Math.ceil(q.data.total / c.pageSize) - 1),
+										)}
+										rowsPerPage={c.pageSize}
+										rowsPerPageOptions={[20, 50, 100]}
+										labelRowsPerPage="Candidatos por página"
+										labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+										onPageChange={(_, p) => {
+											if (!busy) {
+												setC({ ...c, page: p + 1 });
+											}
+										}}
+										onRowsPerPageChange={(e) => {
+											if (!busy) {
+												setC({ ...c, page: 1, pageSize: Number(e.target.value) as 20 | 50 | 100 });
+											}
+										}}
+									/>
+								</>
+							)}
+						</>
+					) : null}
+
+					<Box
+						sx={{
+							p: 1.5,
+							borderRadius: 1.5,
+							bgcolor: 'action.hover',
+							border: 1,
+							borderColor: 'divider',
+						}}
+					>
+						<Typography variant="body2" sx={{ fontWeight: 600 }}>
+							Selección actual: {ids.length} {ids.length === 1 ? 'socio' : 'socios'} · {elegibles}{' '}
+							elegibles · {excluidos} excluidos
 						</Typography>
-					</Stack>
-				</Paper>
-				<SendEmailPanel
-					tipo={c.tipo}
-					incluirDesuscriptos={c.incluirDesuscriptos}
-					selectedSocios={ids}
-					selectedLabels={
-						full
-							? ['Todos los socios de los filtros confirmados.']
-							: rows.map((x) => `${x.apellido}, ${x.nombre} · ${x.email ?? 'Sin correo'}`)
-					}
-					elegibles={elegibles}
-					excluidos={excluidos}
-					onClearSelection={clear}
-					onPendingChange={onPending}
-					disabled={allBusy || q.isFetching || q.isError || search !== c.busqueda}
-				/>
-			</Stack>
-		</>
+					</Box>
+				</Stack>
+			</Paper>
+
+			<SendEmailPanel
+				tipo={c.tipo}
+				incluirDesuscriptos={c.incluirDesuscriptos}
+				selectedSocios={ids}
+				selectedLabels={
+					full
+						? ['Todos los socios de los filtros confirmados.']
+						: rows.map((x) => `${x.apellido}, ${x.nombre} · ${x.email ?? 'Sin correo'}`)
+				}
+				elegibles={elegibles}
+				excluidos={excluidos}
+				onClearSelection={clear}
+				onPendingChange={onPending}
+				disabled={allBusy || q.isFetching || q.isError || search !== c.busqueda}
+			/>
+		</Stack>
 	);
 }

@@ -1,6 +1,8 @@
+import FileDownloadOutlinedIcon from '@mui/icons-material/FileDownloadOutlined';
 import { Alert, Button, LinearProgress, Stack, Typography } from '@mui/material';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '#entities/session';
+import { InfoTooltip } from '#shared/ui';
 import type { ConfiguracionExportacion, FormatoExportacion } from '../model/exportarGrilla';
 import { descargarExportacion, exportarGrilla } from '../model/exportarGrilla';
 
@@ -87,10 +89,11 @@ export function ExportGridButton<Fila, Filtro extends object>(props: Props<Fila,
 	};
 	return (
 		<Stack spacing={1} sx={{ minWidth: 0 }}>
-			<Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap' }} spacing={1}>
+			<Stack direction="row" useFlexGap sx={{ flexWrap: 'wrap', alignItems: 'center' }} spacing={1}>
 				<Button
 					variant="outlined"
 					size="small"
+					startIcon={<FileDownloadOutlinedIcon fontSize="small" />}
 					disabled={ocupado || props.disabled || !sesionRef.current}
 					onClick={() => void iniciar('csv')}
 				>
@@ -99,14 +102,19 @@ export function ExportGridButton<Fila, Filtro extends object>(props: Props<Fila,
 				<Button
 					variant="outlined"
 					size="small"
+					startIcon={<FileDownloadOutlinedIcon fontSize="small" />}
 					disabled={ocupado || props.disabled || !sesionRef.current}
 					onClick={() => void iniciar('xlsx')}
 				>
 					Exportar XLSX
 				</Button>
+				<InfoTooltip
+					label="Cómo funciona la exportación"
+					title="Exporta todas las páginas del listado respetando los filtros y el orden actuales."
+				/>
 				{ocupado && (
-					<Button size="small" onClick={() => controladorRef.current?.abort()}>
-						Cancelar exportación
+					<Button size="small" color="inherit" onClick={() => controladorRef.current?.abort()}>
+						Cancelar
 					</Button>
 				)}
 			</Stack>

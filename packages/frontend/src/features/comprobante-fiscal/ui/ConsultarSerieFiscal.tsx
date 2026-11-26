@@ -1,4 +1,14 @@
-import { Alert, Button, Divider, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import {
+	Alert,
+	Button,
+	Chip,
+	CircularProgress,
+	Divider,
+	MenuItem,
+	Stack,
+	TextField,
+	Typography,
+} from '@mui/material';
 import { useEffect, useRef, useState } from 'react';
 import { consultarSerieFiscal, type ResultadoConsultaSerieFiscal } from '#entities/comprobante';
 import { useAuth } from '#entities/session';
@@ -13,6 +23,7 @@ export function ConsultarSerieFiscal() {
 	const { cacheScope } = useAuth();
 	return <ConsultaSerie key={cacheScope} />;
 }
+
 function ConsultaSerie() {
 	const { perfil, profileStatus, isSigningOut, cacheScope } = useAuth();
 	const actorId = perfil?.id ?? '';
@@ -27,6 +38,7 @@ function ConsultaSerie() {
 		generationRef = useRef(0),
 		abortRef = useRef<AbortController | null>(null);
 	accessRef.current = { enabled, actorId, cacheScope };
+
 	useEffect(() => {
 		activeRef.current = true;
 		return () => {
@@ -35,6 +47,7 @@ function ConsultaSerie() {
 			abortRef.current?.abort();
 		};
 	}, []);
+
 	useEffect(() => {
 		if (enabled) {
 			return;
@@ -46,9 +59,11 @@ function ConsultaSerie() {
 		setResult(null);
 		setError(null);
 	}, [enabled]);
+
 	if (!enabled) {
 		return null;
 	}
+
 	const run = async () => {
 		const selected = Number(tipo);
 		if (!enabled || lockRef.current || !tipos.some((value) => value.codigo === selected)) {
@@ -77,7 +92,7 @@ function ConsultaSerie() {
 		} catch (error) {
 			if (current()) {
 				setError(
-					error instanceof Error ? error.message : 'No se pudo consultar el último comprobante.',
+					error instanceof Error ? error.message : 'No pudimos consultar el último comprobante.',
 				);
 			}
 		} finally {
@@ -87,23 +102,29 @@ function ConsultaSerie() {
 			}
 		}
 	};
+
 	const nombre = tipos.find((value) => value.codigo === result?.tipoComprobante)?.nombre;
+
 	return (
-		<Stack spacing={1.5} sx={{ pt: 1.5 }}>
+		<Stack spacing={1.75} sx={{ pt: 1 }}>
 			<Divider />
-			<Typography component="h3" variant="h6">
-				Consulta de serie en homologación
-			</Typography>
-			<Typography variant="body2">
-				Consultá el último comprobante del punto de venta guardado, aunque el listado no devuelva
-				datos. Esta acción sólo consulta: no emite comprobantes ni reserva números.
+			<Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+				<Chip size="small" color="primary" label="Paso 3" />
+				<Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>
+					Consulta de serie (sin emisión)
+				</Typography>
+			</Stack>
+			<Typography variant="body2" color="text.secondary">
+				Consultá el último número autorizado para tu punto de venta. Esta prueba solo lee el estado
+				en ARCA: no emite comprobantes ni reserva números.
 			</Typography>
 			<TextField
+				size="small"
 				select
 				label="Tipo de comprobante"
 				value={tipo}
 				disabled={!enabled || busy}
-				helperText="La selección se usa sólo para consultar y no modifica la configuración fiscal."
+				helperText="Se usa solo para esta consulta y no cambia la configuración fiscal."
 				onChange={(event) => {
 					generationRef.current++;
 					abortRef.current?.abort();
@@ -115,29 +136,40 @@ function ConsultaSerie() {
 				<MenuItem value="">Elegí un tipo de comprobante</MenuItem>
 				{tipos.map((value) => (
 					<MenuItem key={value.codigo} value={String(value.codigo)}>
-						{value.nombre} ({value.codigo})
+						{value.nombre} (código {value.codigo})
 					</MenuItem>
 				))}
 			</TextField>
-			<Button variant="outlined" disabled={busy || !tipo} onClick={() => void run()}>
-				{busy ? 'Consultando…' : 'Consultar último comprobante'}
+			<Button
+				variant="outlined"
+				size="small"
+				startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
+				disabled={busy || !tipo}
+				onClick={() => void run()}
+				sx={{ alignSelf: 'flex-start' }}
+			>
+				{busy ? 'Consultando ARCA…' : 'Consultar último comprobante'}
 			</Button>
 			{error && <Alert severity="error">{error}</Alert>}
 			{result &&
 				(result.resultado === 'obtenido' ? (
 					<Alert severity="success">
-						Consulta aceptada para {nombre} en el punto de venta{' '}
-						{String(result.puntoVentaConfigurado).padStart(5, '0')}. Último comprobante autorizado:{' '}
-						{result.ultimoAutorizado}.
-						<Typography variant="body2">
-							Este resultado no constituye una factura nueva ni una autorización de CAE.
+						<Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+							<strong>{nombre}</strong> · Punto de venta{' '}
+							<strong>{String(result.puntoVentaConfigurado).padStart(5, '0')}</strong> · Último
+							número autorizado: <strong>{result.ultimoAutorizado}</strong>.
+						</Typography>
+						<Typography variant="caption" sx={{ display: 'block', mt: 0.25 }}>
+							Consulta informativa: no se emitió ninguna factura ni se solicitó CAE.
 						</Typography>
 					</Alert>
 				) : (
 					<Alert severity="warning">
-						No se confirmó la consulta de {nombre} en el punto de venta{' '}
-						{String(result.puntoVentaConfigurado).padStart(5, '0')}.
 						<Typography variant="body2">
+							No pudimos confirmar la serie de {nombre} en el punto de venta{' '}
+							{String(result.puntoVentaConfigurado).padStart(5, '0')}.
+						</Typography>
+						<Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
 							{result.codigos.map((value) => `${value.codigo}: ${value.mensaje}`).join(' ')}
 						</Typography>
 					</Alert>

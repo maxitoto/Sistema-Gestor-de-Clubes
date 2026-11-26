@@ -1,10 +1,13 @@
 import {
 	Alert,
+	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Paper,
 	Stack,
 	Typography,
 } from '@mui/material';
@@ -17,6 +20,26 @@ import {
 	tituloAccionFiscal,
 } from '#entities/monitoreo-fiscal';
 import { useAuth } from '#entities/session';
+import { monedaCobranza } from '#shared/types/cobranza';
+
+type FeedbackTone = 'success' | 'error' | 'warning' | 'info';
+
+function estadoConsultadoLabel(estado: string): string {
+	if (estado === 'valido') {
+		return 'Autorizado';
+	}
+	if (estado === 'anulado') {
+		return 'Documento anulado';
+	}
+	if (estado === 'anulacion_pendiente') {
+		return 'Anulación fiscal pendiente';
+	}
+	if (estado === 'fallido') {
+		return 'Error ARCA';
+	}
+	return 'Pendiente ARCA';
+}
+
 export function AccionFiscalDialog({
 	accion,
 	fila,
@@ -36,7 +59,8 @@ export function AccionFiscalDialog({
 	const [busy, setBusy] = useState(false),
 		[needsCheck, setNeedsCheck] = useState(false),
 		[done, setDone] = useState(false),
-		[feedback, setFeedback] = useState<string | null>(null);
+		[feedback, setFeedback] = useState<{ message: string; severity: FeedbackTone } | null>(null);
+
 	useEffect(
 		() => () => {
 			generationRef.current++;
@@ -44,6 +68,7 @@ export function AccionFiscalDialog({
 		},
 		[],
 	);
+
 	const run = async (check: boolean) => {
 		if (lockRef.current || profileStatus !== 'ready' || isSigningOut || perfil?.rol !== 'admin') {
 			return;
@@ -60,9 +85,10 @@ export function AccionFiscalDialog({
 				if (gen !== generationRef.current) {
 					return;
 				}
-				setFeedback(
-					`Estado consultado: ${state.estadoFiscal === 'valido' ? 'Autorizado' : state.estadoFiscal === 'anulado' ? 'Documento anulado' : state.estadoFiscal === 'anulacion_pendiente' ? 'Anulación fiscal pendiente' : state.estadoFiscal === 'fallido' ? 'Fiscal fallido' : 'Pendiente de CAE'}. Revisá el listado actualizado antes de decidir otra acción.`,
-				);
+				setFeedback({
+					severity: state.estadoFiscal === 'valido' ? 'success' : 'info',
+					message: `Estado actual en ARCA: ${estadoConsultadoLabel(state.estadoFiscal)}. Revisá el listado actualizado antes de decidir otra acción.`,
+				});
 				setNeedsCheck(false);
 				setDone(true);
 				onUpdated();
@@ -76,7 +102,11 @@ export function AccionFiscalDialog({
 					(accion === 'reabrir' && before.estadoFiscal !== 'fallido') ||
 					(accion === 'resolver' && before.estadoFiscal !== 'anulacion_pendiente')
 				) {
-					setFeedback('El estado cambió. No se repitió la acción; revisá la consulta actualizada.');
+					setFeedback({
+						severity: 'info',
+						message:
+							'El estado del comprobante ya cambió. No se repitió la acción; revisá el listado actualizado.',
+					});
 					setDone(true);
 					onUpdated();
 					return;
@@ -90,25 +120,39 @@ export function AccionFiscalDialog({
 				if (gen !== generationRef.current) {
 					return;
 				}
-				setFeedback(
-					result.advertencia ??
-						{
-							autorizado: 'Autorización fiscal confirmada.',
-							rechazado: 'La solicitud fiscal fue rechazada; revisá la incidencia.',
-							pendiente: 'La operación permanece pendiente.',
-							en_proceso: 'Hay una operación en proceso. Consultá el estado.',
-							bloqueado: 'La operación requiere resolver la incidencia indicada.',
-							reabierto: 'Regularización reabierta.',
-							resuelto: 'Resolución fiscal confirmada.',
-							sin_cambios: 'No se modificó el comprobante.',
-						}[result.resultado],
-				);
+				const severityByResult: Record<typeof result.resultado, FeedbackTone> = {
+					autorizado: 'success',
+					reabierto: 'success',
+					resuelto: 'success',
+					rechazado: 'error',
+					bloqueado: 'warning',
+					pendiente: 'info',
+					en_proceso: 'info',
+					sin_cambios: 'info',
+				};
+				const messageByResult: Record<typeof result.resultado, string> = {
+					autorizado: 'Comprobante autorizado correctamente por ARCA.',
+					rechazado: 'ARCA rechazó la solicitud. Revisá el detalle de la incidencia.',
+					pendiente: 'La solicitud sigue pendiente de confirmación en ARCA.',
+					en_proceso: 'Ya hay una solicitud en curso. Consultá el estado en unos segundos.',
+					bloqueado: 'No se pudo completar la acción: revisá el detalle de la incidencia.',
+					reabierto: 'Plazo de regularización reabierto correctamente.',
+					resuelto: 'Anulación fiscal conciliada correctamente.',
+					sin_cambios: 'El comprobante no requirió modificaciones.',
+				};
+				setFeedback({
+					severity: result.advertencia ? 'warning' : severityByResult[result.resultado],
+					message: result.advertencia ?? messageByResult[result.resultado],
+				});
 				setDone(true);
 				onUpdated();
 			}
 		} catch (error) {
 			if (gen === generationRef.current) {
-				setFeedback(error instanceof Error ? error.message : 'No se obtuvo confirmación.');
+				setFeedback({
+					severity: 'warning',
+					message: error instanceof Error ? error.message : 'No se obtuvo confirmación.',
+				});
 				setNeedsCheck(true);
 			}
 		} finally {
@@ -118,40 +162,65 @@ export function AccionFiscalDialog({
 			}
 		}
 	};
+
 	const help =
 		accion === 'forzar'
-			? 'Se usará el mismo presupuesto de regularización que los reintentos automáticos. Si hay una respuesta incierta, se consultará el intento existente.'
+			? 'Se hará un nuevo intento de autorización ante ARCA dentro del límite permitido. Si hubo un intento anterior sin respuesta clara, primero se verificará su resultado para evitar duplicados.'
 			: accion === 'reabrir'
-				? 'La reapertura verifica el intento anterior antes de reiniciar el plazo y los reintentos. Una respuesta incompatible o incierta conservará la incidencia.'
+				? 'Se verificará el intento anterior en ARCA antes de reiniciar el plazo y los reintentos automáticos. Si el problema original persiste, la incidencia seguirá visible en el listado.'
 				: accion === 'resolver'
-					? 'Se verificará primero si el historial permite confirmar que no hubo envío. Si hace falta consultar ARCA, se requiere completar su configuración. La resolución conserva una única Nota de Crédito cuando corresponde.'
-					: 'Se consultará la identidad del comprobante ya registrada. Un CAE ingresado libremente no acredita una regularización y no se admite desde esta pantalla.';
+					? 'Se revisará primero si el comprobante llegó a enviarse a ARCA. Si hace falta consultar el estado remoto, se requiere la configuración fiscal completa. Cuando corresponda, se conservará una única Nota de Crédito.'
+					: 'Se consultará directamente en ARCA usando los datos ya registrados del comprobante. No se permite cargar un CAE manual sin validación.';
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="sm"
+			aria-labelledby="accion-fiscal-title"
 			onClose={() => {
 				if (!busy) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>{tituloAccionFiscal(accion)}</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
-					<Typography>
-						{fila.socio.apellido}, {fila.socio.nombre} ·{' '}
-						{fila.tipo === 'nota_credito' ? 'Nota de Crédito' : 'Factura'}
-					</Typography>
-					<Typography>{help}</Typography>
+			<DialogTitle id="accion-fiscal-title">{tituloAccionFiscal(accion)}</DialogTitle>
+			<DialogContent dividers>
+				<Stack spacing={2}>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Stack
+							direction="row"
+							spacing={1.5}
+							sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+						>
+							<Box sx={{ minWidth: 0 }}>
+								<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+									{fila.socio.apellido}, {fila.socio.nombre}
+								</Typography>
+								<Typography variant="caption" color="text.secondary">
+									{fila.tipo === 'nota_credito' ? 'Nota de Crédito C' : 'Factura C'} · Socio #
+									{fila.socio.nroSocio}
+								</Typography>
+							</Box>
+							<Typography
+								variant="subtitle1"
+								sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+							>
+								{monedaCobranza(fila.monto)}
+							</Typography>
+						</Stack>
+					</Paper>
+
+					<Typography variant="body2">{help}</Typography>
+
 					<Alert severity="info">
-						Esta acción sólo resuelve documentación fiscal. Conserva el estado actual de pago, cuota
-						y caja, incluido cualquier recobro posterior.
+						Esta acción impacta únicamente en la documentación fiscal ante ARCA. El cobro, la cuota
+						y la caja mantienen su estado actual.
 					</Alert>
+
 					{feedback && (
-						<Alert severity={needsCheck ? 'warning' : 'info'}>
-							{feedback}
+						<Alert severity={needsCheck ? 'warning' : feedback.severity}>
+							{feedback.message}
 							{needsCheck ? ' Consultá el estado antes de volver a enviar.' : ''}
 						</Alert>
 					)}
@@ -162,13 +231,22 @@ export function AccionFiscalDialog({
 					Cerrar
 				</Button>
 				{needsCheck ? (
-					<Button disabled={busy} onClick={() => void run(true)}>
-						Consultar estado
+					<Button
+						disabled={busy}
+						startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+						onClick={() => void run(true)}
+					>
+						{busy ? 'Consultando…' : 'Consultar estado'}
 					</Button>
 				) : (
 					!done && (
-						<Button variant="contained" disabled={busy} onClick={() => void run(false)}>
-							Confirmar
+						<Button
+							variant="contained"
+							disabled={busy}
+							startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+							onClick={() => void run(false)}
+						>
+							{busy ? 'Procesando…' : 'Confirmar'}
 						</Button>
 					)
 				)}

@@ -22,6 +22,6 @@ export function useUpdateClubConfig(onConfirmed: (row: ClubConfig) => void) {
 		describeError: (error) =>
 			(error as { code?: string })?.code === '23514'
 				? 'Los datos institucionales no cumplen las reglas del club.'
-				: 'No pudimos guardar la configuración. Revise su conexión y los datos ingresados.',
+				: 'No pudimos guardar la configuración. Revisá tu conexión y los datos ingresados.',
 	});
 }

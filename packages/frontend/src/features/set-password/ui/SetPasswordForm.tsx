@@ -1,8 +1,12 @@
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
+import VpnKeyOutlinedIcon from '@mui/icons-material/VpnKeyOutlined';
 import {
 	Alert,
+	Avatar,
 	Button,
+	CircularProgress,
+	Divider,
 	IconButton,
 	InputAdornment,
 	Paper,
@@ -34,6 +38,7 @@ export function SetPasswordForm({
 	const [password, setPassword] = useState('');
 	const [confirmation, setConfirmation] = useState('');
 	const [currentPassword, setCurrentPassword] = useState('');
+	const [currentVisible, setCurrentVisible] = useState(false);
 	const [visible, setVisible] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [done, setDone] = useState(false);
@@ -48,16 +53,16 @@ export function SetPasswordForm({
 		profileReady: profileStatus === 'ready',
 		linkRequestFailed,
 	});
+
 	useEffect(() => {
 		mountedRef.current = true;
 		return () => {
 			mountedRef.current = false;
 		};
 	}, []);
+
 	useEffect(() => {
 		if (!change) {
-			// El token se conserva sólo en la memoria de esta pantalla hasta guardar.
-			// Auth lo valida/consume en servidor junto con el cambio, sin JWT al navegador.
 			window.history.replaceState(window.history.state, '', window.location.pathname);
 			if (!callback) {
 				setError(
@@ -66,9 +71,14 @@ export function SetPasswordForm({
 			}
 		}
 	}, [callback, change]);
+
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
 		if (saving || !view.showForm) {
+			return;
+		}
+		if (change && !currentPassword) {
+			setError('Ingresá tu contraseña actual.');
 			return;
 		}
 		const validation = validatePassword(password, confirmation);
@@ -113,23 +123,34 @@ export function SetPasswordForm({
 			}
 		}
 	};
+
 	return (
 		<Paper variant="outlined" sx={{ p: { xs: 3, sm: 4 }, width: '100%', boxSizing: 'border-box' }}>
-			<Stack spacing={2.5}>
-				<Typography component="h1" variant="h5">
-					{change ? 'Cambiar contraseña' : 'Establecer contraseña'}
-				</Typography>
-				<Typography color="text.secondary">
-					{change
-						? 'Elegí una contraseña nueva para tu cuenta.'
-						: 'Elegí la contraseña con la que vas a ingresar al sistema.'}
-				</Typography>
+			<Stack spacing={2.25}>
+				<Stack spacing={1.25} sx={{ alignItems: 'center' }}>
+					<Avatar
+						variant="rounded"
+						sx={{ width: 48, height: 48, bgcolor: 'primary.main', color: 'primary.contrastText' }}
+					>
+						<VpnKeyOutlinedIcon />
+					</Avatar>
+					<Typography component="h1" variant="h5" align="center">
+						{change ? 'Cambiar contraseña' : 'Establecer contraseña'}
+					</Typography>
+					<Typography variant="body2" color="text.secondary" align="center">
+						{change
+							? 'Elegí una contraseña nueva para tu cuenta.'
+							: 'Elegí la contraseña con la que vas a ingresar al sistema.'}
+					</Typography>
+				</Stack>
+				<Divider />
+
 				{done ? (
 					<>
 						<Alert severity="success">
 							Contraseña guardada. Ingresá nuevamente para continuar.
 						</Alert>
-						<Button component={Link} to="/login" variant="contained">
+						<Button component={Link} to="/login" variant="contained" size="large">
 							Ir al inicio de sesión
 						</Button>
 					</>
@@ -140,16 +161,36 @@ export function SetPasswordForm({
 							<Alert severity="warning">{view.sessionMismatchMessage}</Alert>
 						)}
 						{view.showForm && (
-							<Stack component="form" onSubmit={save} spacing={2}>
+							<Stack component="form" noValidate onSubmit={save} spacing={2}>
 								{change && (
 									<TextField
 										label="Contraseña actual"
-										type="password"
+										type={currentVisible ? 'text' : 'password'}
 										autoComplete="current-password"
 										required
 										value={currentPassword}
 										onChange={(event) => setCurrentPassword(event.target.value)}
 										disabled={saving}
+										slotProps={{
+											input: {
+												endAdornment: (
+													<InputAdornment position="end">
+														<IconButton
+															aria-label={
+																currentVisible
+																	? 'Ocultar contraseña actual'
+																	: 'Mostrar contraseña actual'
+															}
+															onClick={() => setCurrentVisible((value) => !value)}
+															disabled={saving}
+															edge="end"
+														>
+															{currentVisible ? <VisibilityOffIcon /> : <VisibilityIcon />}
+														</IconButton>
+													</InputAdornment>
+												),
+											},
+										}}
 									/>
 								)}
 								<TextField
@@ -169,6 +210,7 @@ export function SetPasswordForm({
 														aria-label={visible ? 'Ocultar contraseñas' : 'Mostrar contraseñas'}
 														onClick={() => setVisible((value) => !value)}
 														disabled={saving}
+														edge="end"
 													>
 														{visible ? <VisibilityOffIcon /> : <VisibilityIcon />}
 													</IconButton>
@@ -186,7 +228,13 @@ export function SetPasswordForm({
 									onChange={(event) => setConfirmation(event.target.value)}
 									disabled={saving}
 								/>
-								<Button type="submit" variant="contained" disabled={saving}>
+								<Button
+									type="submit"
+									variant="contained"
+									size="large"
+									startIcon={saving ? <CircularProgress size={16} color="inherit" /> : undefined}
+									disabled={saving}
+								>
 									{saving ? 'Guardando…' : 'Guardar contraseña'}
 								</Button>
 							</Stack>

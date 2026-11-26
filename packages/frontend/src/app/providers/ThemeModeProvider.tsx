@@ -6,12 +6,20 @@ import { darkTheme, lightTheme, ThemeModeContext } from '#shared/config/styles';
 
 export const ThemeModeProvider = ({ children }: { children: ReactNode }) => {
 	const [mode, setMode] = useState<'light' | 'dark'>(() => {
-		const savedMode = localStorage.getItem('themeMode');
-		return savedMode === 'light' || savedMode === 'dark' ? savedMode : 'light';
+		try {
+			const savedMode = localStorage.getItem('themeMode');
+			return savedMode === 'light' || savedMode === 'dark' ? savedMode : 'light';
+		} catch {
+			return 'light';
+		}
 	});
 
 	useEffect(() => {
-		localStorage.setItem('themeMode', mode);
+		try {
+			localStorage.setItem('themeMode', mode);
+		} catch {
+			// Ignora navegadores con almacenamiento bloqueado.
+		}
 	}, [mode]);
 
 	const colorMode = useMemo(

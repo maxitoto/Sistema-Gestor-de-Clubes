@@ -14,5 +14,10 @@ export function useCreateCategoria(onCreated: (categoria: Categoria) => void) {
 		create: crearCategoria,
 		lookup: buscarCategoriaPorIdentidad,
 		onCreated,
+		messages: {
+			duplicate:
+				'Ya existe una categoría con ese nombre dentro del deporte. No se creó otro registro.',
+			validation: 'El servidor rechazó los datos. Revisá el nombre, el arancel y las edades.',
+		},
 	});
 }

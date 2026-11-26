@@ -1,6 +1,8 @@
+import AttachFileOutlinedIcon from '@mui/icons-material/AttachFileOutlined';
 import {
 	Alert,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -19,6 +21,7 @@ import {
 } from '#entities/gasto';
 import { useAuth } from '#entities/session';
 import { useCreateGasto } from '../model/useCreateGasto';
+
 export function CreateGastoDialog({
 	hoy,
 	onClose,
@@ -41,6 +44,7 @@ export function CreateGastoDialog({
 	const mutation = useCreateGasto((gasto, evidenciaPrevista) =>
 		onRegistered(gasto, file, evidenciaPrevista),
 	);
+
 	useEffect(() => {
 		if (mutation.attempt) {
 			const d = mutation.attempt.datos;
@@ -52,6 +56,7 @@ export function CreateGastoDialog({
 			});
 		}
 	}, [mutation.attempt]);
+
 	const save = () => {
 		const result = validarGasto(form);
 		setErrors(result.errores);
@@ -60,45 +65,68 @@ export function CreateGastoDialog({
 		}
 		void mutation.submit(result.datos, !!file);
 	};
+
 	const disabled = !mutation.enabled || mutation.pending || mutation.requiresCheck;
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="md"
+			aria-labelledby="create-gasto-title"
 			onClose={() => {
 				if (!mutation.pending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>Registrar gasto</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
+			<DialogTitle id="create-gasto-title">Registrar gasto</DialogTitle>
+			<DialogContent dividers>
+				<Stack spacing={2.5}>
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
 					{categories.isError && (
 						<Alert
 							severity="error"
-							action={<Button onClick={() => void categories.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void categories.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
-							No pudimos cargar las categorías.
+							No pudimos cargar las categorías de gasto.
 						</Alert>
 					)}
 					{!categories.isPending && !categories.data?.length && (
 						<Alert severity="info">
-							Un Administrador debe crear una categoría activa para registrar gastos.
+							Un Administrador debe crear al menos una categoría activa para registrar gastos.
 						</Alert>
 					)}
 					<GastoFields
 						form={form}
-						onChange={setForm}
+						onChange={(next) => {
+							setForm(next);
+							if (Object.keys(errors).length) {
+								setErrors({});
+							}
+						}}
 						errores={errors}
 						disabled={disabled || categories.isPending}
 						categorias={categories.data ?? []}
 					/>
-					<Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-						<Button component="label" variant="outlined" disabled={disabled}>
-							Adjuntar evidencia opcional
+					<Stack
+						direction="row"
+						spacing={1}
+						useFlexGap
+						sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+					>
+						<Button
+							component="label"
+							variant="outlined"
+							size="small"
+							startIcon={<AttachFileOutlinedIcon />}
+							disabled={disabled}
+						>
+							Adjuntar evidencia (opcional)
 							<input
 								type="file"
 								hidden
@@ -126,6 +154,8 @@ export function CreateGastoDialog({
 							<>
 								<Typography variant="body2">{file.name}</Typography>
 								<Button
+									size="small"
+									color="inherit"
 									disabled={disabled}
 									onClick={() => {
 										setFile(null);
@@ -142,6 +172,8 @@ export function CreateGastoDialog({
 							severity="error"
 							action={
 								<Button
+									size="small"
+									color="inherit"
 									onClick={() => {
 										setFileError(null);
 										setFile(null);
@@ -155,14 +187,14 @@ export function CreateGastoDialog({
 						</Alert>
 					)}
 					<Typography variant="caption" color="text.secondary">
-						La evidencia se guarda después de confirmar el gasto. Si falla la carga, podrás
-						recuperarla sobre el mismo registro.
+						La evidencia se sube una vez confirmado el gasto. Si la carga falla, podrás reintentarla
+						desde el detalle del mismo gasto.
 					</Typography>
 				</Stack>
 			</DialogContent>
 			<DialogActions>
 				<Button disabled={mutation.pending} onClick={onClose}>
-					Cerrar
+					Cancelar
 				</Button>
 				{mutation.requiresCheck ? (
 					<>
@@ -178,6 +210,9 @@ export function CreateGastoDialog({
 				) : (
 					<Button
 						variant="contained"
+						startIcon={
+							mutation.pending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={disabled || !categories.data?.length || !!fileError}
 						onClick={save}
 					>

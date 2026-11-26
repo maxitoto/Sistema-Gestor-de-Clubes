@@ -1,9 +1,12 @@
+import ManageAccountsOutlinedIcon from '@mui/icons-material/ManageAccountsOutlined';
 import PersonAddAltOutlinedIcon from '@mui/icons-material/PersonAddAltOutlined';
+import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import {
 	Alert,
-	Box,
 	Button,
 	Chip,
+	CircularProgress,
+	InputAdornment,
 	MenuItem,
 	Paper,
 	Stack,
@@ -27,6 +30,14 @@ import {
 	type Usuario,
 } from '#entities/usuario';
 import { UsuarioActionDialog, UsuarioDialog, UsuarioEstadoDialog } from '#features/manage-usuario';
+import { EmptyState, PageHeader } from '#shared/ui';
+
+const ESTADO_PILLS = [
+	{ value: 'todos', label: 'Todos' },
+	{ value: 'activo', label: 'Activos' },
+	{ value: 'inactivo', label: 'Inactivos' },
+] as const;
+
 export function UsuariosPage() {
 	const { cacheScope, profileStatus, perfil } = useAuth();
 	return (
@@ -38,6 +49,7 @@ export function UsuariosPage() {
 		/>
 	);
 }
+
 function UsuariosPanel({
 	scope,
 	enabled,
@@ -57,6 +69,7 @@ function UsuariosPanel({
 	const [action, setAction] = useState<{ usuario: Usuario; accion: AccionUsuario } | null>(null);
 	const [statusUser, setStatusUser] = useState<Usuario | null>(null);
 	const [result, setResult] = useState<ResultadoUsuario | null>(null);
+
 	useEffect(() => {
 		const timer = setTimeout(() => {
 			setTerm(search);
@@ -64,6 +77,7 @@ function UsuariosPanel({
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [search]);
+
 	const list = useQuery({
 		queryKey: ['usuarios', scope, { page, size, term, estado, rol }],
 		queryFn: ({ signal }) =>
@@ -71,6 +85,7 @@ function UsuariosPanel({
 		enabled,
 		retry: 1,
 	});
+
 	useEffect(() => {
 		if (list.data) {
 			const last = Math.max(0, Math.ceil(list.data.total / size) - 1);
@@ -79,6 +94,7 @@ function UsuariosPanel({
 			}
 		}
 	}, [list.data, size, page]);
+
 	const saved = (r: ResultadoUsuario) => {
 		setResult(r);
 		if (r.resultado === 'completo' || r.resultado === 'rechazado') {
@@ -87,53 +103,77 @@ function UsuariosPanel({
 		}
 		void list.refetch();
 	};
+
+	const clearFilters = () => {
+		setSearch('');
+		setTerm('');
+		setEstado('todos');
+		setRol('todos');
+		setPage(0);
+	};
+
+	const hasAnyFilter = Boolean(search.trim()) || estado !== 'todos' || rol !== 'todos';
+
 	return (
 		<Stack spacing={3}>
-			<Box>
-				<Typography variant="h4" component="h1">
-					Usuarios del sistema
-				</Typography>
-				<Typography color="text.secondary" sx={{ mt: 1 }}>
-					Administrá las cuentas internas y sus permisos de acceso.
-				</Typography>
-			</Box>
+			<PageHeader
+				title="Usuarios del sistema"
+				subtitle="Administrá las cuentas internas, sus roles de acceso y los enlaces de activación."
+				actions={
+					<Button
+						variant="contained"
+						startIcon={<PersonAddAltOutlinedIcon />}
+						disabled={!enabled}
+						onClick={() => setEdit({ usuario: null })}
+					>
+						Nuevo usuario
+					</Button>
+				}
+			/>
+
 			{result && (
 				<Alert
-					severity={result.resultado === 'completo' ? 'success' : 'warning'}
+					severity={
+						result.resultado === 'completo'
+							? 'success'
+							: result.resultado === 'rechazado'
+								? 'error'
+								: 'warning'
+					}
 					onClose={() => setResult(null)}
 				>
 					{result.mensaje}
 					{result.resultado !== 'completo' &&
-						' Consultá la cuenta para completar la acción pendiente.'}
+						result.resultado !== 'rechazado' &&
+						' Consultá «Enlaces y estado» para completar la acción pendiente.'}
 				</Alert>
 			)}
+
 			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-				<Stack spacing={2}>
+				<Stack spacing={2.25}>
 					<Stack
-						direction={{ xs: 'column', sm: 'row' }}
-						spacing={2}
-						sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
+						direction={{ xs: 'column', md: 'row' }}
+						spacing={1.5}
+						sx={{ alignItems: { md: 'center' }, justifyContent: 'space-between' }}
 					>
-						<Typography component="h2" variant="h6">
-							Cuentas de acceso
-						</Typography>
-						<Button
-							variant="contained"
-							startIcon={<PersonAddAltOutlinedIcon />}
-							disabled={!enabled}
-							onClick={() => setEdit({ usuario: null })}
-						>
-							Nuevo usuario
-						</Button>
-					</Stack>
-					<Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
 						<TextField
 							size="small"
-							label="Buscar nombre o correo"
+							label="Buscar usuario"
+							placeholder="Nombre, apellido o correo…"
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							sx={{ flex: 1 }}
+							slotProps={{
+								input: {
+									startAdornment: (
+										<InputAdornment position="start">
+											<SearchOutlinedIcon fontSize="small" color="action" />
+										</InputAdornment>
+									),
+								},
+							}}
+							sx={{ flex: 1, minWidth: 220 }}
 						/>
+
 						<TextField
 							size="small"
 							select
@@ -143,58 +183,103 @@ function UsuariosPanel({
 								setRol(e.target.value);
 								setPage(0);
 							}}
-							sx={{ minWidth: 180 }}
+							sx={{ minWidth: 170 }}
 						>
 							<MenuItem value="todos">Todos los roles</MenuItem>
 							<MenuItem value="admin">Administrador</MenuItem>
 							<MenuItem value="responsable">Responsable</MenuItem>
 						</TextField>
-						<TextField
-							size="small"
-							select
-							label="Estado"
-							value={estado}
-							onChange={(e) => {
-								setEstado(e.target.value);
-								setPage(0);
-							}}
-							sx={{ minWidth: 150 }}
+
+						<Stack
+							direction="row"
+							spacing={0.75}
+							useFlexGap
+							sx={{ flexWrap: 'wrap', alignItems: 'center' }}
 						>
-							<MenuItem value="todos">Todos</MenuItem>
-							<MenuItem value="activo">Activo</MenuItem>
-							<MenuItem value="inactivo">Inactivo</MenuItem>
-						</TextField>
+							{ESTADO_PILLS.map((pill) => {
+								const active = estado === pill.value;
+								return (
+									<Chip
+										key={pill.value}
+										size="small"
+										label={pill.label}
+										clickable
+										color={active ? 'primary' : 'default'}
+										variant={active ? 'filled' : 'outlined'}
+										onClick={() => {
+											setEstado(pill.value);
+											setPage(0);
+										}}
+									/>
+								);
+							})}
+							{hasAnyFilter && (
+								<Button size="small" color="inherit" onClick={clearFilters}>
+									Limpiar filtros
+								</Button>
+							)}
+						</Stack>
 					</Stack>
+
 					{list.isError ? (
 						<Alert
 							severity="error"
-							action={<Button onClick={() => void list.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void list.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
 							No pudimos cargar los usuarios.
 						</Alert>
 					) : (
 						<>
-							<TableContainer>
+							<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
 								<Table aria-label="Usuarios del sistema" size="small">
 									<TableHead>
 										<TableRow>
-											{['Usuario', 'Rol', 'Estado', 'Acciones'].map((label) => (
-												<TableCell key={label}>{label}</TableCell>
-											))}
+											<TableCell>Usuario</TableCell>
+											<TableCell>Rol</TableCell>
+											<TableCell>Estado</TableCell>
+											<TableCell align="right">Acciones</TableCell>
 										</TableRow>
 									</TableHead>
 									<TableBody>
 										{list.isPending ? (
 											<TableRow>
-												<TableCell colSpan={4}>Cargando usuarios…</TableCell>
+												<TableCell colSpan={4} sx={{ py: 5 }}>
+													<Stack
+														direction="row"
+														spacing={1.5}
+														sx={{ justifyContent: 'center', alignItems: 'center' }}
+													>
+														<CircularProgress size={20} />
+														<Typography variant="body2" color="text.secondary">
+															Cargando usuarios…
+														</Typography>
+													</Stack>
+												</TableCell>
 											</TableRow>
 										) : !list.data?.rows.length ? (
 											<TableRow>
-												<TableCell colSpan={4}>No hay usuarios para estos filtros.</TableCell>
+												<TableCell colSpan={4} sx={{ borderBottom: 0 }}>
+													<EmptyState
+														icon={<ManageAccountsOutlinedIcon />}
+														title="No encontramos usuarios para estos filtros"
+														description="Probá ajustando el rol, el estado o el texto de búsqueda."
+														action={
+															hasAnyFilter ? (
+																<Button variant="outlined" size="small" onClick={clearFilters}>
+																	Limpiar filtros
+																</Button>
+															) : null
+														}
+													/>
+												</TableCell>
 											</TableRow>
 										) : (
 											list.data.rows.map((u) => (
-												<TableRow key={u.id}>
+												<TableRow key={u.id} sx={{ opacity: u.estado === 'activo' ? 1 : 0.68 }}>
 													<TableCell>
 														<Typography variant="body2" sx={{ fontWeight: 600 }}>
 															{u.apellido}, {u.nombre}
@@ -204,24 +289,34 @@ function UsuariosPanel({
 														</Typography>
 													</TableCell>
 													<TableCell>
-														{u.rol === 'admin' ? 'Administrador' : 'Responsable'}
+														<Chip
+															size="small"
+															color={u.rol === 'admin' ? 'info' : 'default'}
+															label={u.rol === 'admin' ? 'Administrador' : 'Responsable'}
+														/>
 													</TableCell>
 													<TableCell>
 														<Chip
 															size="small"
-															variant="outlined"
 															color={u.estado === 'activo' ? 'success' : 'default'}
 															label={u.estado === 'activo' ? 'Activo' : 'Inactivo'}
 														/>
 													</TableCell>
-													<TableCell>
+													<TableCell align="right">
 														{u.id === actorId ? (
-															<Typography variant="caption" color="text.secondary">
-																Mi cuenta · gestión protegida
-															</Typography>
+															<Chip size="small" variant="outlined" label="Tu cuenta" />
 														) : (
-															<Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
-																<Button size="small" onClick={() => setStatusUser(u)}>
+															<Stack
+																direction="row"
+																spacing={0.5}
+																useFlexGap
+																sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}
+															>
+																<Button
+																	size="small"
+																	variant="outlined"
+																	onClick={() => setStatusUser(u)}
+																>
 																	Enlaces y estado
 																</Button>
 																<Button size="small" onClick={() => setEdit({ usuario: u })}>
@@ -232,7 +327,7 @@ function UsuariosPanel({
 																		size="small"
 																		onClick={() => setAction({ usuario: u, accion: 'restablecer' })}
 																	>
-																		Restablecer contraseña
+																		Restablecer clave
 																	</Button>
 																)}
 																<Button
@@ -259,7 +354,7 @@ function UsuariosPanel({
 							<TablePagination
 								component="div"
 								count={list.data?.total ?? 0}
-								page={page}
+								page={Math.min(page, Math.max(0, Math.ceil((list.data?.total ?? 0) / size) - 1))}
 								rowsPerPage={size}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, p) => setPage(p)}
@@ -274,6 +369,7 @@ function UsuariosPanel({
 					)}
 				</Stack>
 			</Paper>
+
 			{statusUser && (
 				<UsuarioEstadoDialog
 					usuario={statusUser}
@@ -286,7 +382,7 @@ function UsuariosPanel({
 			)}
 			{edit && (
 				<UsuarioDialog usuario={edit.usuario} onClose={() => setEdit(null)} onSaved={saved} />
-			)}{' '}
+			)}
 			{action && (
 				<UsuarioActionDialog
 					usuario={action.usuario}

@@ -1,6 +1,8 @@
 import {
 	Alert,
+	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -9,7 +11,7 @@ import {
 	Stack,
 	TextField,
 } from '@mui/material';
-import { useRef, useState } from 'react';
+import { type FormEvent, useRef, useState } from 'react';
 import {
 	type DatosUsuario,
 	type ResultadoUsuario,
@@ -17,6 +19,7 @@ import {
 	validarUsuario,
 } from '#entities/usuario';
 import { useGestionUsuario } from '../model/useGestionUsuario';
+
 export function UsuarioDialog({
 	usuario,
 	onClose,
@@ -35,7 +38,20 @@ export function UsuarioDialog({
 	const [errors, setErrors] = useState<Partial<Record<keyof DatosUsuario, string>>>({});
 	const operationRef = useRef<{ key: string; id: string } | null>(null);
 	const management = useGestionUsuario(onSaved);
-	const save = () => {
+
+	const clearError = (field: keyof DatosUsuario) => {
+		setErrors((prev) => {
+			if (!prev[field]) {
+				return prev;
+			}
+			const next = { ...prev };
+			delete next[field];
+			return next;
+		});
+	};
+
+	const submit = (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
 		const result = validarUsuario(form);
 		setErrors(result.errores);
 		if (Object.keys(result.errores).length) {
@@ -52,9 +68,13 @@ export function UsuarioDialog({
 				: { operacion: 'crear', operacionId: operationId, ...result.datos },
 		);
 	};
+
+	const locked = management.pending || management.needsCheck;
+
 	return (
 		<Dialog
 			open
+			aria-labelledby="usuario-dialog-title"
 			onClose={() => {
 				if (!management.pending) {
 					onClose();
@@ -63,87 +83,109 @@ export function UsuarioDialog({
 			fullWidth
 			maxWidth="sm"
 		>
-			<DialogTitle>{usuario ? 'Editar usuario' : 'Nuevo usuario'}</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
-					{management.feedback && (
-						<Alert severity={management.needsCheck ? 'warning' : 'error'}>
-							{management.feedback}
-						</Alert>
-					)}
-					<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-						{(['nombre', 'apellido'] as const).map((field) => (
-							<TextField
-								key={field}
-								fullWidth
-								required
-								label={field === 'nombre' ? 'Nombre' : 'Apellido'}
-								value={form[field]}
-								disabled={management.pending || management.needsCheck}
-								error={Boolean(errors[field])}
-								helperText={errors[field]}
-								onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-								slotProps={{ htmlInput: { maxLength: 100 } }}
-							/>
-						))}
-					</Stack>
-					<TextField
-						label="Correo electrónico"
-						type="email"
-						required
-						value={form.email}
-						disabled={management.pending || management.needsCheck}
-						error={Boolean(errors.email)}
-						helperText={errors.email ?? 'Este correo se utiliza para ingresar.'}
-						onChange={(e) => setForm({ ...form, email: e.target.value })}
-					/>
-					<TextField
-						label="Rol"
-						select
-						value={form.rol}
-						disabled={management.pending || management.needsCheck}
-						onChange={(e) => setForm({ ...form, rol: e.target.value as DatosUsuario['rol'] })}
-					>
-						<MenuItem value="responsable">Responsable</MenuItem>
-						<MenuItem value="admin">Administrador</MenuItem>
-					</TextField>
-					{!usuario && (
-						<Alert severity="info">
-							La persona recibirá un enlace para establecer su contraseña. El enlace vence a los 15
-							minutos.
-						</Alert>
-					)}
-				</Stack>
-			</DialogContent>
-			<DialogActions>
-				<Button onClick={onClose} disabled={management.pending}>
-					Cerrar
-				</Button>
-				{management.needsCheck ? (
-					<>
-						<Button disabled={management.pending} onClick={() => void management.check()}>
-							Consultar resultado
-						</Button>
-						{management.canResume && (
-							<Button variant="contained" disabled={management.pending} onClick={management.resume}>
-								Completar acción pendiente
-							</Button>
+			<Box component="form" noValidate onSubmit={submit}>
+				<DialogTitle id="usuario-dialog-title">
+					{usuario ? 'Editar usuario' : 'Nuevo usuario'}
+				</DialogTitle>
+				<DialogContent dividers>
+					<Stack spacing={2.25}>
+						{management.feedback && (
+							<Alert severity={management.needsCheck ? 'warning' : 'error'}>
+								{management.feedback}
+							</Alert>
 						)}
-					</>
-				) : (
-					<Button
-						variant="contained"
-						disabled={management.pending || !management.enabled}
-						onClick={save}
-					>
-						{management.pending
-							? 'Guardando…'
-							: usuario
-								? 'Guardar cambios'
-								: 'Crear y enviar enlace'}
+						<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+							{(['nombre', 'apellido'] as const).map((field) => (
+								<TextField
+									key={field}
+									fullWidth
+									required
+									label={field === 'nombre' ? 'Nombre' : 'Apellido'}
+									value={form[field]}
+									disabled={locked}
+									error={Boolean(errors[field])}
+									helperText={errors[field]}
+									onChange={(e) => {
+										setForm({ ...form, [field]: e.target.value });
+										clearError(field);
+									}}
+									slotProps={{ htmlInput: { maxLength: 100 } }}
+								/>
+							))}
+						</Stack>
+						<TextField
+							label="Correo electrónico"
+							type="email"
+							required
+							value={form.email}
+							disabled={locked}
+							error={Boolean(errors.email)}
+							helperText={errors.email ?? 'Se usa para iniciar sesión y recibir enlaces de acceso.'}
+							onChange={(e) => {
+								setForm({ ...form, email: e.target.value });
+								clearError('email');
+							}}
+						/>
+						<TextField
+							label="Rol"
+							select
+							value={form.rol}
+							disabled={locked}
+							helperText={
+								form.rol === 'admin'
+									? 'Acceso total: panel financiero, deportes, usuarios, configuración ARCA y regularización fiscal.'
+									: 'Acceso operativo: socios, cobranza, gastos y comunicaciones.'
+							}
+							onChange={(e) => setForm({ ...form, rol: e.target.value as DatosUsuario['rol'] })}
+						>
+							<MenuItem value="responsable">Responsable</MenuItem>
+							<MenuItem value="admin">Administrador</MenuItem>
+						</TextField>
+						{!usuario && (
+							<Alert severity="info">
+								La persona recibirá por correo un enlace único para elegir su contraseña. El enlace
+								vence a los 15 minutos.
+							</Alert>
+						)}
+					</Stack>
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={onClose} disabled={management.pending}>
+						Cancelar
 					</Button>
-				)}
-			</DialogActions>
+					{management.needsCheck ? (
+						<>
+							<Button disabled={management.pending} onClick={() => void management.check()}>
+								Consultar resultado
+							</Button>
+							{management.canResume && (
+								<Button
+									variant="contained"
+									disabled={management.pending}
+									onClick={management.resume}
+								>
+									Completar acción pendiente
+								</Button>
+							)}
+						</>
+					) : (
+						<Button
+							type="submit"
+							variant="contained"
+							startIcon={
+								management.pending ? <CircularProgress size={16} color="inherit" /> : undefined
+							}
+							disabled={management.pending || !management.enabled}
+						>
+							{management.pending
+								? 'Guardando…'
+								: usuario
+									? 'Guardar cambios'
+									: 'Crear y enviar enlace'}
+						</Button>
+					)}
+				</DialogActions>
+			</Box>
 		</Dialog>
 	);
 }

@@ -1,17 +1,22 @@
 import {
 	Alert,
+	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
-	DialogContentText,
 	DialogTitle,
+	Paper,
 	Stack,
+	Typography,
 } from '@mui/material';
 import { useId } from 'react';
 import { useAuth } from '#entities/session';
 import { cambiarEstadoSocio, getSocio, type SocioDetalle } from '#entities/socio';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+
+const currency = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 
 export function ChangeSocioStatusDialog({
 	socio,
@@ -44,6 +49,7 @@ export function ChangeSocioStatusDialog({
 		describeError: () =>
 			'No se pudo cambiar el estado. Consultá la ficha actual y verificá tu sesión.',
 	});
+
 	return (
 		<Dialog
 			open={open}
@@ -58,29 +64,41 @@ export function ChangeSocioStatusDialog({
 			<DialogTitle id={titleId}>{baja ? 'Dar de baja al socio' : 'Reactivar al socio'}</DialogTitle>
 			<DialogContent dividers>
 				<Stack spacing={2}>
-					<DialogContentText>
-						{socio.apellido}, {socio.nombre} · Socio n.º {socio.numero_socio}
-					</DialogContentText>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+							{socio.apellido}, {socio.nombre}
+						</Typography>
+						<Typography
+							variant="caption"
+							color="text.secondary"
+							sx={{ fontVariantNumeric: 'tabular-nums' }}
+						>
+							Socio #{socio.numero_socio} · DNI {socio.dni}
+						</Typography>
+					</Paper>
+
 					<Alert severity={baja ? 'warning' : 'info'}>
-						{baja
-							? 'Se inactivará el socio y se cerrarán sus inscripciones activas. Las cuotas y el historial se conservan.'
-							: 'El socio volverá a estar activo. Las inscripciones anteriores seguirán cerradas: si retoma una actividad, deberá inscribirse nuevamente.'}
-					</Alert>
-					{deudaPendiente !== null && deudaPendiente > 0 && (
-						<Alert severity="warning">
-							Tiene deuda pendiente de{' '}
-							{new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(
-								deudaPendiente,
+						<Box component="ul" sx={{ m: 0, pl: 2.25, '& li': { mb: 0.5 } }}>
+							<li>
+								{baja
+									? 'El socio pasará a estado inactivo y se cerrarán sus inscripciones activas.'
+									: 'El socio volverá a estar activo. Sus inscripciones anteriores seguirán cerradas hasta que lo inscribas nuevamente.'}
+							</li>
+							{deudaPendiente !== null && deudaPendiente > 0 ? (
+								<li>
+									<strong>Registra una deuda pendiente de {currency.format(deudaPendiente)}</strong>
+									, que se conservará luego de esta operación.
+								</li>
+							) : deudaPendiente === null ? (
+								<li>
+									No pudimos consultar el saldo actual; las cuotas y deudas existentes se conservan.
+								</li>
+							) : (
+								<li>Las cuotas y el historial previo se conservan intactos.</li>
 							)}
-							. Se conservará después de esta operación.
-						</Alert>
-					)}
-					{deudaPendiente === null && (
-						<Alert severity="info">
-							No se pudo consultar el saldo. Esta operación conserva las cuotas y la deuda
-							existente.
-						</Alert>
-					)}
+						</Box>
+					</Alert>
+
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
 				</Stack>
 			</DialogContent>
@@ -96,10 +114,13 @@ export function ChangeSocioStatusDialog({
 				<Button
 					variant="contained"
 					color={baja ? 'error' : 'primary'}
+					startIcon={
+						mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+					}
 					disabled={!mutation.enabled || mutation.isPending || mutation.requiresCheck}
 					onClick={() => void mutation.run(target)}
 				>
-					{mutation.isPending ? 'Verificando…' : baja ? 'Confirmar baja' : 'Confirmar reactivación'}
+					{mutation.isPending ? 'Confirmando…' : baja ? 'Confirmar baja' : 'Confirmar reactivación'}
 				</Button>
 			</DialogActions>
 		</Dialog>

@@ -2,10 +2,12 @@ import {
 	Alert,
 	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	InputAdornment,
 	Stack,
 	TextField,
 	Typography,
@@ -63,6 +65,7 @@ export function EditCategoriaDialog({
 	const accessRef = useRef<string | null>(null);
 	accessRef.current = enabled ? cacheScope : null;
 	const lockedRef = useRef(false);
+
 	useEffect(() => {
 		const scope = cacheScope;
 		return () => {
@@ -73,6 +76,7 @@ export function EditCategoriaDialog({
 			}
 		};
 	}, [cacheScope]);
+
 	const mutation = useVerifiedMutation<CrearCategoriaPayload, Categoria>({
 		cacheScope,
 		enabled,
@@ -90,6 +94,7 @@ export function EditCategoriaDialog({
 	});
 	const busy = checking || mutation.isPending;
 	const disabled = busy || mutation.requiresCheck;
+
 	const change = (key: Exclude<keyof CategoriaForm, 'deporte_id'>, value: string) => {
 		sequenceRef.current++;
 		requestRef.current?.abort();
@@ -101,6 +106,7 @@ export function EditCategoriaDialog({
 		setCheckError(null);
 		mutation.clearFeedback();
 	};
+
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (!accessRef.current || lockedRef.current || mutation.isPending || mutation.requiresCheck) {
@@ -143,6 +149,7 @@ export function EditCategoriaDialog({
 			}
 		}
 	};
+
 	const field = (
 		key: Exclude<keyof CategoriaForm, 'deporte_id'>,
 		label: string,
@@ -162,9 +169,17 @@ export function EditCategoriaDialog({
 					key === 'nombre'
 						? { maxLength: 100 }
 						: { inputMode: key === 'arancel_mensual' ? 'decimal' : 'numeric' },
+				...(key === 'arancel_mensual'
+					? {
+							input: {
+								startAdornment: <InputAdornment position="start">$</InputAdornment>,
+							},
+						}
+					: {}),
 			}}
 		/>
 	);
+
 	return (
 		<Dialog
 			open
@@ -179,11 +194,11 @@ export function EditCategoriaDialog({
 		>
 			<Box component="form" noValidate onSubmit={(event) => void submit(event)}>
 				<DialogTitle id={titleId}>Editar categoría</DialogTitle>
-				<DialogContent>
-					<Stack spacing={2.5} sx={{ pt: 1 }}>
+				<DialogContent dividers>
+					<Stack spacing={2.25}>
 						<Typography variant="body2" color="text.secondary">
-							Deporte: {deporteNombre}. El nuevo arancel sólo afecta cuotas que se generen después
-							del cambio.
+							Deporte: <strong>{deporteNombre}</strong>. El nuevo arancel solo aplica a las cuotas
+							que se generen después del cambio.
 						</Typography>
 						{mutation.feedback && (
 							<Alert severity={mutation.requiresCheck ? 'warning' : 'error'}>
@@ -191,15 +206,21 @@ export function EditCategoriaDialog({
 							</Alert>
 						)}
 						{mutation.requiresCheck && (
-							<Button disabled={busy} onClick={() => void mutation.reconcile()}>
+							<Button
+								variant="outlined"
+								size="small"
+								disabled={busy}
+								onClick={() => void mutation.reconcile()}
+								sx={{ alignSelf: 'flex-start' }}
+							>
 								Consultar resultado guardado
 							</Button>
 						)}
 						{checkError && <Alert severity="error">{checkError}</Alert>}
 						{field('nombre', 'Nombre de la categoría', true)}
-						{field('arancel_mensual', 'Arancel mensual ($)', true)}
+						{field('arancel_mensual', 'Arancel mensual', true)}
 						<Typography variant="caption" color="text.secondary">
-							Importe mayor a cero, con punto decimal. Las cuotas emitidas conservan su importe.
+							Importe mayor a cero con punto decimal. Las cuotas ya emitidas conservan su monto.
 							Dejá ambas edades vacías si no hay límite.
 						</Typography>
 						<Box
@@ -212,11 +233,12 @@ export function EditCategoriaDialog({
 							<Alert severity="warning">
 								El rango se superpone con: {overlap.rows.map((row) => row.nombre).join(', ')}. Podés
 								confirmar los cambios si corresponde.
-								<Box sx={{ mt: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-									<Button disabled={busy} onClick={() => setOverlap(null)}>
+								<Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, flexWrap: 'wrap' }}>
+									<Button size="small" disabled={busy} onClick={() => setOverlap(null)}>
 										Revisar rango
 									</Button>
 									<Button
+										size="small"
 										variant="contained"
 										color="warning"
 										disabled={disabled || !enabled}
@@ -228,21 +250,22 @@ export function EditCategoriaDialog({
 									>
 										Confirmar y guardar cambios
 									</Button>
-								</Box>
+								</Stack>
 							</Alert>
 						)}
 					</Stack>
 				</DialogContent>
-				<DialogActions sx={{ borderTop: 1, borderColor: 'divider' }}>
+				<DialogActions>
 					<Button variant="outlined" color="inherit" disabled={busy} onClick={onClose}>
 						Cancelar
 					</Button>
 					<Button
 						type="submit"
 						variant="contained"
+						startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
 						disabled={disabled || !enabled || Boolean(overlap)}
 					>
-						{busy ? 'Verificando…' : 'Guardar cambios'}
+						{busy ? 'Guardando…' : 'Guardar cambios'}
 					</Button>
 				</DialogActions>
 			</Box>

@@ -40,6 +40,10 @@ interface Options<P, T> {
 	create: (payload: P, signal: AbortSignal) => Promise<T>;
 	lookup: (payload: P, signal: AbortSignal) => Promise<T | null>;
 	onCreated: (created: T) => void;
+	messages?: {
+		duplicate?: string;
+		validation?: string;
+	};
 }
 /** Escritura humana sin retry; verifica identidad si se pierde la respuesta. */
 export function useHumanCreate<P, T>(options: Options<P, T>) {
@@ -159,9 +163,12 @@ export function useHumanCreate<P, T>(options: Options<P, T>) {
 			} else {
 				const messages = {
 					duplicate:
-						'Ya existe ese nombre: para categorías, el nombre debe ser único dentro del deporte. No se creó otro registro.',
+						optionsRef.current.messages?.duplicate ??
+						'Ya existe un registro con ese nombre. No se creó otro.',
 					permission: 'Necesitás una sesión de Administrador activo para guardar.',
-					validation: 'El servidor rechazó los datos. Revisá el nombre, el arancel y las edades.',
+					validation:
+						optionsRef.current.messages?.validation ??
+						'El servidor rechazó los datos. Revisá los campos ingresados.',
 					error: 'No pudimos completar el alta. Revisá los datos; el formulario se conserva.',
 				};
 				setFeedback({ kind, message: messages[kind] });

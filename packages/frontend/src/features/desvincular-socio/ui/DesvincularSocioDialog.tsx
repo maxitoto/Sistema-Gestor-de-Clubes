@@ -1,12 +1,15 @@
 import {
 	Alert,
+	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
-	DialogContentText,
 	DialogTitle,
+	Paper,
 	Stack,
+	Typography,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
 import { useId } from 'react';
@@ -72,6 +75,7 @@ export function DesvincularSocioDialog({
 		describeError: () =>
 			'No se pudo cerrar la inscripción. Consultá su estado actual antes de continuar.',
 	});
+
 	return (
 		<Dialog
 			open={open}
@@ -86,20 +90,40 @@ export function DesvincularSocioDialog({
 			<DialogTitle id={titleId}>Desvincular de la actividad</DialogTitle>
 			<DialogContent dividers>
 				<Stack spacing={2}>
-					<DialogContentText>
-						{inscripcion.categoria?.deporte?.nombre} · {inscripcion.categoria?.nombre}
-					</DialogContentText>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+							{inscripcion.categoria?.deporte?.nombre}
+						</Typography>
+						<Typography variant="body2" color="text.secondary">
+							Categoría: {inscripcion.categoria?.nombre}
+						</Typography>
+					</Paper>
+
 					{avisoDeuda.estado === 'cargando' && (
-						<Alert severity="info">Consultando cuotas pendientes de esta actividad…</Alert>
+						<Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+							<CircularProgress size={16} />
+							<Typography variant="body2" color="text.secondary">
+								Consultando cuotas pendientes de esta actividad…
+							</Typography>
+						</Stack>
 					)}
-					{avisoDeuda.estado === 'con_deuda' && (
-						<Alert severity="warning">{avisoDeuda.mensaje}</Alert>
-					)}
-					{avisoDeuda.estado === 'error' && <Alert severity="info">{avisoDeuda.mensaje}</Alert>}
+
 					<Alert severity="warning">
-						La inscripción quedará en el historial. Las cuotas emitidas se conservan y no se
-						compensan; dejará de generar cuotas futuras mientras no exista una inscripción activa.
+						<Box component="ul" sx={{ m: 0, pl: 2.25, '& li': { mb: 0.5 } }}>
+							{avisoDeuda.estado === 'con_deuda' && (
+								<li>
+									<strong>{avisoDeuda.mensaje}</strong>
+								</li>
+							)}
+							{avisoDeuda.estado === 'error' && <li>{avisoDeuda.mensaje}</li>}
+							<li>La inscripción pasará al historial como cerrada.</li>
+							<li>
+								Las cuotas ya emitidas se conservan y no se compensan; dejará de generar cuotas
+								futuras para esta categoría.
+							</li>
+						</Box>
 					</Alert>
+
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
 				</Stack>
 			</DialogContent>
@@ -115,10 +139,13 @@ export function DesvincularSocioDialog({
 				<Button
 					variant="contained"
 					color="error"
+					startIcon={
+						mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+					}
 					disabled={!mutation.enabled || mutation.isPending || mutation.requiresCheck}
 					onClick={() => void mutation.run('inactiva')}
 				>
-					{mutation.isPending ? 'Verificando…' : 'Confirmar desvinculación'}
+					{mutation.isPending ? 'Confirmando…' : 'Confirmar desvinculación'}
 				</Button>
 			</DialogActions>
 		</Dialog>

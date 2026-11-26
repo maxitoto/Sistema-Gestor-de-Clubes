@@ -1,5 +1,6 @@
-import { MenuItem, Stack, TextField } from '@mui/material';
+import { InputAdornment, MenuItem, Stack, TextField } from '@mui/material';
 import type { GastoForm } from '../model/gastoForm';
+
 export function GastoFields({
 	form,
 	onChange,
@@ -39,6 +40,9 @@ export function GastoFields({
 					helperText={errores.categoria_id}
 					sx={{ flex: 1 }}
 				>
+					{form.categoria_id && !categorias.some((c) => c.id === form.categoria_id) && (
+						<MenuItem value={form.categoria_id}>Cargando categoría…</MenuItem>
+					)}
 					{categorias.map((c) => (
 						<MenuItem key={c.id} value={c.id}>
 							{c.nombre}
@@ -49,18 +53,25 @@ export function GastoFields({
 				<TextField
 					label="Importe"
 					required
+					placeholder="0,00"
 					value={form.monto}
 					onChange={(e) => onChange({ ...form, monto: e.target.value })}
 					disabled={disabled}
 					error={!!errores.monto}
 					helperText={errores.monto}
-					slotProps={{ htmlInput: { inputMode: 'decimal' } }}
+					slotProps={{
+						htmlInput: { inputMode: 'decimal' },
+						input: {
+							startAdornment: <InputAdornment position="start">$</InputAdornment>,
+						},
+					}}
 					sx={{ flex: 1 }}
 				/>
 			</Stack>
 			<TextField
 				label="Concepto"
 				required
+				placeholder="Ej. Pago de luz, compra de pelotas, mantenimiento"
 				value={form.concepto}
 				onChange={(e) => onChange({ ...form, concepto: e.target.value })}
 				disabled={disabled}

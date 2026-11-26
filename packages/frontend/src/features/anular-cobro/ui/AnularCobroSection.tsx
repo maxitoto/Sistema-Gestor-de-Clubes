@@ -1,6 +1,8 @@
 import {
 	Alert,
+	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -22,6 +24,7 @@ import {
 import { useAuth } from '#entities/session';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
 import { fechaCobranza } from '#shared/types/cobranza';
+
 export function AnularCobroSection({
 	pagoId,
 	onUpdated,
@@ -41,43 +44,67 @@ export function AnularCobroSection({
 	});
 	const row = confirmed ?? query.data,
 		bloqueo = row ? motivoBloqueoAnulacionPago(row, perfil?.rol ?? '') : null;
+
 	return (
-		<Stack spacing={2}>
+		<Stack spacing={1.5}>
 			<Divider />
-			<Typography component="h3" variant="h6">
-				Anulación del cobro
-			</Typography>
 			{query.isError ? (
 				<Alert
 					severity="warning"
-					action={<Button onClick={() => void query.refetch()}>Consultar</Button>}
+					action={
+						<Button size="small" color="inherit" onClick={() => void query.refetch()}>
+							Reintentar
+						</Button>
+					}
 				>
 					No pudimos verificar si este cobro admite anulación.
 				</Alert>
 			) : query.isPending ? (
-				<Typography>Consultando permiso de anulación…</Typography>
+				<Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+					<CircularProgress size={16} />
+					<Typography variant="caption" color="text.secondary">
+						Verificando disponibilidad de anulación…
+					</Typography>
+				</Stack>
 			) : row?.estado === 'anulado' ? (
 				<Alert severity="info">
-					Anulación financiera confirmada el {fechaCobranza(row.anuladoEn)}. Motivo: {row.motivo}.
-					La resolución fiscal conserva cualquier recobro posterior de la cuota.
+					Cobro anulado el {fechaCobranza(row.anuladoEn)}. Motivo: {row.motivo}. Si la cuota volvió
+					a cobrarse después, ese nuevo cobro se conserva sin cambios.
 				</Alert>
 			) : row ? (
-				<>
-					<Typography variant="body2" color="text.secondary">
-						Se usa para una devolución o para corregir un cobro erróneo. La regularización fiscal de
-						un cobro válido se realiza desde Monitoreo fiscal.
-					</Typography>
-					{bloqueo ? (
-						<Typography variant="body2" color="text.secondary">
-							{bloqueo}
+				<Stack
+					direction={{ xs: 'column', sm: 'row' }}
+					spacing={1.5}
+					sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
+				>
+					<Box sx={{ minWidth: 0 }}>
+						<Typography component="h3" variant="subtitle2" sx={{ fontWeight: 700 }}>
+							Anulación del cobro
 						</Typography>
-					) : (
-						<Button color="error" variant="outlined" onClick={() => setOpen(true)}>
+						<Typography
+							variant="caption"
+							color="text.secondary"
+							sx={{ display: 'block', mt: 0.25 }}
+						>
+							{bloqueo
+								? bloqueo
+								: 'Usala únicamente ante una devolución o un cobro cargado por error. Si el problema es solo fiscal, regularizalo desde Monitoreo fiscal.'}
+						</Typography>
+					</Box>
+					{!bloqueo && (
+						<Button
+							color="error"
+							variant="outlined"
+							size="small"
+							onClick={() => setOpen(true)}
+							sx={{ alignSelf: { xs: 'flex-start', sm: 'center' }, flexShrink: 0 }}
+						>
 							Anular cobro
 						</Button>
 					)}
-				</>
+				</Stack>
 			) : null}
+
 			{open && row && (
 				<AnularCobroDialog
 					key={`${cacheScope}:${pagoId}`}
@@ -94,6 +121,7 @@ export function AnularCobroSection({
 		</Stack>
 	);
 }
+
 function AnularCobroDialog({
 	pagoId,
 	onClose,
@@ -124,50 +152,68 @@ function AnularCobroDialog({
 		matches: (row) => row.estado === 'anulado',
 		onConfirmed,
 	});
+
 	const confirm = () => {
 		try {
 			const clean = validarMotivoAnulacionPago(motivo);
 			setError(null);
 			void mutation.run({ motivo: clean });
 		} catch (e) {
-			setError(e instanceof Error ? e.message : 'Completá el motivo.');
+			setError(e instanceof Error ? e.message : 'Completá el motivo de la anulación.');
 		}
 	};
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="sm"
+			aria-labelledby="anular-cobro-title"
 			onClose={() => {
 				if (!mutation.isPending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>Anular cobro</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
+			<DialogTitle id="anular-cobro-title">Anular cobro</DialogTitle>
+			<DialogContent dividers>
+				<Stack spacing={2}>
 					<Alert severity="warning">
-						Al confirmar, el pago quedará anulado, la cuota volverá a pendiente y se conservará un
-						único movimiento de reverso. Realizá la devolución o corrección de dinero que
-						corresponda; esta pantalla no efectúa una transferencia bancaria.
+						<Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+							Antes de confirmar, tené en cuenta:
+						</Typography>
+						<Box component="ul" sx={{ m: 0, pl: 2.25, '& li': { mb: 0.5 } }}>
+							<li>El pago quedará anulado en caja y la cuota volverá a figurar como pendiente.</li>
+							<li>
+								Cuando corresponda, se gestionará la Nota de Crédito C en ARCA sin eliminar el
+								comprobante original.
+							</li>
+							<li>
+								Esta operación no realiza transferencias bancarias automáticas: hacé la devolución
+								del dinero por fuera del sistema.
+							</li>
+						</Box>
 					</Alert>
-					<Typography>
-						La resolución fiscal se procesa por separado. Puede quedar pendiente una Nota de Crédito
-						o una conciliación; ese resultado no repetirá la anulación financiera.
-					</Typography>
+
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
+
 					<TextField
-						label="Motivo de anulación"
+						label="Motivo de la anulación"
+						placeholder="Ej. Devolución solicitada por el socio o cobro cargado por error"
 						required
 						multiline
 						minRows={3}
 						value={motivo}
 						disabled={mutation.isPending || mutation.requiresCheck}
 						error={!!error}
-						helperText={error ?? 'Indicá la devolución o corrección de cobro erróneo.'}
+						helperText={error ?? 'Queda registrado en el historial de caja y auditoría.'}
 						slotProps={{ htmlInput: { maxLength: 2000 } }}
-						onChange={(e) => setMotivo(e.target.value)}
+						onChange={(e) => {
+							setMotivo(e.target.value);
+							if (error) {
+								setError(null);
+							}
+						}}
 					/>
 				</Stack>
 			</DialogContent>
@@ -183,10 +229,13 @@ function AnularCobroDialog({
 					<Button
 						variant="contained"
 						color="error"
+						startIcon={
+							mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={mutation.isPending || !mutation.enabled}
 						onClick={confirm}
 					>
-						Confirmar anulación
+						{mutation.isPending ? 'Anulando…' : 'Confirmar anulación'}
 					</Button>
 				)}
 			</DialogActions>

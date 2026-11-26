@@ -14,5 +14,9 @@ export function useCreateDeporte(onCreated: (deporte: Deporte) => void) {
 		create: crearDeporte,
 		lookup: buscarDeportePorNombre,
 		onCreated,
+		messages: {
+			duplicate: 'Ya existe un deporte con ese nombre. No se creó otro registro.',
+			validation: 'El servidor rechazó los datos. Revisá el nombre y la descripción del deporte.',
+		},
 	});
 }

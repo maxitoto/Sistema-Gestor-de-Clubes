@@ -240,10 +240,11 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 					<Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
 						Imagen JPG o PNG de hasta 5 MB y 16 megapíxeles.
 					</Typography>
-					<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+					<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 						<Button
 							component="label"
 							variant="outlined"
+							size="small"
 							startIcon={<AddPhotoAlternateOutlinedIcon />}
 							disabled={!enabled || busy || !!pendingPath}
 						>
@@ -278,18 +279,30 @@ function PhotoEditor({ clubId, onUpdated }: UpdateClubLogoProps) {
 							<>
 								<Button
 									variant="contained"
+									size="small"
+									startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
 									disabled={busy || !enabled || needsCheck}
 									onClick={() => void save()}
 								>
-									Guardar logo
+									{busy ? 'Guardando…' : 'Guardar logo'}
 								</Button>
-								<Button disabled={busy || !enabled || needsCheck} onClick={() => void cancel()}>
+								<Button
+									size="small"
+									color="inherit"
+									disabled={busy || !enabled || needsCheck}
+									onClick={() => void cancel()}
+								>
 									Cancelar
 								</Button>
 							</>
 						)}
 						{needsCheck && (
-							<Button variant="outlined" disabled={busy || !enabled} onClick={() => void check()}>
+							<Button
+								variant="outlined"
+								size="small"
+								disabled={busy || !enabled}
+								onClick={() => void check()}
+							>
 								Verificar resultado
 							</Button>
 						)}

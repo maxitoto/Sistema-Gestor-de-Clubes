@@ -1,12 +1,14 @@
 import {
 	Alert,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
-	DialogContentText,
 	DialogTitle,
+	Paper,
 	Stack,
+	Typography,
 } from '@mui/material';
 import { useState } from 'react';
 import type { AccionUsuario, ResultadoUsuario, Usuario } from '#entities/usuario';
@@ -16,8 +18,9 @@ const labels: Record<AccionUsuario, string> = {
 	desactivar: 'Desactivar cuenta',
 	reactivar: 'Reactivar cuenta',
 	restablecer: 'Restablecer contraseña',
-	reenviar: 'Reenviar enlace',
+	reenviar: 'Reenviar enlace de acceso',
 };
+
 export function UsuarioActionDialog({
 	usuario,
 	accion,
@@ -31,32 +34,39 @@ export function UsuarioActionDialog({
 }) {
 	const management = useGestionUsuario(onSaved);
 	const [operationId] = useState(() => crypto.randomUUID());
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="sm"
+			aria-labelledby="usuario-action-title"
 			onClose={() => {
 				if (!management.pending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>{labels[accion]}</DialogTitle>
-			<DialogContent>
+			<DialogTitle id="usuario-action-title">{labels[accion]}</DialogTitle>
+			<DialogContent dividers>
 				<Stack spacing={2}>
 					{management.feedback && <Alert severity="warning">{management.feedback}</Alert>}
-					<DialogContentText>
-						{usuario.nombre} {usuario.apellido} · {usuario.email}
-					</DialogContentText>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+							{usuario.apellido}, {usuario.nombre}
+						</Typography>
+						<Typography variant="caption" color="text.secondary">
+							{usuario.email}
+						</Typography>
+					</Paper>
 					<Alert severity={accion === 'desactivar' ? 'warning' : 'info'}>
 						{accion === 'desactivar'
-							? 'La cuenta dejará de operar. Se conserva su historial y se solicitará el cierre de sus sesiones.'
+							? 'La cuenta dejará de poder ingresar. Se conserva todo su historial y se solicitará el cierre de sus sesiones activas.'
 							: accion === 'reactivar'
-								? 'La cuenta volverá a estar activa. Sus sesiones anteriores no se restauran.'
+								? 'La cuenta volverá a estar habilitada. Deberá iniciar sesión nuevamente.'
 								: accion === 'restablecer'
-									? 'Se solicitará el cierre de las sesiones y se enviará un enlace de un uso para establecer una nueva contraseña.'
-									: 'Se enviará otro enlace para establecer la contraseña. No se creará una nueva cuenta.'}
+									? 'Se cerrarán sus sesiones activas y se enviará un enlace único (válido 15 minutos) para elegir una nueva contraseña.'
+									: 'Se enviará un nuevo enlace para establecer la contraseña, reemplazando al anterior. No se creará otra cuenta.'}
 					</Alert>
 				</Stack>
 			</DialogContent>
@@ -79,6 +89,9 @@ export function UsuarioActionDialog({
 					<Button
 						variant="contained"
 						color={accion === 'desactivar' ? 'error' : 'primary'}
+						startIcon={
+							management.pending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={management.pending || !management.enabled}
 						onClick={() =>
 							void management.run({

@@ -100,7 +100,7 @@ export async function getEmailTemplates(
 		...(signal ? { signal } : {}),
 	});
 	if (error || !data || !Array.isArray(data.templates)) {
-		throw new Error('No se pudo consultar las plantillas activas.');
+		throw new Error('No se pudieron consultar las plantillas activas.');
 	}
 	return data.templates.filter((x: EmailTemplate) => x.estado === 'activo');
 }

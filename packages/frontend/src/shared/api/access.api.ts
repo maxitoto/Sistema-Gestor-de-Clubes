@@ -1,6 +1,9 @@
 import type { Session } from '@supabase/supabase-js';
 
-async function request(input: object, signal?: AbortSignal): Promise<{ session?: unknown }> {
+async function request(
+	input: { operacion: 'login' | 'recuperar'; [key: string]: unknown },
+	signal?: AbortSignal,
+): Promise<{ session?: unknown }> {
 	const response = await fetch(`${process.env.PUBLIC_SUPABASE_URL}/functions/v1/acceso`, {
 		method: 'POST',
 		headers: {
@@ -17,9 +20,11 @@ async function request(input: object, signal?: AbortSignal): Promise<{ session?:
 		const message =
 			response.status === 429
 				? 'Se alcanzó el límite de solicitudes. Esperá antes de volver a intentarlo.'
-				: response.status === 400 || response.status === 401
-					? 'Correo o contraseña incorrectos.'
-					: 'No pudimos conectar con el servicio de acceso. Volvé a intentarlo.';
+				: response.status === 400 && input.operacion === 'recuperar'
+					? 'Ingresá un correo electrónico válido.'
+					: response.status === 400 || response.status === 401
+						? 'Correo o contraseña incorrectos.'
+						: 'No pudimos conectar con el servicio de acceso. Volvé a intentarlo.';
 		throw Object.assign(new Error(message), { status: response.status });
 	}
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {

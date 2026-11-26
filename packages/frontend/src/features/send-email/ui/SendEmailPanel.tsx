@@ -1,10 +1,15 @@
+import SendOutlinedIcon from '@mui/icons-material/SendOutlined';
 import {
 	Alert,
+	Box,
 	Button,
+	Chip,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Divider,
 	MenuItem,
 	Paper,
 	Stack,
@@ -15,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '#entities/session';
 import {
+	ETIQUETAS_CORREO,
 	idsCanonicosCorreo,
 	validarTextoCorreo,
 	vistaPreviaCorreo,
@@ -34,6 +40,7 @@ interface Props {
 	onPendingChange: (pendingRef: boolean) => void;
 	disabled?: boolean;
 }
+
 export function SendEmailPanel({
 	tipo,
 	incluirDesuscriptos,
@@ -62,6 +69,7 @@ export function SendEmailPanel({
 		abortRef = useRef<AbortController | null>(null),
 		aliveRef = useRef(true);
 	const locked = busy || uncertain || disabled;
+
 	useEffect(() => {
 		aliveRef.current = true;
 		return () => {
@@ -69,10 +77,21 @@ export function SendEmailPanel({
 			abortRef.current?.abort();
 		};
 	}, []);
+
 	useEffect(() => {
 		onPendingChange(busy || uncertain);
 		return () => onPendingChange(false);
 	}, [busy, uncertain, onPendingChange]);
+
+	const insertarEtiqueta = (tag: (typeof ETIQUETAS_CORREO)[number]) => {
+		if (locked) {
+			return;
+		}
+		setCuerpo((prev) => `${prev}${prev && !prev.endsWith(' ') ? ' ' : ''}{{${tag}}}`);
+		setPlantilla('');
+		setSuccess(null);
+	};
+
 	const prepare = () => {
 		if (locked || !elegibles || profileStatus !== 'ready' || isSigningOut) {
 			return;
@@ -105,6 +124,7 @@ export function SendEmailPanel({
 			setError(e instanceof Error ? e.message : 'Revisá la selección.');
 		}
 	};
+
 	const send = async () => {
 		if (lockRef.current || !pendingRef.current || profileStatus !== 'ready' || isSigningOut) {
 			return;
@@ -136,22 +156,29 @@ export function SendEmailPanel({
 			}
 		}
 	};
+
 	const previewSubject = tipo === 'deuda' ? 'Aviso de deuda pendiente' : vistaPreviaCorreo(asunto);
 	const previewBody =
 		tipo === 'deuda'
-			? 'Cada destinatario recibirá el aviso institucional con su deuda pendiente y fecha de preparación. El importe histórico se conserva; si salda toda la deuda antes del despacho, el aviso se excluye.'
+			? 'Cada destinatario recibirá el aviso institucional con su deuda pendiente y la fecha de emisión. Si regulariza su saldo antes del despacho, el envío se omite automáticamente.'
 			: vistaPreviaCorreo(cuerpo);
+
 	return (
 		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-			<Stack spacing={2}>
-				<Typography component="h2" variant="h6">
-					Componer y revisar el mensaje
-				</Typography>
+			<Stack spacing={2.25}>
+				<Stack direction="row" spacing={1.25} sx={{ alignItems: 'center' }}>
+					<Chip size="small" color="primary" label="Paso 2" />
+					<Typography component="h2" variant="h6">
+						Mensaje y vista previa
+					</Typography>
+				</Stack>
+
 				{tipo === 'general' ? (
 					<>
 						<TextField
+							size="small"
 							select
-							label="Plantilla de correo"
+							label="Cargar desde plantilla (opcional)"
 							value={plantilla}
 							disabled={locked || templates.isLoading}
 							onChange={(e) => {
@@ -164,23 +191,31 @@ export function SendEmailPanel({
 								setSuccess(null);
 							}}
 						>
-							<MenuItem value="">Sin plantilla</MenuItem>
+							<MenuItem value="">Redactar sin plantilla</MenuItem>
 							{templates.data?.map((p) => (
 								<MenuItem key={p.id} value={p.id}>
 									{p.nombre_interno}
 								</MenuItem>
 							))}
 						</TextField>
+
 						{templates.isError && (
 							<Alert
 								severity="warning"
-								action={<Button onClick={() => void templates.refetch()}>Reintentar</Button>}
+								action={
+									<Button size="small" color="inherit" onClick={() => void templates.refetch()}>
+										Reintentar
+									</Button>
+								}
 							>
-								No se pudieron cargar las plantillas. Podés redactar el mensaje.
+								No pudimos cargar las plantillas. Podés redactar el mensaje manualmente.
 							</Alert>
 						)}
+
 						<TextField
+							size="small"
 							label="Asunto"
+							placeholder="Ej. Horarios de entrenamiento de esta semana"
 							required
 							value={asunto}
 							disabled={locked}
@@ -191,126 +226,209 @@ export function SendEmailPanel({
 							}}
 							slotProps={{ htmlInput: { maxLength: 255 } }}
 						/>
-						<TextField
-							label="Mensaje"
-							required
-							multiline
-							minRows={5}
-							value={cuerpo}
-							disabled={locked}
-							onChange={(e) => {
-								setCuerpo(e.target.value);
-								setPlantilla('');
-								setSuccess(null);
-							}}
-							slotProps={{ htmlInput: { maxLength: 10000 } }}
-							helperText="Etiquetas: {{nombre}}, {{apellido}}, {{deporte}} y {{deuda}}. Se muestran como texto simple."
-						/>
+
+						<Stack spacing={1}>
+							<Stack
+								direction="row"
+								spacing={0.75}
+								useFlexGap
+								sx={{ flexWrap: 'wrap', alignItems: 'center' }}
+							>
+								<Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+									Insertar dato del socio:
+								</Typography>
+								{ETIQUETAS_CORREO.map((tag) => (
+									<Chip
+										key={tag}
+										size="small"
+										variant="outlined"
+										clickable={!locked}
+										disabled={locked}
+										label={`{{${tag}}}`}
+										onClick={() => insertarEtiqueta(tag)}
+									/>
+								))}
+							</Stack>
+
+							<TextField
+								label="Mensaje"
+								placeholder="Hola {{nombre}}, te escribimos desde el club para informarte…"
+								required
+								multiline
+								minRows={5}
+								value={cuerpo}
+								disabled={locked}
+								onChange={(e) => {
+									setCuerpo(e.target.value);
+									setPlantilla('');
+									setSuccess(null);
+								}}
+								slotProps={{ htmlInput: { maxLength: 10000 } }}
+								helperText="Se envía como texto simple. Las etiquetas se reemplazan con los datos de cada socio."
+							/>
+						</Stack>
 					</>
 				) : (
 					<>
 						<TextField
+							size="small"
 							label="Asunto del aviso"
 							value="Aviso de deuda pendiente"
 							slotProps={{ input: { readOnly: true } }}
 						/>
 						<Alert severity="info">
-							El contenido del aviso de deuda se prepara con los datos confirmados de cada socio. No
-							se reemplaza con una comunicación general.
+							El texto del aviso de deuda se arma automáticamente con el saldo actualizado de cada
+							socio seleccionado.
 						</Alert>
 					</>
 				)}
-				<Paper variant="outlined" sx={{ p: 2 }}>
-					<Typography component="h3" variant="subtitle1">
-						Vista previa orientativa con datos sintéticos
+
+				<Paper variant="outlined" sx={{ p: 2, bgcolor: 'action.hover' }}>
+					<Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+						VISTA PREVIA DE EJEMPLO (DATOS ILUSTRATIVOS)
 					</Typography>
-					<Typography sx={{ fontWeight: 700, my: 1, overflowWrap: 'anywhere' }}>
-						{previewSubject}
+					<Typography variant="subtitle2" sx={{ fontWeight: 700, mt: 1, overflowWrap: 'anywhere' }}>
+						{previewSubject || 'Sin asunto todavía'}
 					</Typography>
-					<Typography sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-						{previewBody}
+					<Divider sx={{ my: 1.25 }} />
+					<Typography
+						variant="body2"
+						color={previewBody ? 'text.primary' : 'text.secondary'}
+						sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+					>
+						{previewBody || 'Escribí el mensaje arriba para ver cómo lo recibirá el socio.'}
 					</Typography>
 				</Paper>
-				<Typography color="text.secondary">
-					Cada destinatario recibe un mensaje individual. Antes de despachar se vuelven a comprobar
-					dirección, preferencia y deuda; pueden cambiar las exclusiones.
+
+				<Typography variant="caption" color="text.secondary">
+					Cada destinatario recibe un correo individual. Antes de enviar, el sistema vuelve a
+					validar dirección, preferencia y saldo pendiente.
 				</Typography>
+
 				{error && <Alert severity={uncertain ? 'warning' : 'error'}>{error}</Alert>}
+
 				{uncertain && (
-					<Button variant="contained" disabled={busy} onClick={() => void send()}>
-						Recuperar la misma solicitud
-					</Button>
-				)}
-				{success && (
-					<Alert severity="success">
-						<Typography sx={{ fontWeight: 700 }}>Encolado</Typography>
-						En cola: {success.encolados}. Excluidos: {success.excluidos}. Los correos están siendo
-						enviados en segundo plano. La entrega todavía no está confirmada.{' '}
-						<Button component={Link} to={`/comunicaciones/${success.id}`}>
-							Ver resultado en el historial
+					<Box>
+						<Button variant="contained" disabled={busy} onClick={() => void send()}>
+							Recuperar la misma solicitud
 						</Button>
+					</Box>
+				)}
+
+				{success && (
+					<Alert
+						severity="success"
+						action={
+							<Button
+								size="small"
+								color="inherit"
+								component={Link}
+								to={`/comunicaciones/${success.id}`}
+							>
+								Ver detalle
+							</Button>
+						}
+					>
+						<Typography variant="body2" sx={{ fontWeight: 700 }}>
+							Envío programado correctamente
+						</Typography>
+						<Typography variant="body2" sx={{ mt: 0.25 }}>
+							Programados: {success.encolados} · Excluidos: {success.excluidos}. Los correos se
+							están procesando en segundo plano y podrás seguir la entrega desde el historial.
+						</Typography>
 					</Alert>
 				)}
-				<Button
-					variant="contained"
-					disabled={
-						locked ||
-						!selectedSocios.length ||
-						!elegibles ||
-						(tipo === 'general' && (!asunto.trim() || !cuerpo.trim()))
-					}
-					onClick={prepare}
-				>
-					{busy ? 'Confirmando…' : 'Revisar y confirmar comunicación'}
-				</Button>
+
+				<Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
+					<Button
+						variant="contained"
+						startIcon={busy ? <CircularProgress size={16} color="inherit" /> : <SendOutlinedIcon />}
+						disabled={
+							locked ||
+							!selectedSocios.length ||
+							!elegibles ||
+							(tipo === 'general' && (!asunto.trim() || !cuerpo.trim()))
+						}
+						onClick={prepare}
+					>
+						{busy ? 'Programando envío…' : 'Revisar y programar envío'}
+					</Button>
+				</Stack>
+
 				<Dialog
 					open={review}
 					fullWidth
 					maxWidth="md"
+					aria-labelledby="confirmar-comunicacion-title"
 					onClose={() => {
 						if (!busy) {
 							setReview(false);
 						}
 					}}
 				>
-					<DialogTitle>Confirmar comunicación</DialogTitle>
-					<DialogContent>
+					<DialogTitle id="confirmar-comunicacion-title">
+						Confirmar envío de comunicación
+					</DialogTitle>
+					<DialogContent dividers>
 						<Stack spacing={2}>
-							<Typography>
-								{selectedSocios.length} socios seleccionados: {elegibles} elegibles y {excluidos}{' '}
-								excluidos según la consulta actual.
-							</Typography>
-							<Typography variant="body2">
-								{selectedLabels.slice(0, 5).join(' · ')}
-								{selectedLabels.length > 5 ? ` · y ${selectedLabels.length - 5} más` : ''}
-							</Typography>
+							<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+								<Typography variant="body2" sx={{ fontWeight: 700 }}>
+									{selectedSocios.length} socios seleccionados: {elegibles} elegibles y {excluidos}{' '}
+									excluidos.
+								</Typography>
+								<Typography
+									variant="caption"
+									color="text.secondary"
+									sx={{ display: 'block', mt: 0.5 }}
+								>
+									{selectedLabels.slice(0, 5).join(' · ')}
+									{selectedLabels.length > 5 ? ` · y ${selectedLabels.length - 5} más` : ''}
+								</Typography>
+							</Paper>
+
 							{tipo === 'deuda' && incluirDesuscriptos && (
 								<Alert severity="warning">
-									Se incluyen desuscriptos sólo si conservan deuda pendiente. Una dirección inválida
-									se excluye siempre.
+									Se incluirán socios desuscriptos solo si mantienen deuda pendiente. Las
+									direcciones marcadas como inválidas se excluyen siempre.
 								</Alert>
 							)}
-							<Typography variant="body2" color="text.secondary">
-								Vista previa con datos de ejemplo. Cada mensaje usará los datos del socio.
-							</Typography>
-							<Typography sx={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
-								{previewSubject}
-							</Typography>
-							<Typography sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-								{previewBody}
-							</Typography>
+
+							<Paper variant="outlined" sx={{ p: 2 }}>
+								<Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+									VISTA PREVIA (CADA SOCIO VERÁ SUS PROPIOS DATOS)
+								</Typography>
+								<Typography
+									variant="subtitle2"
+									sx={{ fontWeight: 700, mt: 0.75, overflowWrap: 'anywhere' }}
+								>
+									{previewSubject}
+								</Typography>
+								<Divider sx={{ my: 1 }} />
+								<Typography
+									variant="body2"
+									sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+								>
+									{previewBody}
+								</Typography>
+							</Paper>
+
 							<Alert severity="info">
-								Se guardará una única solicitud con los destinatarios elegidos. El resultado
-								confirmado será Encolado; consultá el historial para seguir el procesamiento.
+								Se registrará una única solicitud de envío en segundo plano. Podrás seguir el estado
+								individual de cada destinatario en el historial.
 							</Alert>
 						</Stack>
 					</DialogContent>
 					<DialogActions>
 						<Button disabled={busy} onClick={() => setReview(false)}>
-							Volver a revisar
+							Volver a editar
 						</Button>
-						<Button variant="contained" disabled={busy} onClick={() => void send()}>
-							Confirmar y encolar
+						<Button
+							variant="contained"
+							startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+							disabled={busy}
+							onClick={() => void send()}
+						>
+							{busy ? 'Programando…' : 'Confirmar y programar envío'}
 						</Button>
 					</DialogActions>
 				</Dialog>

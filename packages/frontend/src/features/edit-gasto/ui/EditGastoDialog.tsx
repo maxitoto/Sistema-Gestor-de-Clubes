@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -23,6 +24,7 @@ import {
 } from '#entities/gasto';
 import { useAuth } from '#entities/session';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+
 export function EditGastoDialog({
 	gasto,
 	onClose,
@@ -61,28 +63,35 @@ export function EditGastoDialog({
 			void mutation.run(result.datos);
 		}
 	};
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="md"
+			aria-labelledby="edit-gasto-title"
 			onClose={() => {
 				if (!mutation.isPending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>Editar gasto</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
+			<DialogTitle id="edit-gasto-title">Editar gasto</DialogTitle>
+			<DialogContent dividers>
+				<Stack spacing={2.5}>
 					<Alert severity="info">
-						Podés corregir un gasto activo durante su día de carga. La fecha del gasto no amplía ese
-						permiso.
+						Podés editar un gasto activo durante su día de carga. Cambiar la fecha del gasto no
+						extiende ese plazo.
 					</Alert>
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
 					<GastoFields
 						form={form}
-						onChange={setForm}
+						onChange={(next) => {
+							setForm(next);
+							if (Object.keys(errors).length) {
+								setErrors({});
+							}
+						}}
 						errores={errors}
 						disabled={mutation.isPending || mutation.requiresCheck || !mutation.enabled}
 						categorias={categoryList}
@@ -91,7 +100,7 @@ export function EditGastoDialog({
 			</DialogContent>
 			<DialogActions>
 				<Button disabled={mutation.isPending} onClick={onClose}>
-					Cerrar
+					Cancelar
 				</Button>
 				{mutation.requiresCheck ? (
 					<Button disabled={mutation.isPending} onClick={() => void mutation.reconcile()}>
@@ -100,10 +109,13 @@ export function EditGastoDialog({
 				) : (
 					<Button
 						variant="contained"
+						startIcon={
+							mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={mutation.isPending || !mutation.enabled}
 						onClick={save}
 					>
-						Guardar cambios
+						{mutation.isPending ? 'Guardando…' : 'Guardar cambios'}
 					</Button>
 				)}
 			</DialogActions>

@@ -18,7 +18,7 @@ export function LoginPage() {
 	}
 	return (
 		<Box sx={{ flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-			<Stack spacing={2} sx={{ width: '100%', maxWidth: 560 }}>
+			<Stack spacing={2} sx={{ width: '100%', maxWidth: 460 }}>
 				{message && <Alert severity="info">{message}</Alert>}
 				<LoginForm />
 			</Stack>

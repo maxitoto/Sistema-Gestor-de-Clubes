@@ -3,6 +3,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	Chip,
 	CircularProgress,
 	Dialog,
 	DialogActions,
@@ -27,6 +28,7 @@ import {
 	type PeriodoCuotas,
 } from '#entities/job-cuotas';
 import { useAuth } from '#entities/session';
+import { EmptyState } from '#shared/ui';
 import { useGenerarCuotas } from '../model/useGenerarCuotas';
 
 const periodoTexto = (periodo: PeriodoCuotas) =>
@@ -40,15 +42,30 @@ const fechaTexto = (value: string | null) =>
 			}).format(new Date(value))
 		: 'En proceso';
 
-export function GenerarCuotasPanel() {
+export function GenerarCuotasPanel({ embedded = false }: { embedded?: boolean } = {}) {
 	const { cacheScope, profileStatus, perfil, user, isSigningOut } = useAuth();
 	if (profileStatus !== 'ready' || perfil?.rol !== 'admin' || !user || isSigningOut) {
 		return null;
 	}
-	return <PanelGeneracion key={cacheScope} cacheScope={cacheScope} usuarioId={user.id} />;
+	return (
+		<PanelGeneracion
+			key={cacheScope}
+			cacheScope={cacheScope}
+			usuarioId={user.id}
+			embedded={embedded}
+		/>
+	);
 }
 
-function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuarioId: string }) {
+function PanelGeneracion({
+	cacheScope,
+	usuarioId,
+	embedded,
+}: {
+	cacheScope: string;
+	usuarioId: string;
+	embedded: boolean;
+}) {
 	const { profileStatus, perfil, isSigningOut } = useAuth();
 	const enabled = profileStatus === 'ready' && perfil?.rol === 'admin' && !isSigningOut;
 	const [confirmar, setConfirmar] = useState<PeriodoCuotas | null>(null);
@@ -67,25 +84,30 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 	});
 	const generation = useGenerarCuotas({ cacheScope, enabled, usuarioId });
 	const result = generation.result;
+
 	const abrirConfirmacion = async () => {
 		const actual = await periodo.refetch();
 		if (actual.data && !actual.error) {
 			setConfirmar(actual.data);
 		}
 	};
-	return (
-		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 }, mt: 3 }}>
+
+	const content = (
+		<Stack spacing={2}>
 			<Stack
 				direction={{ xs: 'column', sm: 'row' }}
 				spacing={2}
-				sx={{ justifyContent: 'space-between', mb: 2 }}
+				sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
 			>
 				<Box>
-					<Typography component="h2" variant="h6">
-						Cuotas mensuales
-					</Typography>
+					{!embedded && (
+						<Typography component="h2" variant="h6">
+							Cuotas mensuales
+						</Typography>
+					)}
 					<Typography variant="body2" color="text.secondary">
-						Generación del mes actual y consulta de corridas anteriores.
+						La generación manual siempre toma el mes actual del club. Las cuotas ya emitidas se
+						conservan sin duplicarse.
 					</Typography>
 				</Box>
 				<Button
@@ -100,44 +122,54 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 						periodo.isError
 					}
 					onClick={() => void abrirConfirmacion()}
+					sx={{ flexShrink: 0, alignSelf: { xs: 'flex-start', sm: 'center' } }}
 				>
 					Generar cuotas del mes
 				</Button>
 			</Stack>
-			<Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-				El período y los importes se determinan con la fecha del club. Las cuotas ya emitidas se
-				conservan.
-			</Typography>
+
 			{periodo.isError && (
 				<Alert
 					severity="error"
-					action={<Button onClick={() => void periodo.refetch()}>Reintentar</Button>}
-					sx={{ mb: 2 }}
+					action={
+						<Button size="small" color="inherit" onClick={() => void periodo.refetch()}>
+							Reintentar
+						</Button>
+					}
 				>
-					No pudimos consultar el período actual.
+					No pudimos consultar el período actual del club.
 				</Alert>
 			)}
+
 			{generation.feedback && (
-				<Alert severity={generation.requiresCheck ? 'warning' : 'info'} sx={{ mb: 2 }}>
+				<Alert
+					severity={generation.requiresCheck ? 'warning' : 'info'}
+					action={
+						generation.requiresCheck ? (
+							<Button
+								size="small"
+								color="inherit"
+								disabled={generation.isPending || !enabled}
+								onClick={() => void generation.consultarResultado()}
+							>
+								Consultar resultado
+							</Button>
+						) : undefined
+					}
+				>
 					{generation.feedback}
 				</Alert>
 			)}
-			{generation.requiresCheck && (
-				<Button
-					variant="outlined"
-					disabled={generation.isPending || !enabled}
-					onClick={() => void generation.consultarResultado()}
-					sx={{ mb: 2 }}
-				>
-					Consultar resultado guardado
-				</Button>
-			)}
+
 			{generation.isPending && (
-				<Stack direction="row" spacing={1} role="status" sx={{ alignItems: 'center', my: 2 }}>
-					<CircularProgress size={20} />
-					<Typography variant="body2">Consultando y verificando la generación…</Typography>
+				<Stack direction="row" spacing={1.25} role="status" sx={{ alignItems: 'center' }}>
+					<CircularProgress size={18} />
+					<Typography variant="body2" color="text.secondary">
+						Verificando y ejecutando la generación…
+					</Typography>
 				</Stack>
 			)}
+
 			{result && (
 				<Alert
 					severity={
@@ -147,23 +179,25 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 								? 'success'
 								: 'info'
 					}
-					sx={{ mb: 2 }}
 				>
-					<Typography sx={{ fontWeight: 700 }}>
+					<Typography variant="body2" sx={{ fontWeight: 700 }}>
 						{result.job.estado === 'fallido'
 							? 'La generación no se completó'
 							: result.origen === 'generado'
 								? 'Generación confirmada'
 								: result.origen === 'recuperado'
-									? 'Corrida guardada consultada'
+									? 'Resultado de la generación recuperado'
 									: 'El mes ya fue generado'}
 					</Typography>
-					Período {periodoTexto({ mes: result.job.periodo_mes, anio: result.job.periodo_anio })}.{' '}
-					{result.job.estado === 'fallido'
-						? 'No se confirmó un lote parcial. Podés revisar el historial y volver a intentar manualmente.'
-						: `${result.job.cuotas_generadas} cuotas generadas y ${result.job.cuotas_omitidas} ya existentes conservadas en esa corrida.`}
+					<Typography variant="body2" sx={{ mt: 0.25 }}>
+						Período {periodoTexto({ mes: result.job.periodo_mes, anio: result.job.periodo_anio })}.{' '}
+						{result.job.estado === 'fallido'
+							? 'No se confirmó un lote parcial. Podés revisar el historial y volver a intentar.'
+							: `${result.job.cuotas_generadas} cuotas generadas y ${result.job.cuotas_omitidas} ya existentes conservadas.`}
+					</Typography>
 				</Alert>
 			)}
+
 			{result?.job.estado === 'exitoso' && (
 				<EstadoNotificacionCorreo
 					operation={{ jobId: result.job.id }}
@@ -172,23 +206,42 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 					enabled={enabled}
 				/>
 			)}
-			<Typography component="h3" variant="subtitle2" sx={{ mb: 1 }}>
-				Últimas corridas
+
+			<Typography component="h3" variant="subtitle2" sx={{ fontWeight: 700, pt: 0.5 }}>
+				Últimas generaciones
 			</Typography>
-			{history.isPending && <CircularProgress size={22} aria-label="Cargando corridas de cuotas" />}
+
+			{history.isPending && (
+				<Stack direction="row" spacing={1.25} sx={{ py: 2, alignItems: 'center' }}>
+					<CircularProgress size={18} aria-label="Cargando historial de generaciones" />
+					<Typography variant="body2" color="text.secondary">
+						Cargando historial…
+					</Typography>
+				</Stack>
+			)}
+
 			{history.isError && (
 				<Alert
 					severity="error"
-					action={<Button onClick={() => void history.refetch()}>Reintentar</Button>}
+					action={
+						<Button size="small" color="inherit" onClick={() => void history.refetch()}>
+							Reintentar
+						</Button>
+					}
 				>
-					No pudimos cargar el historial de generación.
+					No pudimos cargar el historial de generaciones.
 				</Alert>
 			)}
+
 			{!history.isPending && !history.isError && history.data?.length === 0 && (
-				<Alert severity="info">Todavía no hay corridas registradas.</Alert>
+				<EmptyState
+					title="Todavía no hay generaciones registradas"
+					description="Cuando ejecutes la emisión mensual de cuotas, cada resultado quedará registrado acá."
+				/>
 			)}
+
 			{!!history.data?.length && (
-				<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
+				<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
 					<Table size="small" aria-label="Historial de generación mensual de cuotas">
 						<TableHead>
 							<TableRow>
@@ -203,26 +256,43 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 						<TableBody>
 							{history.data.map((job) => (
 								<TableRow key={job.id}>
-									<TableCell>
+									<TableCell sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
 										{periodoTexto({ mes: job.periodo_mes, anio: job.periodo_anio })}
 									</TableCell>
 									<TableCell>
-										{job.estado === 'exitoso'
-											? 'Completada'
-											: job.estado === 'fallido'
-												? 'Fallida'
-												: 'En proceso'}
+										<Chip
+											size="small"
+											color={
+												job.estado === 'exitoso'
+													? 'success'
+													: job.estado === 'fallido'
+														? 'error'
+														: 'warning'
+											}
+											label={
+												job.estado === 'exitoso'
+													? 'Completada'
+													: job.estado === 'fallido'
+														? 'Fallida'
+														: 'En proceso'
+											}
+										/>
 									</TableCell>
 									<TableCell align="right">{job.cuotas_generadas}</TableCell>
 									<TableCell align="right">{job.cuotas_omitidas}</TableCell>
-									<TableCell>{fechaTexto(job.fecha_inicio)}</TableCell>
-									<TableCell>{fechaTexto(job.fecha_fin)}</TableCell>
+									<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+										{fechaTexto(job.fecha_inicio)}
+									</TableCell>
+									<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+										{fechaTexto(job.fecha_fin)}
+									</TableCell>
 								</TableRow>
 							))}
 						</TableBody>
 					</Table>
 				</TableContainer>
 			)}
+
 			<Dialog
 				open={Boolean(confirmar)}
 				onClose={() => {
@@ -237,14 +307,16 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 					Generar cuotas de {confirmar ? periodoTexto(confirmar) : ''}
 				</DialogTitle>
 				<DialogContent dividers>
-					<Typography>
-						Se generarán las cuotas que correspondan a socios activos con inscripciones vigentes.
-						Las cuotas existentes no se duplican ni se recalculan.
-					</Typography>
-					<Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-						El resultado se consulta antes de confirmar la operación. Esta acción no registra
-						cobros.
-					</Typography>
+					<Stack spacing={1.5}>
+						<Typography variant="body2">
+							Se generarán las cuotas correspondientes a los socios activos con inscripciones
+							vigentes. Las cuotas que ya existan en este período no se duplican ni se recalculan.
+						</Typography>
+						<Typography variant="caption" color="text.secondary">
+							El sistema verifica el estado previo antes de confirmar. Esta acción solo emite cuotas
+							pendientes y no registra cobros.
+						</Typography>
+					</Stack>
 				</DialogContent>
 				<DialogActions>
 					<Button
@@ -269,6 +341,16 @@ function PanelGeneracion({ cacheScope, usuarioId }: { cacheScope: string; usuari
 					</Button>
 				</DialogActions>
 			</Dialog>
+		</Stack>
+	);
+
+	if (embedded) {
+		return content;
+	}
+
+	return (
+		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+			{content}
 		</Paper>
 	);
 }

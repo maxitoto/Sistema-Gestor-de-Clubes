@@ -5,6 +5,7 @@ import {
 	Alert,
 	Avatar,
 	Button,
+	CircularProgress,
 	Divider,
 	IconButton,
 	InputAdornment,
@@ -22,31 +23,47 @@ export function LoginForm() {
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
+	const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(false);
+
 	const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
+		const cleanEmail = email.trim();
+		const nextErrors: { email?: string; password?: string } = {};
+		if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+			nextErrors.email = 'Ingresá un correo electrónico válido.';
+		}
+		if (!password) {
+			nextErrors.password = 'Ingresá tu contraseña.';
+		}
+		if (nextErrors.email || nextErrors.password) {
+			setFieldErrors(nextErrors);
+			return;
+		}
+		setFieldErrors({});
 		setLoading(true);
 		setError(null);
 		try {
-			const { error: authError } = await login({ email: email.trim(), password });
+			const { error: authError } = await login({ email: cleanEmail, password });
 			if (authError) {
 				setError(
 					authError.status === 400 || authError.status === 401
 						? 'Correo o contraseña incorrectos.'
 						: authError.message ||
-								'No pudimos conectar con el servicio de acceso. Vuelva a intentarlo.',
+								'No pudimos conectar con el servicio de acceso. Volvé a intentarlo.',
 				);
 			}
 		} catch {
-			setError('No pudimos conectar con el servicio de acceso. Revise su conexión.');
+			setError('No pudimos conectar con el servicio de acceso. Revisá tu conexión.');
 		} finally {
 			setLoading(false);
 		}
 	};
+
 	return (
 		<Paper variant="outlined" sx={{ p: { xs: 3, sm: 4 }, width: '100%', boxSizing: 'border-box' }}>
-			<Stack spacing={1.5} sx={{ mb: 3, alignItems: 'center' }}>
+			<Stack spacing={1.25} sx={{ mb: 3, alignItems: 'center' }}>
 				<Avatar
 					variant="rounded"
 					sx={{ width: 48, height: 48, bgcolor: 'primary.main', color: 'primary.contrastText' }}
@@ -62,18 +79,25 @@ export function LoginForm() {
 			</Stack>
 			<Divider sx={{ mb: 3 }} />
 			{error && (
-				<Alert severity="error" sx={{ mb: 2 }}>
+				<Alert severity="error" sx={{ mb: 2.5 }}>
 					{error}
 				</Alert>
 			)}
-			<Stack component="form" onSubmit={handleLogin} spacing={2.5}>
+			<Stack component="form" noValidate onSubmit={handleLogin} spacing={2.25}>
 				<TextField
 					fullWidth
 					label="Correo electrónico"
 					type="email"
 					autoComplete="username"
 					value={email}
-					onChange={(e) => setEmail(e.target.value)}
+					error={Boolean(fieldErrors.email)}
+					helperText={fieldErrors.email}
+					onChange={(e) => {
+						setEmail(e.target.value);
+						if (fieldErrors.email) {
+							setFieldErrors((prev) => ({ ...prev, email: '' }));
+						}
+					}}
 					required
 					disabled={loading}
 				/>
@@ -83,7 +107,14 @@ export function LoginForm() {
 					type={showPassword ? 'text' : 'password'}
 					autoComplete="current-password"
 					value={password}
-					onChange={(e) => setPassword(e.target.value)}
+					error={Boolean(fieldErrors.password)}
+					helperText={fieldErrors.password}
+					onChange={(e) => {
+						setPassword(e.target.value);
+						if (fieldErrors.password) {
+							setFieldErrors((prev) => ({ ...prev, password: '' }));
+						}
+					}}
 					required
 					disabled={loading}
 					slotProps={{
@@ -103,7 +134,14 @@ export function LoginForm() {
 						},
 					}}
 				/>
-				<Button type="submit" fullWidth variant="contained" disabled={loading} size="large">
+				<Button
+					type="submit"
+					fullWidth
+					variant="contained"
+					startIcon={loading ? <CircularProgress size={16} color="inherit" /> : undefined}
+					disabled={loading}
+					size="large"
+				>
 					{loading ? 'Ingresando…' : 'Ingresar'}
 				</Button>
 				<Button component={Link} to="/recuperar-contrasena" disabled={loading}>

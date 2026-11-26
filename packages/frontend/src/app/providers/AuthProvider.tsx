@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				return;
 			}
 			setProfileStatus('error');
-			setMessage('No pudimos recuperar la sesión. Vuelva a iniciar sesión.');
+			setMessage('No pudimos recuperar la sesión. Volvé a iniciar sesión.');
 		}, 10_000);
 		// El callback es síncrono: la carga del perfil sucede en el efecto siguiente.
 		const {
@@ -182,8 +182,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 					setProfileStatus(data?.estado === 'inactivo' ? 'inactive' : 'missing');
 					setMessage(
 						data?.estado === 'inactivo'
-							? 'Su cuenta ha sido suspendida.'
-							: 'Su cuenta no tiene un perfil operativo habilitado. Comuníquese con el administrador.',
+							? 'Tu cuenta fue suspendida.'
+							: 'Tu cuenta no tiene un perfil operativo habilitado. Comunicate con el administrador.',
 					);
 					clearProtectedData();
 					return;
@@ -201,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 				}
 				setPerfil(null);
 				setProfileStatus('error');
-				setMessage('No pudimos verificar su perfil. Revise la conexión y vuelva a intentarlo.');
+				setMessage('No pudimos verificar tu perfil. Revisá la conexión y volvé a intentarlo.');
 				clearProtectedData();
 			} finally {
 				window.clearTimeout(timeout);
@@ -254,7 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		const check = () => {
 			window.clearTimeout(timeout);
 			if (activityClock.expired(Date.now())) {
-				void logout('La sesión finalizó después de 30 minutos sin actividad. Ingrese nuevamente.');
+				void logout('La sesión finalizó después de 30 minutos sin actividad. Ingresá nuevamente.');
 				return false;
 			}
 			timeout = window.setTimeout(check, Math.max(1, activityClock.remaining(Date.now())));
