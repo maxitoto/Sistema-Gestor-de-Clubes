@@ -192,10 +192,10 @@ export function parseResultadoAccionFiscal(value: unknown): ResultadoAccionFisca
 }
 export const tituloAccionFiscal = (accion: AccionMonitoreo) =>
 	({
-		forzar: 'Forzar regularización',
-		reabrir: 'Reabrir regularización',
+		forzar: 'Reintentar autorización',
+		reabrir: 'Reabrir plazo de reintentos',
 		resolver: 'Conciliar anulación',
-		'registrar-externo': 'Consultar regularización externa',
+		'registrar-externo': 'Consultar en ARCA',
 	})[accion];
 export function puedeAccionFiscal(
 	row: FilaMonitoreo,

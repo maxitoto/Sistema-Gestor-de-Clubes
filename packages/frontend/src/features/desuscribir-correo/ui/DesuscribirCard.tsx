@@ -110,6 +110,9 @@ export function DesuscribirCard() {
 									<Button
 										variant="contained"
 										size="large"
+										startIcon={
+											enviando ? <CircularProgress size={16} color="inherit" /> : undefined
+										}
 										disabled={enviando}
 										onClick={() => void confirmar()}
 									>
