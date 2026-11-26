@@ -1,10 +1,12 @@
 import {
 	Alert,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Paper,
 	Stack,
 	TextField,
 	Typography,
@@ -20,6 +22,7 @@ import {
 } from '#entities/gasto';
 import { useAuth } from '#entities/session';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+
 export function AnularGastoDialog({
 	gasto,
 	onClose,
@@ -44,35 +47,55 @@ export function AnularGastoDialog({
 	});
 	const confirm = () => {
 		if (!motivo.trim()) {
-			setError('Completá el motivo de anulación.');
+			setError('Completá el motivo de la anulación.');
 			return;
 		}
 		void mutation.run({ motivo: motivo.trim() });
 	};
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="sm"
+			aria-labelledby="anular-gasto-title"
 			onClose={() => {
 				if (!mutation.isPending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>Anular gasto</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ pt: 1 }}>
-					<Typography>
-						{gasto.concepto} · {monedaGasto(gasto.monto)}
-					</Typography>
+			<DialogTitle id="anular-gasto-title">Anular gasto</DialogTitle>
+			<DialogContent dividers>
+				<Stack spacing={2}>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Stack
+							direction="row"
+							spacing={1.5}
+							sx={{ alignItems: 'center', justifyContent: 'space-between' }}
+						>
+							<Typography variant="subtitle2" sx={{ fontWeight: 700, minWidth: 0 }}>
+								{gasto.concepto}
+							</Typography>
+							<Typography
+								variant="subtitle1"
+								sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}
+							>
+								{monedaGasto(gasto.monto)}
+							</Typography>
+						</Stack>
+					</Paper>
+
 					<Alert severity="warning">
-						Se conservará el gasto original y se registrará su anulación con motivo. El movimiento
-						de devolución se verá en la fecha de anulación.
+						El gasto original quedará visible como anulado y se registrará el asiento de anulación
+						con la fecha de hoy para ajustar el resultado de caja.
 					</Alert>
+
 					{mutation.feedback && <Alert severity="warning">{mutation.feedback}</Alert>}
+
 					<TextField
-						label="Motivo de anulación"
+						label="Motivo de la anulación"
+						placeholder="Ej. Carga duplicada o error en el importe"
 						required
 						multiline
 						minRows={3}
@@ -83,7 +106,7 @@ export function AnularGastoDialog({
 						}}
 						disabled={mutation.isPending || mutation.requiresCheck}
 						error={!!error}
-						helperText={error}
+						helperText={error ?? 'Queda registrado en el historial de caja y auditoría.'}
 					/>
 				</Stack>
 			</DialogContent>
@@ -99,10 +122,13 @@ export function AnularGastoDialog({
 					<Button
 						variant="contained"
 						color="error"
+						startIcon={
+							mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={mutation.isPending || !mutation.enabled}
 						onClick={confirm}
 					>
-						Confirmar anulación
+						{mutation.isPending ? 'Anulando…' : 'Confirmar anulación'}
 					</Button>
 				)}
 			</DialogActions>

@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -24,6 +25,7 @@ import {
 import { useAuth } from '#entities/session';
 import { useHumanCreate } from '#shared/lib/useHumanCreate';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+
 export function CategoriaGastoDialog({
 	categoria,
 	onClose,
@@ -67,6 +69,7 @@ export function CategoriaGastoDialog({
 	});
 	const pending = categoria ? edit.isPending : create.isPending;
 	const requiresCheck = categoria ? edit.requiresCheck : create.requiresCheck;
+
 	const submit = (event: FormEvent) => {
 		event.preventDefault();
 		const result = validarCategoriaGasto(form);
@@ -81,11 +84,13 @@ export function CategoriaGastoDialog({
 			void create.create(result.payload);
 		}
 	};
+
 	return (
 		<Dialog
 			open
 			maxWidth="sm"
 			fullWidth
+			aria-labelledby="categoria-gasto-title"
 			onClose={() => {
 				if (!pending) {
 					onClose();
@@ -93,14 +98,14 @@ export function CategoriaGastoDialog({
 			}}
 		>
 			<Box component="form" onSubmit={submit} noValidate>
-				<DialogTitle>
+				<DialogTitle id="categoria-gasto-title">
 					{categoria ? 'Editar categoría de gasto' : 'Nueva categoría de gasto'}
 				</DialogTitle>
-				<DialogContent>
-					<Stack spacing={2.5} sx={{ pt: 1 }}>
-						<Typography color="text.secondary">
-							La clasificación se conserva en los gastos anteriores. Cambiar su nombre actualiza
-							cómo se muestran.
+				<DialogContent dividers>
+					<Stack spacing={2.25}>
+						<Typography variant="body2" color="text.secondary">
+							La clasificación se conserva en los gastos anteriores. Renombrar la categoría
+							actualiza cómo se muestra en el historial.
 						</Typography>
 						{fieldError && <Alert severity="error">{fieldError}</Alert>}
 						{categoria
@@ -114,6 +119,7 @@ export function CategoriaGastoDialog({
 								)}
 						<TextField
 							label="Nombre"
+							placeholder="Ej. Servicios, Mantenimiento, Equipamiento"
 							value={form.nombre}
 							required
 							disabled={pending || requiresCheck}
@@ -133,8 +139,11 @@ export function CategoriaGastoDialog({
 						/>
 						{requiresCheck && (
 							<Button
+								variant="outlined"
+								size="small"
 								disabled={pending}
 								onClick={() => void (categoria ? edit.reconcile() : create.checkExisting())}
+								sx={{ alignSelf: 'flex-start' }}
 							>
 								Consultar resultado
 							</Button>
@@ -145,8 +154,13 @@ export function CategoriaGastoDialog({
 					<Button disabled={pending} onClick={onClose}>
 						Cancelar
 					</Button>
-					<Button type="submit" variant="contained" disabled={!enabled || pending || requiresCheck}>
-						{pending ? 'Verificando…' : 'Guardar categoría'}
+					<Button
+						type="submit"
+						variant="contained"
+						startIcon={pending ? <CircularProgress size={16} color="inherit" /> : undefined}
+						disabled={!enabled || pending || requiresCheck}
+					>
+						{pending ? 'Guardando…' : 'Guardar categoría'}
 					</Button>
 				</DialogActions>
 			</Box>

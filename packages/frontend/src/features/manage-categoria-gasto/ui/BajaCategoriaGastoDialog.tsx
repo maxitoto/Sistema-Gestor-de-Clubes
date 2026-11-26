@@ -1,10 +1,12 @@
 import {
 	Alert,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	Paper,
 	Stack,
 	Typography,
 } from '@mui/material';
@@ -16,6 +18,7 @@ import {
 } from '#entities/categoria-gasto';
 import { useAuth } from '#entities/session';
 import { useVerifiedMutation } from '#shared/lib/useVerifiedMutation';
+
 export function BajaCategoriaGastoDialog({
 	categoria,
 	onClose,
@@ -36,23 +39,34 @@ export function BajaCategoriaGastoDialog({
 		onConfirmed: onSaved,
 		describeError: describirErrorCategoriaGasto,
 	});
+
 	return (
 		<Dialog
 			open
 			fullWidth
 			maxWidth="sm"
+			aria-labelledby="baja-categoria-gasto-title"
 			onClose={() => {
 				if (!mutation.isPending) {
 					onClose();
 				}
 			}}
 		>
-			<DialogTitle>Dar de baja categoría</DialogTitle>
-			<DialogContent>
+			<DialogTitle id="baja-categoria-gasto-title">Dar de baja categoría</DialogTitle>
+			<DialogContent dividers>
 				<Stack spacing={2}>
-					<Typography>¿Dar de baja «{categoria.nombre}»?</Typography>
+					<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+						<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+							{categoria.nombre}
+						</Typography>
+						{categoria.descripcion && (
+							<Typography variant="caption" color="text.secondary">
+								{categoria.descripcion}
+							</Typography>
+						)}
+					</Paper>
 					<Alert severity="warning">
-						Dejará de ofrecerse para gastos nuevos. Los gastos ya registrados conservarán su
+						Dejará de aparecer al registrar nuevos gastos. Los gastos ya cargados conservarán su
 						categoría e historial.
 					</Alert>
 					{mutation.feedback && (
@@ -74,10 +88,13 @@ export function BajaCategoriaGastoDialog({
 					<Button
 						variant="contained"
 						color="error"
+						startIcon={
+							mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
 						disabled={mutation.isPending || !mutation.enabled}
 						onClick={() => void mutation.run(null)}
 					>
-						Dar de baja
+						{mutation.isPending ? 'Confirmando…' : 'Confirmar baja'}
 					</Button>
 				)}
 			</DialogActions>
