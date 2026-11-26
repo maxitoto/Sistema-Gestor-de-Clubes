@@ -109,7 +109,7 @@ export function validarSocioForm(
 	}
 	const hoy = fechaBuenosAires(now);
 	if (!fechaCalendarioValida(nacimiento)) {
-		errors.fecha_nacimiento = 'Ingresá una fecha de calendario válida (AAAA-MM-DD).';
+		errors.fecha_nacimiento = 'Ingresá una fecha de nacimiento válida.';
 	} else if (nacimiento > hoy) {
 		errors.fecha_nacimiento = 'La fecha de nacimiento no puede ser futura.';
 	}

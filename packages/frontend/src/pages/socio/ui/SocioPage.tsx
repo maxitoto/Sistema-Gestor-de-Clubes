@@ -1,5 +1,7 @@
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import PaymentsOutlinedIcon from '@mui/icons-material/PaymentsOutlined';
+import SportsSoccerOutlinedIcon from '@mui/icons-material/SportsSoccerOutlined';
 import {
 	Alert,
 	Box,
@@ -29,6 +31,7 @@ import { DesvincularSocioDialog } from '#features/desvincular-socio';
 import { EditSocioForm } from '#features/edit-socio';
 import { InscribirSocioDialog } from '#features/inscribir-socio';
 import { UpdateSocioPhoto } from '#features/update-socio-photo';
+import { EmptyState, InfoTooltip, PageHeader } from '#shared/ui';
 
 const currency = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 const date = (value: string | null) => {
@@ -51,21 +54,46 @@ export function SocioPage() {
 	const { cacheScope } = useAuth();
 	if (!uuid.test(socioId)) {
 		return (
-			<Alert severity="info">
-				No se encontró el socio solicitado. <Link to="/socios">Volver al padrón</Link>
+			<Alert
+				severity="info"
+				action={
+					<Button size="small" color="inherit" component={Link} to="/socios">
+						Volver al padrón
+					</Button>
+				}
+			>
+				No se encontró el socio solicitado.
 			</Alert>
 		);
 	}
 	return <SocioView key={`${cacheScope}:${socioId}`} socioId={socioId} />;
 }
 
-function Datum({ label, value }: { label: string; value: string | number | null }) {
+function Datum({
+	label,
+	value,
+	tabular = false,
+}: {
+	label: string;
+	value: string | number | null;
+	tabular?: boolean;
+}) {
 	return (
-		<Box>
-			<Typography variant="caption" color="text.secondary">
+		<Box sx={{ minWidth: 0 }}>
+			<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
 				{label}
 			</Typography>
-			<Typography sx={{ overflowWrap: 'anywhere' }}>{value || 'No informado'}</Typography>
+			<Typography
+				variant="body2"
+				sx={{
+					mt: 0.25,
+					fontWeight: 500,
+					overflowWrap: 'anywhere',
+					fontVariantNumeric: tabular ? 'tabular-nums' : undefined,
+				}}
+			>
+				{value || 'No informado'}
+			</Typography>
 		</Box>
 	);
 }
@@ -81,24 +109,37 @@ function SocioView({ socioId }: { socioId: string }) {
 	const [statusOpen, setStatusOpen] = useState(false);
 	const [inscribirOpen, setInscribirOpen] = useState(false);
 	const [desvincular, setDesvincular] = useState<InscripcionHistorial | null>(null);
+
 	const refresh = () => {
 		void detail.refetch();
 		void resumen.refetch();
 		void historial.refetch();
 	};
+
 	if (!enabled || detail.isPending) {
 		return (
-			<Box role="status" sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-				<CircularProgress size={24} />
-				<Typography>Cargando ficha del socio…</Typography>
-			</Box>
+			<Stack
+				direction="row"
+				spacing={1.5}
+				role="status"
+				sx={{ py: 6, justifyContent: 'center', alignItems: 'center' }}
+			>
+				<CircularProgress size={22} />
+				<Typography variant="body2" color="text.secondary">
+					Cargando ficha del socio…
+				</Typography>
+			</Stack>
 		);
 	}
 	if (detail.isError) {
 		return (
 			<Alert
 				severity="error"
-				action={<Button onClick={() => void detail.refetch()}>Reintentar</Button>}
+				action={
+					<Button size="small" color="inherit" onClick={() => void detail.refetch()}>
+						Reintentar
+					</Button>
+				}
 			>
 				No pudimos cargar la ficha. Revisá la conexión e intentá nuevamente.
 			</Alert>
@@ -106,107 +147,163 @@ function SocioView({ socioId }: { socioId: string }) {
 	}
 	if (!detail.data) {
 		return (
-			<Alert severity="info">
-				No se encontró el socio solicitado. <Link to="/socios">Volver al padrón</Link>
+			<Alert
+				severity="info"
+				action={
+					<Button size="small" color="inherit" component={Link} to="/socios">
+						Volver al padrón
+					</Button>
+				}
+			>
+				No se encontró el socio solicitado.
 			</Alert>
 		);
 	}
+
 	const socio = detail.data;
 	const active = historial.data?.filter((item) => item.estado === 'activa') ?? [];
 	const past = historial.data?.filter((item) => item.estado !== 'activa') ?? [];
+
 	return (
 		<Stack spacing={3}>
-			<Button
-				component={Link}
-				to="/socios"
-				startIcon={<ArrowBackIcon />}
-				sx={{ alignSelf: 'flex-start' }}
-			>
-				Volver al padrón
-			</Button>
-			<Stack
-				direction={{ xs: 'column', sm: 'row' }}
-				sx={{ gap: 2, alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
-			>
-				<Box>
-					<Typography component="h1" variant="h5">
-						{socio.apellido}, {socio.nombre}
-					</Typography>
-					<Typography color="text.secondary">
-						Socio n.º {socio.numero_socio} · DNI {socio.dni}
-					</Typography>
-				</Box>
-				<Stack direction="row" sx={{ gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-					<Chip
-						label={socio.estado === 'activo' ? 'Activo' : 'Inactivo'}
-						color={socio.estado === 'activo' ? 'success' : 'default'}
-						variant="outlined"
-					/>
-					<Button
-						variant="outlined"
-						startIcon={<EditOutlinedIcon />}
-						onClick={() => setEditOpen(true)}
-					>
-						Editar datos
+			<PageHeader
+				back={
+					<Button component={Link} to="/socios" size="small" startIcon={<ArrowBackIcon />}>
+						Volver al padrón
 					</Button>
-					<Button component={Link} to={`/pagos?socioId=${socio.id}`} variant="outlined">
-						Ver cuotas y cobros
-					</Button>
-					<Button
-						color={socio.estado === 'activo' ? 'error' : 'primary'}
-						onClick={() => setStatusOpen(true)}
-					>
-						{socio.estado === 'activo' ? 'Dar de baja' : 'Reactivar socio'}
-					</Button>
-				</Stack>
-			</Stack>
+				}
+				title={`${socio.apellido}, ${socio.nombre}`}
+				subtitle={`Socio #${socio.numero_socio} · DNI ${socio.dni}`}
+				actions={
+					<>
+						<Chip
+							size="small"
+							label={socio.estado === 'activo' ? 'Activo' : 'Inactivo'}
+							color={socio.estado === 'activo' ? 'success' : 'default'}
+						/>
+						<Button
+							variant="outlined"
+							size="small"
+							startIcon={<PaymentsOutlinedIcon />}
+							component={Link}
+							to={`/pagos?socioId=${socio.id}`}
+						>
+							Cuotas y cobros
+						</Button>
+						<Button
+							variant="outlined"
+							size="small"
+							startIcon={<EditOutlinedIcon />}
+							onClick={() => setEditOpen(true)}
+						>
+							Editar datos
+						</Button>
+						<Button
+							variant={socio.estado === 'activo' ? 'outlined' : 'contained'}
+							size="small"
+							color={socio.estado === 'activo' ? 'error' : 'primary'}
+							onClick={() => setStatusOpen(true)}
+						>
+							{socio.estado === 'activo' ? 'Dar de baja' : 'Reactivar socio'}
+						</Button>
+					</>
+				}
+			/>
+
 			<Box
 				sx={{
 					display: 'grid',
-					gridTemplateColumns: { xs: '1fr', md: 'minmax(260px, 1fr) 2fr' },
+					gridTemplateColumns: { xs: '1fr', md: 'minmax(280px, 1fr) 1.5fr' },
 					gap: 3,
 				}}
 			>
 				<UpdateSocioPhoto socioId={socio.id} onUpdated={refresh} />
-				<Paper variant="outlined" sx={{ p: 3 }}>
-					<Typography component="h2" variant="h6" sx={{ mb: 2 }}>
-						Estado de cuotas
-					</Typography>
+				<Paper
+					variant="outlined"
+					sx={{
+						p: 2.5,
+						borderLeftWidth: 4,
+						borderLeftColor: resumen.data
+							? resumen.data.esMoroso
+								? 'error.main'
+								: resumen.data.deudaPendiente > 0
+									? 'warning.main'
+									: 'success.main'
+							: 'divider',
+					}}
+				>
+					<Stack
+						direction="row"
+						spacing={1}
+						sx={{ alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}
+					>
+						<Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+							<Typography component="h2" variant="h6">
+								Estado de cuotas
+							</Typography>
+							<InfoTooltip
+								label="Relación entre deuda y estado del socio"
+								title="El estado de pago es independiente del estado administrativo: dar de baja a un socio conserva su historial y sus cuotas pendientes."
+							/>
+						</Stack>
+						{resumen.data && (
+							<Chip
+								size="small"
+								label={resumen.data.esMoroso ? 'Moroso' : 'Al día'}
+								color={resumen.data.esMoroso ? 'error' : 'success'}
+							/>
+						)}
+					</Stack>
+
 					{resumen.isPending ? (
-						<CircularProgress size={22} aria-label="Consultando cuotas" />
+						<Stack direction="row" spacing={1.25} sx={{ py: 2, alignItems: 'center' }}>
+							<CircularProgress size={18} aria-label="Consultando cuotas" />
+							<Typography variant="body2" color="text.secondary">
+								Consultando resumen de cuotas…
+							</Typography>
+						</Stack>
 					) : resumen.isError || !resumen.data ? (
 						<Alert
 							severity="warning"
-							action={<Button onClick={() => void resumen.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void resumen.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
 							No pudimos consultar el resumen de cuotas.
 						</Alert>
 					) : (
-						<Stack spacing={1.5}>
-							<Chip
-								sx={{ alignSelf: 'flex-start' }}
-								label={resumen.data.esMoroso ? 'Moroso' : 'Al día'}
-								color={resumen.data.esMoroso ? 'error' : 'success'}
-								variant="outlined"
-							/>
-							<Typography>
-								Deuda pendiente total:{' '}
-								<strong>{currency.format(resumen.data.deudaPendiente)}</strong>
-							</Typography>
-							<Typography variant="body2" color="text.secondary">
-								{resumen.data.cuotasPendientes}{' '}
-								{resumen.data.cuotasPendientes === 1 ? 'cuota pendiente' : 'cuotas pendientes'}. El
-								estado de pago es independiente del estado administrativo del socio.
-							</Typography>
-							{!resumen.data.esMoroso && (
-								<Typography variant="body2" color="text.secondary">
-									No registra cuotas en mora. Puede tener cuotas pendientes dentro del plazo.
+						<Stack spacing={1.25}>
+							<Box>
+								<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+									Deuda pendiente total
 								</Typography>
-							)}
+								<Typography
+									variant="h4"
+									sx={{
+										fontWeight: 800,
+										fontVariantNumeric: 'tabular-nums',
+										color: resumen.data.esMoroso
+											? 'error.main'
+											: resumen.data.deudaPendiente > 0
+												? 'warning.main'
+												: 'text.primary',
+									}}
+								>
+									{currency.format(resumen.data.deudaPendiente)}
+								</Typography>
+							</Box>
+							<Typography variant="body2" color="text.secondary">
+								{resumen.data.cuotasPendientes === 0
+									? 'Sin cuotas pendientes de pago.'
+									: `${resumen.data.cuotasPendientes} ${resumen.data.cuotasPendientes === 1 ? 'cuota pendiente' : 'cuotas pendientes'}${!resumen.data.esMoroso ? ' (todas dentro del plazo).' : '.'}`}
+							</Typography>
 						</Stack>
 					)}
 				</Paper>
 			</Box>
+
 			<Paper variant="outlined">
 				<Tabs
 					value={tab}
@@ -214,10 +311,11 @@ function SocioView({ socioId }: { socioId: string }) {
 					aria-label="Secciones de la ficha"
 					variant="scrollable"
 					allowScrollButtonsMobile
+					sx={{ px: 1 }}
 				>
 					<Tab label="Datos del socio" id="socio-tab-datos" aria-controls="socio-panel-datos" />
 					<Tab
-						label="Historial deportivo"
+						label={`Historial deportivo (${active.length})`}
 						id="socio-tab-deportes"
 						aria-controls="socio-panel-deportes"
 					/>
@@ -241,13 +339,15 @@ function SocioView({ socioId }: { socioId: string }) {
 				>
 					<Stack
 						direction={{ xs: 'column', sm: 'row' }}
-						sx={{ mb: 2, gap: 2, justifyContent: 'space-between', alignItems: { sm: 'center' } }}
+						spacing={2}
+						sx={{ mb: 2, justifyContent: 'space-between', alignItems: { sm: 'center' } }}
 					>
 						<Typography component="h2" variant="h6">
-							Actividades actuales
+							Actividades vigentes
 						</Typography>
 						<Button
 							variant="contained"
+							size="small"
 							disabled={socio.estado !== 'activo'}
 							onClick={() => setInscribirOpen(true)}
 						>
@@ -260,25 +360,37 @@ function SocioView({ socioId }: { socioId: string }) {
 						</Alert>
 					)}
 					{historial.isPending ? (
-						<CircularProgress size={22} aria-label="Cargando historial" />
+						<Stack direction="row" spacing={1.25} sx={{ py: 3, alignItems: 'center' }}>
+							<CircularProgress size={18} aria-label="Cargando historial" />
+							<Typography variant="body2" color="text.secondary">
+								Cargando historial deportivo…
+							</Typography>
+						</Stack>
 					) : historial.isError ? (
 						<Alert
 							severity="error"
-							action={<Button onClick={() => void historial.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void historial.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
 							No pudimos consultar las inscripciones.
 						</Alert>
 					) : (
 						<Stack spacing={3}>
 							<HistorialTable rows={active} active onDesvincular={setDesvincular} />
-							<Typography component="h2" variant="h6">
-								Inscripciones históricas
-							</Typography>
-							<HistorialTable rows={past} onDesvincular={setDesvincular} />
+							<Box>
+								<Typography component="h2" variant="h6" sx={{ mb: 1.5 }}>
+									Inscripciones anteriores
+								</Typography>
+								<HistorialTable rows={past} onDesvincular={setDesvincular} />
+							</Box>
 						</Stack>
 					)}
 				</Box>
 			</Paper>
+
 			{editOpen && (
 				<EditSocioForm open socio={socio} onClose={() => setEditOpen(false)} onSaved={refresh} />
 			)}
@@ -313,58 +425,71 @@ function SocioView({ socioId }: { socioId: string }) {
 
 function DatosSocio({ socio }: { socio: SocioDetalle }) {
 	const age = edadSocio(socio.fecha_nacimiento);
+	const showFechaBaja = socio.estado === 'inactivo' || Boolean(socio.fecha_baja);
 	return (
 		<Stack spacing={3}>
-			<Typography component="h2" variant="h6">
-				Datos personales
-			</Typography>
-			<Box
-				sx={{
-					display: 'grid',
-					gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', lg: '1fr 1fr 1fr' },
-					gap: 3,
-				}}
-			>
-				<Datum label="Nombre" value={socio.nombre} />
-				<Datum label="Apellido" value={socio.apellido} />
-				<Datum
-					label="Fecha de nacimiento"
-					value={`${date(socio.fecha_nacimiento)}${age === null ? '' : ` · ${age} años`}`}
-				/>
-				<Datum label="Fecha de ingreso" value={date(socio.fecha_alta)} />
-				<Datum label="Fecha de baja" value={date(socio.fecha_baja)} />
+			<Box>
+				<Typography component="h2" variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+					Datos personales
+				</Typography>
+				<Box
+					sx={{
+						display: 'grid',
+						gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(3, 1fr)' },
+						gap: 2.5,
+					}}
+				>
+					<Datum label="Nombre" value={socio.nombre} />
+					<Datum label="Apellido" value={socio.apellido} />
+					<Datum
+						label="Fecha de nacimiento"
+						value={`${date(socio.fecha_nacimiento)}${age === null ? '' : ` · ${age} años`}`}
+						tabular
+					/>
+					<Datum label="Fecha de ingreso" value={date(socio.fecha_alta)} tabular />
+					{showFechaBaja && <Datum label="Fecha de baja" value={date(socio.fecha_baja)} tabular />}
+				</Box>
 			</Box>
+
 			<Divider />
-			<Typography component="h2" variant="h6">
-				Contacto y preferencias
-			</Typography>
-			<Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 3 }}>
-				<Datum label="Correo electrónico" value={socio.email} />
-				<Datum label="Teléfono" value={socio.telefono} />
-				<Datum label="Domicilio" value={socio.direccion} />
-				<Datum
-					label="Comunicaciones"
-					value={
-						socio.acepta_comunicaciones
-							? 'Acepta comunicaciones del club'
-							: 'No acepta comunicaciones del club'
-					}
-				/>
+
+			<Box>
+				<Typography component="h2" variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+					Contacto y preferencias
+				</Typography>
+				<Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5 }}>
+					<Datum label="Correo electrónico" value={socio.email} />
+					<Datum label="Teléfono" value={socio.telefono} tabular />
+					<Datum label="Domicilio" value={socio.direccion} />
+					<Datum
+						label="Comunicaciones"
+						value={
+							socio.acepta_comunicaciones
+								? 'Acepta comunicaciones del club'
+								: 'No acepta comunicaciones del club'
+						}
+					/>
+				</Box>
+				{socio.email_invalido && (
+					<Alert severity="warning" sx={{ mt: 2 }}>
+						El correo está marcado como inválido. Al corregirlo podrá volver a recibir envíos; la
+						preferencia de comunicaciones se mantiene por separado.
+					</Alert>
+				)}
 			</Box>
-			{socio.email_invalido && (
-				<Alert severity="warning">
-					El correo está marcado como inválido. Corregirlo permitirá volver a utilizarlo; la
-					preferencia de comunicaciones se gestiona por separado.
-				</Alert>
-			)}
+
 			<Divider />
-			<Typography component="h2" variant="h6">
-				Contacto de emergencia
-			</Typography>
-			<Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 3 }}>
-				<Datum label="Nombre del contacto" value={socio.contacto_emergencia_nombre} />
-				<Datum label="Teléfono del contacto" value={socio.contacto_emergencia_telefono} />
+
+			<Box>
+				<Typography component="h2" variant="subtitle1" sx={{ fontWeight: 700, mb: 2 }}>
+					Contacto de emergencia
+				</Typography>
+				<Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2.5 }}>
+					<Datum label="Nombre del contacto" value={socio.contacto_emergencia_nombre} />
+					<Datum label="Teléfono del contacto" value={socio.contacto_emergencia_telefono} tabular />
+				</Box>
 			</Box>
+
 			{socio.dni_corregido_at && (
 				<Alert severity="info">
 					Documento corregido el {date(socio.dni_corregido_at)}. Documento anterior:{' '}
@@ -386,13 +511,19 @@ function HistorialTable({
 }) {
 	if (!rows.length) {
 		return (
-			<Alert severity="info">
-				{active ? 'No tiene inscripciones activas.' : 'Todavía no tiene inscripciones cerradas.'}
-			</Alert>
+			<EmptyState
+				icon={<SportsSoccerOutlinedIcon />}
+				title={active ? 'Sin inscripciones activas' : 'Sin inscripciones anteriores'}
+				description={
+					active
+						? 'Usá «Inscribir a actividad» para asociar a este socio a un deporte y categoría.'
+						: 'Cuando el socio se desvincule de alguna actividad, su registro histórico aparecerá acá.'
+				}
+			/>
 		);
 	}
 	return (
-		<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1 }}>
+		<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
 			<Table
 				size="small"
 				aria-label={active ? 'Inscripciones activas' : 'Historial de inscripciones'}
@@ -401,9 +532,9 @@ function HistorialTable({
 					<TableRow>
 						<TableCell>Deporte / categoría</TableCell>
 						<TableCell>Alta</TableCell>
-						<TableCell>Baja</TableCell>
+						{!active && <TableCell>Baja</TableCell>}
 						<TableCell>Estado</TableCell>
-						{active && <TableCell>Acciones</TableCell>}
+						{active && <TableCell align="right">Acciones</TableCell>}
 					</TableRow>
 				</TableHead>
 				<TableBody>
@@ -417,19 +548,29 @@ function HistorialTable({
 									{row.categoria?.nombre}
 								</Typography>
 							</TableCell>
-							<TableCell>{date(row.fecha_alta)}</TableCell>
-							<TableCell>{date(row.fecha_baja)}</TableCell>
+							<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+								{date(row.fecha_alta)}
+							</TableCell>
+							{!active && (
+								<TableCell sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+									{date(row.fecha_baja)}
+								</TableCell>
+							)}
 							<TableCell>
 								<Chip
 									size="small"
-									variant="outlined"
 									color={active ? 'success' : 'default'}
 									label={active ? 'Activa' : 'Cerrada'}
 								/>
 							</TableCell>
 							{active && (
-								<TableCell>
-									<Button color="error" onClick={() => onDesvincular(row)}>
+								<TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+									<Button
+										size="small"
+										variant="outlined"
+										color="error"
+										onClick={() => onDesvincular(row)}
+									>
 										Desvincular
 									</Button>
 								</TableCell>

@@ -1,12 +1,14 @@
+import AddOutlinedIcon from '@mui/icons-material/AddOutlined';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import {
 	Alert,
 	Button,
 	Chip,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
-	MenuItem,
 	Paper,
 	Stack,
 	Table,
@@ -16,7 +18,6 @@ import {
 	TableHead,
 	TablePagination,
 	TableRow,
-	TextField,
 	Typography,
 } from '@mui/material';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -28,17 +29,26 @@ import {
 } from '#entities/plantilla-correo';
 import { useAuth } from '#entities/session';
 import { TemplateForm } from '#features/manage-email-template';
+import { EmptyState, PageHeader } from '#shared/ui';
 import { ComunicacionesTabs } from './ComunicacionesTabs';
+
+const ESTADO_PILLS = [
+	{ value: 'todos', label: 'Todas' },
+	{ value: 'activo', label: 'Activas' },
+	{ value: 'inactivo', label: 'Inactivas' },
+] as const;
+
 export function PlantillasPage() {
 	const { cacheScope } = useAuth();
 	return <Plantillas key={cacheScope} />;
 }
+
 function Plantillas() {
 	const { perfil, profileStatus, isSigningOut, cacheScope } = useAuth(),
 		client = useQueryClient();
 	const [page, setPage] = useState(1),
 		[size, setSize] = useState<20 | 50 | 100>(20),
-		[estado, setEstado] = useState('todos'),
+		[estado, setEstado] = useState<'todos' | 'activo' | 'inactivo'>('todos'),
 		[form, setForm] = useState<{ plantilla: PlantillaCorreo | null } | null>(null),
 		[change, setChange] = useState<PlantillaCorreo | null>(null),
 		[busy, setBusy] = useState(false),
@@ -47,6 +57,7 @@ function Plantillas() {
 	const lockRef = useRef(false),
 		abortRef = useRef<AbortController | null>(null),
 		aliveRef = useRef(true);
+
 	useEffect(() => {
 		aliveRef.current = true;
 		return () => {
@@ -54,12 +65,14 @@ function Plantillas() {
 			abortRef.current?.abort();
 		};
 	}, []);
+
 	const q = useQuery({
 		queryKey: ['plantillas-correo', cacheScope, page, size, estado],
 		queryFn: ({ signal }) => getPlantillasCorreo(page, size, estado, perfil?.id ?? '', signal),
 		enabled: profileStatus === 'ready' && !isSigningOut,
 		retry: 1,
 	});
+
 	useEffect(() => {
 		if (q.data) {
 			const ultima = Math.max(1, Math.ceil(q.data.total / size));
@@ -68,10 +81,12 @@ function Plantillas() {
 			}
 		}
 	}, [q.data, page, size]);
+
 	const refresh = () => {
 		void client.invalidateQueries({ queryKey: ['plantillas-correo', cacheScope] });
 		void client.invalidateQueries({ queryKey: ['email-templates', cacheScope] });
 	};
+
 	const confirm = async () => {
 		if (!change || lockRef.current || profileStatus !== 'ready' || isSigningOut) {
 			return;
@@ -109,131 +124,200 @@ function Plantillas() {
 			}
 		}
 	};
+
 	return (
-		<>
-			<Typography variant="h4" component="h1" sx={{ mb: 3 }}>
-				Plantillas de correo
-			</Typography>
-			<ComunicacionesTabs />
-			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-				<Stack spacing={2}>
-					<Stack
-						direction={{ xs: 'column', sm: 'row' }}
-						spacing={2}
-						sx={{ justifyContent: 'space-between' }}
+		<Stack spacing={3}>
+			<PageHeader
+				title="Plantillas de correo"
+				subtitle="Prepará mensajes reutilizables con etiquetas dinámicas. Editar o desactivar una plantilla conserva los envíos anteriores."
+				actions={
+					<Button
+						variant="contained"
+						startIcon={<AddOutlinedIcon />}
+						onClick={() => {
+							setError(null);
+							setSuccess('');
+							setForm({ plantilla: null });
+						}}
 					>
-						<TextField
-							select
-							label="Estado de plantilla"
-							value={estado}
-							onChange={(e) => {
-								setEstado(e.target.value);
-								setPage(1);
-							}}
-							sx={{ minWidth: 180 }}
-						>
-							<MenuItem value="todos">Todas</MenuItem>
-							<MenuItem value="activo">Activas</MenuItem>
-							<MenuItem value="inactivo">Inactivas</MenuItem>
-						</TextField>
-						<Button
-							variant="contained"
-							onClick={() => {
-								setError(null);
-								setSuccess('');
-								setForm({ plantilla: null });
-							}}
-						>
-							Nueva plantilla
-						</Button>
+						Nueva plantilla
+					</Button>
+				}
+			/>
+
+			<ComunicacionesTabs />
+
+			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+				<Stack spacing={2.25}>
+					<Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: 'wrap' }}>
+						{ESTADO_PILLS.map((pill) => {
+							const active = estado === pill.value;
+							return (
+								<Chip
+									key={pill.value}
+									size="small"
+									label={pill.label}
+									clickable
+									color={active ? 'primary' : 'default'}
+									variant={active ? 'filled' : 'outlined'}
+									onClick={() => {
+										setEstado(pill.value);
+										setPage(1);
+									}}
+								/>
+							);
+						})}
 					</Stack>
-					<Typography color="text.secondary">
-						Usá texto simple con etiquetas. La edición o baja lógica conserva los mensajes
-						históricos.
-					</Typography>
-					{success && <Alert severity="success">{success}</Alert>}
+
+					{success && (
+						<Alert severity="success" onClose={() => setSuccess('')}>
+							{success}
+						</Alert>
+					)}
 					{error && <Alert severity="error">{error}</Alert>}
-					{q.isLoading && <Typography>Consultando plantillas…</Typography>}
-					{q.isError && (
+
+					{q.isLoading ? (
+						<Stack
+							direction="row"
+							spacing={1.5}
+							sx={{ py: 5, justifyContent: 'center', alignItems: 'center' }}
+						>
+							<CircularProgress size={20} />
+							<Typography variant="body2" color="text.secondary">
+								Consultando plantillas…
+							</Typography>
+						</Stack>
+					) : q.isError ? (
 						<Alert
 							severity="error"
-							action={<Button onClick={() => void q.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void q.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
 							{q.error.message}
 						</Alert>
-					)}
-					{q.data && (
-						<>
-							<TableContainer>
-								<Table aria-label="Plantillas de correo" sx={{ minWidth: 650 }}>
-									<TableHead>
-										<TableRow>
-											<TableCell>Nombre interno</TableCell>
-											<TableCell>Asunto</TableCell>
-											<TableCell>Estado</TableCell>
-											<TableCell>Acciones</TableCell>
-										</TableRow>
-									</TableHead>
-									<TableBody>
-										{q.data.plantillas.map((p) => (
-											<TableRow key={p.id}>
-												<TableCell>{p.nombre_interno}</TableCell>
-												<TableCell>{p.asunto}</TableCell>
-												<TableCell>
-													<Chip
-														size="small"
-														label={p.estado === 'activo' ? 'Activa' : 'Inactiva'}
-														color={p.estado === 'activo' ? 'success' : 'default'}
-													/>
-												</TableCell>
-												<TableCell>
-													<Button
-														onClick={() => {
-															setError(null);
-															setSuccess('');
-															setForm({ plantilla: p });
-														}}
-													>
-														Editar
-													</Button>
-													<Button
-														color={p.estado === 'activo' ? 'error' : 'primary'}
-														onClick={() => {
-															setError(null);
-															setChange(p);
-														}}
-													>
-														{p.estado === 'activo' ? 'Desactivar' : 'Activar'}
-													</Button>
-												</TableCell>
-											</TableRow>
-										))}
-										{!q.data.plantillas.length && (
-											<TableRow>
-												<TableCell colSpan={4}>No hay plantillas para este filtro.</TableCell>
-											</TableRow>
-										)}
-									</TableBody>
-								</Table>
-							</TableContainer>
-							<TablePagination
-								component="div"
-								count={q.data.total}
-								page={Math.min(page - 1, Math.max(0, Math.ceil(q.data.total / size) - 1))}
-								rowsPerPage={size}
-								rowsPerPageOptions={[20, 50, 100]}
-								labelRowsPerPage="Filas por página"
-								labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
-								onPageChange={(_, p) => setPage(p + 1)}
-								onRowsPerPageChange={(e) => {
-									setPage(1);
-									setSize(Number(e.target.value) as 20 | 50 | 100);
-								}}
+					) : q.data ? (
+						!q.data.plantillas.length ? (
+							<EmptyState
+								icon={<DescriptionOutlinedIcon />}
+								title={
+									estado === 'todos'
+										? 'Todavía no hay plantillas creadas'
+										: 'No hay plantillas para este estado'
+								}
+								description={
+									estado === 'todos'
+										? 'Creá una plantilla para agilizar comunicados frecuentes del club.'
+										: 'Probá seleccionando «Todas» para ver el resto.'
+								}
+								action={
+									estado !== 'todos' ? (
+										<Button
+											variant="outlined"
+											size="small"
+											onClick={() => {
+												setEstado('todos');
+												setPage(1);
+											}}
+										>
+											Ver todas
+										</Button>
+									) : (
+										<Button
+											variant="contained"
+											size="small"
+											startIcon={<AddOutlinedIcon />}
+											onClick={() => {
+												setError(null);
+												setSuccess('');
+												setForm({ plantilla: null });
+											}}
+										>
+											Nueva plantilla
+										</Button>
+									)
+								}
 							/>
-						</>
-					)}
+						) : (
+							<>
+								<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
+									<Table size="small" aria-label="Plantillas de correo" sx={{ minWidth: 640 }}>
+										<TableHead>
+											<TableRow>
+												<TableCell>Nombre de la plantilla</TableCell>
+												<TableCell>Asunto</TableCell>
+												<TableCell>Estado</TableCell>
+												<TableCell align="right">Acciones</TableCell>
+											</TableRow>
+										</TableHead>
+										<TableBody>
+											{q.data.plantillas.map((p) => (
+												<TableRow key={p.id}>
+													<TableCell sx={{ fontWeight: 600 }}>{p.nombre_interno}</TableCell>
+													<TableCell>{p.asunto}</TableCell>
+													<TableCell>
+														<Chip
+															size="small"
+															label={p.estado === 'activo' ? 'Activa' : 'Inactiva'}
+															color={p.estado === 'activo' ? 'success' : 'default'}
+														/>
+													</TableCell>
+													<TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+														<Stack
+															direction="row"
+															spacing={0.5}
+															sx={{ justifyContent: 'flex-end' }}
+														>
+															<Button
+																size="small"
+																variant="outlined"
+																onClick={() => {
+																	setError(null);
+																	setSuccess('');
+																	setForm({ plantilla: p });
+																}}
+															>
+																Editar
+															</Button>
+															<Button
+																size="small"
+																color={p.estado === 'activo' ? 'error' : 'primary'}
+																onClick={() => {
+																	setError(null);
+																	setChange(p);
+																}}
+															>
+																{p.estado === 'activo' ? 'Desactivar' : 'Activar'}
+															</Button>
+														</Stack>
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</Table>
+								</TableContainer>
+								<TablePagination
+									component="div"
+									count={q.data.total}
+									page={Math.min(page - 1, Math.max(0, Math.ceil(q.data.total / size) - 1))}
+									rowsPerPage={size}
+									rowsPerPageOptions={[20, 50, 100]}
+									labelRowsPerPage="Filas por página"
+									labelDisplayedRows={({ from, to, count }) => `${from}–${to} de ${count}`}
+									onPageChange={(_, p) => setPage(p + 1)}
+									onRowsPerPageChange={(e) => {
+										setPage(1);
+										setSize(Number(e.target.value) as 20 | 50 | 100);
+									}}
+								/>
+							</>
+						)
+					) : null}
 				</Stack>
 			</Paper>
+
 			{form && (
 				<TemplateForm
 					plantilla={form.plantilla}
@@ -244,41 +328,56 @@ function Plantillas() {
 					}}
 				/>
 			)}
+
 			<Dialog
 				open={Boolean(change)}
 				fullWidth
 				maxWidth="sm"
+				aria-labelledby="estado-plantilla-title"
 				onClose={() => {
 					if (!busy) {
 						setChange(null);
 					}
 				}}
 			>
-				<DialogTitle>
+				<DialogTitle id="estado-plantilla-title">
 					{change?.estado === 'activo' ? 'Desactivar plantilla' : 'Activar plantilla'}
 				</DialogTitle>
-				<DialogContent>
-					<Typography>{change?.nombre_interno}</Typography>
-					<Typography sx={{ mt: 2 }}>
-						{change?.estado === 'activo'
-							? 'Dejará de aparecer en nuevas comunicaciones. Los envíos anteriores conservan el asunto y el mensaje usados.'
-							: 'Volverá a estar disponible para preparar nuevas comunicaciones.'}
-					</Typography>
-					{error && (
-						<Alert severity="error" sx={{ mt: 2 }}>
-							{error}
-						</Alert>
-					)}
+				<DialogContent dividers>
+					<Stack spacing={2}>
+						<Paper variant="outlined" sx={{ p: 1.75, bgcolor: 'action.hover' }}>
+							<Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+								{change?.nombre_interno}
+							</Typography>
+							{change?.asunto && (
+								<Typography variant="caption" color="text.secondary">
+									Asunto: {change.asunto}
+								</Typography>
+							)}
+						</Paper>
+						<Typography variant="body2">
+							{change?.estado === 'activo'
+								? 'Dejará de aparecer al redactar nuevas comunicaciones. Los envíos anteriores conservan su asunto y mensaje.'
+								: 'Volverá a estar disponible al redactar nuevas comunicaciones.'}
+						</Typography>
+						{error && <Alert severity="error">{error}</Alert>}
+					</Stack>
 				</DialogContent>
 				<DialogActions>
 					<Button disabled={busy} onClick={() => setChange(null)}>
 						Cancelar
 					</Button>
-					<Button disabled={busy} variant="contained" onClick={() => void confirm()}>
+					<Button
+						disabled={busy}
+						variant="contained"
+						color={change?.estado === 'activo' ? 'error' : 'primary'}
+						startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
+						onClick={() => void confirm()}
+					>
 						{busy ? 'Confirmando…' : 'Confirmar'}
 					</Button>
 				</DialogActions>
 			</Dialog>
-		</>
+		</Stack>
 	);
 }
