@@ -1,11 +1,16 @@
+import OpenInNewOutlinedIcon from '@mui/icons-material/OpenInNewOutlined';
+import PictureAsPdfOutlinedIcon from '@mui/icons-material/PictureAsPdfOutlined';
+import RefreshOutlinedIcon from '@mui/icons-material/RefreshOutlined';
 import {
 	Alert,
+	Box,
 	Button,
+	Chip,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
-	Divider,
 	Stack,
 	Typography,
 } from '@mui/material';
@@ -20,6 +25,30 @@ import {
 } from '#entities/comprobante';
 import { EstadoNotificacionCorreo } from '#entities/comunicacion';
 import { useAuth } from '#entities/session';
+import { formatIsoDateArg } from '#shared/lib/datePresets';
+
+function estadoFiscalChip(estado: string): {
+	label: string;
+	color: 'success' | 'warning' | 'error' | 'default';
+} {
+	if (estado === 'valido') {
+		return { label: 'Autorizado', color: 'success' };
+	}
+	if (estado === 'fallido') {
+		return { label: 'Error ARCA', color: 'error' };
+	}
+	if (estado === 'anulacion_pendiente') {
+		return { label: 'Anulación pendiente', color: 'warning' };
+	}
+	if (estado === 'pendiente_cae') {
+		return { label: 'Pendiente ARCA', color: 'warning' };
+	}
+	if (estado === 'anulado') {
+		return { label: 'Anulado', color: 'default' };
+	}
+	return { label: 'Sin datos', color: 'default' };
+}
+
 export function FiscalComprobantePanel({
 	comprobanteId,
 	autoEmitir = false,
@@ -44,6 +73,7 @@ export function FiscalComprobantePanel({
 		generationRef = useRef(0),
 		autoDoneRef = useRef(false);
 	const enabled = profileStatus === 'ready' && !isSigningOut;
+
 	const query = useQuery({
 		queryKey: ['comprobante-fiscal', cacheScope, comprobanteId],
 		queryFn: ({ signal }) => getEstadoComprobante(comprobanteId, actorId, signal),
@@ -55,6 +85,7 @@ export function FiscalComprobantePanel({
 				? 5000
 				: false,
 	});
+
 	useEffect(
 		() => () => {
 			generationRef.current++;
@@ -62,6 +93,7 @@ export function FiscalComprobantePanel({
 		},
 		[],
 	);
+
 	const run = async (kind: 'emitir' | 'pdf') => {
 		const gen = generationRef.current,
 			abort = new AbortController();
@@ -100,6 +132,7 @@ export function FiscalComprobantePanel({
 			}
 		}
 	};
+
 	useEffect(() => {
 		if (!autoEmitir || autoDoneRef.current || !query.data) {
 			return;
@@ -109,6 +142,7 @@ export function FiscalComprobantePanel({
 			void run('emitir');
 		}
 	});
+
 	const check = async () => {
 		setFeedback(null);
 		const result = await query.refetch();
@@ -117,6 +151,7 @@ export function FiscalComprobantePanel({
 			onUpdated();
 		}
 	};
+
 	const documentKey = query.data
 		? [query.data.estadoFiscal, query.data.pdfVersion, query.data.notaCreditoId].join(':')
 		: null;
@@ -125,116 +160,258 @@ export function FiscalComprobantePanel({
 			setPdf(null);
 		}
 	}, [documentKey]);
+
 	const data = query.data;
+	const chip = data ? estadoFiscalChip(data.estadoFiscal) : null;
+
 	return (
 		<Stack spacing={2}>
-			<Divider />
-			<Typography component="h3" variant="h6">
-				{query.data?.tipoDocumento === 'nota_credito'
-					? 'Documentación de la Nota de Crédito'
-					: 'Documentación del cobro'}
-			</Typography>
+			<Stack
+				direction="row"
+				spacing={1}
+				useFlexGap
+				sx={{ alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}
+			>
+				<Typography component="h3" variant="subtitle1" sx={{ fontWeight: 700 }}>
+					{data?.tipoDocumento === 'nota_credito'
+						? 'Nota de Crédito ARCA'
+						: 'Comprobante fiscal ARCA'}
+				</Typography>
+				{chip && <Chip size="small" color={chip.color} label={chip.label} />}
+			</Stack>
+
 			{query.isPending ? (
-				<Typography>Consultando documentación…</Typography>
+				<Stack direction="row" spacing={1.25} sx={{ py: 1.5, alignItems: 'center' }}>
+					<CircularProgress size={18} />
+					<Typography variant="body2" color="text.secondary">
+						Consultando estado en ARCA…
+					</Typography>
+				</Stack>
 			) : query.isError ? (
 				<Alert severity="warning">
-					No pudimos consultar la documentación. Consultá el estado financiero por separado.
+					No pudimos consultar el comprobante en este momento. El cobro sigue confirmado por
+					separado.
 				</Alert>
 			) : (
 				data && (
 					<>
-						{data.aviso && <Alert severity="info">{data.aviso}</Alert>}
 						{data.cae && (
-							<Typography>
-								CAE: {data.cae} · Vencimiento: {data.vencimiento}
-							</Typography>
+							<Box
+								sx={{
+									p: 1.5,
+									borderRadius: 1.5,
+									bgcolor: 'action.hover',
+									display: 'grid',
+									gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+									gap: 1.25,
+								}}
+							>
+								<Box sx={{ minWidth: 0 }}>
+									<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+										CAE autorizado
+									</Typography>
+									<Typography
+										variant="body2"
+										sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}
+									>
+										{data.cae}
+									</Typography>
+								</Box>
+								<Box sx={{ minWidth: 0 }}>
+									<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+										Vencimiento del CAE
+									</Typography>
+									<Typography
+										variant="body2"
+										sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+									>
+										{formatIsoDateArg(data.vencimiento)}
+									</Typography>
+								</Box>
+								{data.numero && (
+									<Box sx={{ gridColumn: '1 / -1', minWidth: 0 }}>
+										<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+											Número de comprobante
+										</Typography>
+										<Typography
+											variant="body2"
+											sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+										>
+											{data.numero}
+										</Typography>
+									</Box>
+								)}
+							</Box>
 						)}
+
+						{data.aviso && <Alert severity="info">{data.aviso}</Alert>}
+
 						{data.operacion &&
 							['adquirida', 'preparada', 'posible_envio'].includes(data.operacion) && (
 								<Alert severity="info">
-									La operación fiscal está en proceso. Podés volver a consultar sin registrar otro
-									cobro.
+									La solicitud ante ARCA está en proceso. Podés actualizar el estado en unos
+									segundos sin volver a registrar el cobro.
 								</Alert>
 							)}
+
 						{data.estadoFiscal === 'fallido' && (
 							<Alert severity="warning">
 								{ocultarEnlaceMonitoreo
-									? 'La documentación requiere regularización. Revisá las acciones disponibles en el listado.'
-									: 'La documentación requiere regularización. Consultá la incidencia en Monitoreo fiscal.'}
+									? 'El comprobante requiere revisión. Usá las acciones disponibles en el listado para regularizarlo.'
+									: 'El comprobante no pudo autorizarse y requiere revisión en Monitoreo fiscal.'}
 							</Alert>
 						)}
-						{data.emisionDisponible && (
-							<Button
-								variant="outlined"
-								disabled={!!busy || needsCheck}
-								onClick={() => void run('emitir')}
-							>
-								{busy === 'emitir'
-									? 'Consultando autorización…'
-									: data.operacion
-										? 'Conciliar autorización'
-										: 'Solicitar autorización'}
-							</Button>
-						)}
-						{!ocultarEnlaceMonitoreo && (
-							<Button component={Link} to="/monitoreo-fiscal">
-								Monitoreo fiscal
-							</Button>
-						)}
-						{mostrarRelaciones && data.notaCreditoId && (
-							<Button variant="outlined" onClick={() => setRelatedId(data.notaCreditoId ?? null)}>
-								Ver Nota de Crédito
-							</Button>
-						)}
-						{mostrarRelaciones && data.comprobanteOrigenId && (
-							<Button
-								variant="outlined"
-								onClick={() => setRelatedId(data.comprobanteOrigenId ?? null)}
-							>
-								Ver factura original
-							</Button>
-						)}
+
 						{data.pdfVersion && (
-							<Button variant="contained" disabled={!!busy} onClick={() => void run('pdf')}>
+							<Button
+								variant="contained"
+								fullWidth
+								startIcon={
+									busy === 'pdf' ? (
+										<CircularProgress size={16} color="inherit" />
+									) : (
+										<PictureAsPdfOutlinedIcon />
+									)
+								}
+								disabled={!!busy}
+								onClick={() => void run('pdf')}
+							>
 								{busy === 'pdf'
-									? 'Preparando PDF…'
-									: `Obtener PDF ${data.pdfVersion === 'autorizado' ? 'autorizado' : 'provisional'}`}
+									? 'Generando PDF…'
+									: data.pdfVersion === 'autorizado'
+										? 'Descargar PDF autorizado'
+										: 'Descargar comprobante provisional'}
 							</Button>
 						)}
+
+						{pdf && (
+							<Alert
+								severity="success"
+								action={
+									<Button
+										size="small"
+										color="inherit"
+										component="a"
+										href={pdf.url}
+										target="_blank"
+										rel="noopener noreferrer"
+										endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
+									>
+										Abrir PDF
+									</Button>
+								}
+							>
+								<Typography variant="body2" sx={{ fontWeight: 600 }}>
+									PDF {pdf.version === 'autorizado' ? 'autorizado' : 'provisional'} listo.
+								</Typography>
+								<Typography variant="caption" sx={{ display: 'block', mt: 0.25 }}>
+									El enlace seguro vence en 10 minutos. Podés volver a generarlo cuando quieras sin
+									emitir otro comprobante.
+								</Typography>
+							</Alert>
+						)}
+
+						<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+							{data.emisionDisponible && (
+								<Button
+									size="small"
+									variant={data.pdfVersion ? 'outlined' : 'contained'}
+									disabled={!!busy || needsCheck}
+									startIcon={
+										busy === 'emitir' ? <CircularProgress size={14} color="inherit" /> : undefined
+									}
+									onClick={() => void run('emitir')}
+								>
+									{busy === 'emitir'
+										? 'Consultando ARCA…'
+										: data.operacion
+											? 'Verificar autorización'
+											: 'Solicitar autorización ARCA'}
+								</Button>
+							)}
+
+							<Button
+								size="small"
+								variant="outlined"
+								startIcon={<RefreshOutlinedIcon />}
+								disabled={!!busy || query.isFetching}
+								onClick={() => void check()}
+							>
+								Actualizar estado
+							</Button>
+
+							{mostrarRelaciones && data.notaCreditoId && (
+								<Button
+									size="small"
+									variant="outlined"
+									onClick={() => setRelatedId(data.notaCreditoId ?? null)}
+								>
+									Ver Nota de Crédito
+								</Button>
+							)}
+
+							{mostrarRelaciones && data.comprobanteOrigenId && (
+								<Button
+									size="small"
+									variant="outlined"
+									onClick={() => setRelatedId(data.comprobanteOrigenId ?? null)}
+								>
+									Ver factura original
+								</Button>
+							)}
+
+							{!ocultarEnlaceMonitoreo && data.estadoFiscal !== 'valido' && (
+								<Button
+									size="small"
+									component={Link}
+									to="/monitoreo-fiscal"
+									endIcon={<OpenInNewOutlinedIcon fontSize="small" />}
+								>
+									Ir a Monitoreo fiscal
+								</Button>
+							)}
+						</Stack>
 					</>
 				)
 			)}
+
+			{!data && !query.isPending && (
+				<Button
+					size="small"
+					variant="outlined"
+					startIcon={<RefreshOutlinedIcon />}
+					disabled={!!busy || query.isFetching}
+					onClick={() => void check()}
+					sx={{ alignSelf: 'flex-start' }}
+				>
+					Actualizar estado
+				</Button>
+			)}
+
 			{feedback && (
 				<Alert severity="warning">
 					{feedback}
-					{needsCheck ? ' Consultá el estado antes de volver a enviar.' : ''}
+					{needsCheck ? ' Actualizá el estado antes de reintentar.' : ''}
 				</Alert>
 			)}
+
 			<EstadoNotificacionCorreo
 				operation={{ comprobanteId }}
 				actorId={actorId}
 				cacheScope={cacheScope}
 				enabled={enabled}
 			/>
-			<Button disabled={!!busy || query.isFetching} onClick={() => void check()}>
-				Consultar estado
-			</Button>
-			{pdf && (
-				<Alert severity="success">
-					PDF {pdf.version === 'autorizado' ? 'autorizado' : 'provisional'} disponible.{' '}
-					<Button component="a" href={pdf.url} target="_blank" rel="noopener noreferrer">
-						Abrir PDF
-					</Button>
-					<Typography variant="caption" sx={{ display: 'block' }}>
-						El enlace privado vence en 10 minutos. Podés obtenerlo nuevamente sin cobrar ni emitir
-						otra vez.
-					</Typography>
-				</Alert>
-			)}
+
 			{relatedId && (
-				<Dialog open fullWidth maxWidth="sm" onClose={() => setRelatedId(null)}>
-					<DialogTitle>Documento relacionado</DialogTitle>
-					<DialogContent>
+				<Dialog
+					open
+					fullWidth
+					maxWidth="sm"
+					aria-labelledby="documento-relacionado-title"
+					onClose={() => setRelatedId(null)}
+				>
+					<DialogTitle id="documento-relacionado-title">Comprobante relacionado</DialogTitle>
+					<DialogContent dividers>
 						<FiscalComprobantePanel
 							key={`${cacheScope}:${relatedId}`}
 							comprobanteId={relatedId}
@@ -243,7 +420,7 @@ export function FiscalComprobantePanel({
 						/>
 					</DialogContent>
 					<DialogActions>
-						<Button onClick={() => setRelatedId(null)}>Cerrar documento</Button>
+						<Button onClick={() => setRelatedId(null)}>Cerrar</Button>
 					</DialogActions>
 				</Dialog>
 			)}

@@ -1,9 +1,15 @@
 import AddCardOutlinedIcon from '@mui/icons-material/AddCardOutlined';
+import FilterListOutlinedIcon from '@mui/icons-material/FilterListOutlined';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
+import SearchOutlinedIcon from '@mui/icons-material/SearchOutlined';
 import {
 	Alert,
 	Box,
 	Button,
 	Chip,
+	CircularProgress,
+	Collapse,
+	InputAdornment,
 	MenuItem,
 	Paper,
 	Stack,
@@ -40,7 +46,62 @@ import {
 	monedaCobranza,
 	periodoCobranza,
 } from '#shared/types/cobranza';
+import { DateRangePresets, EmptyState, InfoTooltip, KpiCard, PageHeader } from '#shared/ui';
 import { PagoDetalleDialog } from './PagoDetalleDialog';
+
+const MESES = [
+	{ value: 1, label: 'Enero' },
+	{ value: 2, label: 'Febrero' },
+	{ value: 3, label: 'Marzo' },
+	{ value: 4, label: 'Abril' },
+	{ value: 5, label: 'Mayo' },
+	{ value: 6, label: 'Junio' },
+	{ value: 7, label: 'Julio' },
+	{ value: 8, label: 'Agosto' },
+	{ value: 9, label: 'Septiembre' },
+	{ value: 10, label: 'Octubre' },
+	{ value: 11, label: 'Noviembre' },
+	{ value: 12, label: 'Diciembre' },
+] as const;
+
+const PILLS_CUOTA: readonly { value: CriteriosCobranza['estado_cuota']; label: string }[] = [
+	{ value: 'pendiente', label: 'Pendientes' },
+	{ value: 'pagada', label: 'Pagadas' },
+	{ value: 'todos', label: 'Todas' },
+];
+
+const PILLS_RECIBO: readonly { value: CriteriosCobranza['estado_recibo']; label: string }[] = [
+	{ value: 'todos', label: 'Todos' },
+	{ value: 'activo', label: 'Autorizados' },
+	{ value: 'pendiente_cae', label: 'Pendiente ARCA' },
+	{ value: 'fallido', label: 'Error ARCA' },
+	{ value: 'anulado', label: 'Anulados' },
+];
+
+function chipEstadoPago(row: FilaCobranza): {
+	label: string;
+	color: 'success' | 'warning' | 'error' | 'default';
+} {
+	if (row.estado_pago === 'anulado') {
+		return { label: 'Cobro anulado', color: 'default' };
+	}
+	if (row.estado_fiscal === 'valido') {
+		return { label: 'Autorizado', color: 'success' };
+	}
+	if (row.estado_fiscal === 'fallido') {
+		return { label: 'Error ARCA', color: 'error' };
+	}
+	if (row.estado_fiscal === 'anulacion_pendiente') {
+		return { label: 'Anulación pendiente', color: 'warning' };
+	}
+	if (row.estado_fiscal === 'pendiente_cae') {
+		return { label: 'Pendiente ARCA', color: 'warning' };
+	}
+	if (row.estado_fiscal === 'anulado') {
+		return { label: 'Documento anulado', color: 'default' };
+	}
+	return { label: 'Sin comprobante', color: 'default' };
+}
 
 const columnasPagos: readonly ColumnaExportacion<FilaCobranza>[] = [
 	{
@@ -70,6 +131,7 @@ const columnasPagos: readonly ColumnaExportacion<FilaCobranza>[] = [
 	},
 	{ titulo: 'Estado fiscal', tipo: 'texto', valor: (p) => estadoFiscalCobranza(p) },
 ];
+
 export function PagosPage() {
 	const { cacheScope, perfil, profileStatus } = useAuth();
 	return (
@@ -81,6 +143,7 @@ export function PagosPage() {
 		/>
 	);
 }
+
 function PagosPanel({
 	scope,
 	actorId,
@@ -104,6 +167,9 @@ function PagosPanel({
 	}));
 	const [search, setSearch] = useState('');
 	const [receipt, setReceipt] = useState('');
+	const [filtersOpen, setFiltersOpen] = useState(() =>
+		Boolean(params.get('desde') || params.get('hasta')),
+	);
 	const [cuotaId, setCuotaId] = useState<string | null>(null);
 	const [pagoId, setPagoId] = useState<string | null>(deepPago);
 	const [confirmed, setConfirmed] = useState<CobroConfirmado | null>(null);
@@ -134,6 +200,7 @@ function PagosPanel({
 	});
 	const update = <K extends keyof CriteriosCobranza>(field: K, value: CriteriosCobranza[K]) =>
 		setCriteria((current) => ({ ...current, [field]: value, pagina: 0 }));
+
 	useEffect(() => {
 		const timeout = setTimeout(
 			() =>
@@ -142,16 +209,19 @@ function PagosPanel({
 		);
 		return () => clearTimeout(timeout);
 	}, [search, receipt]);
+
 	useEffect(() => {
 		const id = socioId;
 		setCriteria((current) => ({ ...current, pagina: 0, socio_id: id }));
 	}, [socioId]);
+
 	useEffect(() => {
 		if (deepPago) {
 			setPagoId(deepPago);
 			setTab('pagos');
 		}
 	}, [deepPago]);
+
 	useEffect(() => {
 		if (list.data) {
 			const last = Math.max(0, Math.ceil(list.data.total / criteria.limite) - 1);
@@ -160,10 +230,12 @@ function PagosPanel({
 			}
 		}
 	}, [list.data, criteria.pagina, criteria.limite]);
+
 	const tabUrl = params.get('tab'),
 		desdeUrl = params.get('desde') ?? '',
 		hastaUrl = params.get('hasta') ?? '',
 		estadoUrl = params.get('estadoCuota');
+
 	useEffect(() => {
 		if (tabUrl === 'pagos' || tabUrl === 'cuotas') {
 			setTab(tabUrl);
@@ -174,8 +246,12 @@ function PagosPanel({
 				hasta: hastaUrl,
 				estado_cuota: estadoUrl === 'pagada' ? 'pagada' : 'pendiente',
 			}));
+			if (desdeUrl || hastaUrl) {
+				setFiltersOpen(true);
+			}
 		}
 	}, [tabUrl, desdeUrl, hastaUrl, estadoUrl]);
+
 	const closeDetail = () => {
 		setPagoId(null);
 		if (deepPago) {
@@ -184,12 +260,14 @@ function PagosPanel({
 			setParams(next, { replace: true });
 		}
 	};
+
 	const saved = (result: CobroConfirmado) => {
 		setCuotaId(null);
 		setConfirmed(result);
 		setPagoId(result.pago.pago_id);
 		void list.refetch();
 	};
+
 	const sort = (field: CriteriosCobranza['orden']) =>
 		setCriteria((current) => ({
 			...current,
@@ -197,6 +275,7 @@ function PagosPanel({
 			orden: field,
 			direccion: current.orden === field && current.direccion === 'asc' ? 'desc' : 'asc',
 		}));
+
 	const header = (label: string, field: CriteriosCobranza['orden']) => (
 		<TableSortLabel
 			active={criteria.orden === field}
@@ -206,6 +285,13 @@ function PagosPanel({
 			{label}
 		</TableSortLabel>
 	);
+
+	const clearSocio = () => {
+		const next = new URLSearchParams(params);
+		next.delete('socioId');
+		setParams(next, { replace: true });
+	};
+
 	const clear = () => {
 		setCriteria({ ...criteriosCobranzaIniciales(), estado_cuota: 'pendiente' });
 		setSearch('');
@@ -217,48 +303,46 @@ function PagosPanel({
 		next.set('tab', tab);
 		setParams(next, { replace: true });
 	};
+
+	const extraFiltersCount =
+		Number(Boolean(criteria.desde || criteria.hasta)) +
+		Number(criteria.estado_socio !== 'todos') +
+		Number(Boolean(criteria.deporte_id)) +
+		Number(Boolean(criteria.categoria_id)) +
+		(tab === 'cuotas'
+			? Number(criteria.periodo_mes !== null) + Number(criteria.periodo_anio !== null)
+			: Number(Boolean(receipt.trim())) + Number(criteria.medio !== 'todos'));
+
+	const hasAnyFilter =
+		Boolean(search.trim()) ||
+		Boolean(socioId) ||
+		extraFiltersCount > 0 ||
+		(tab === 'cuotas' ? criteria.estado_cuota !== 'pendiente' : criteria.estado_recibo !== 'todos');
+
+	const selectedSportExists =
+		!criteria.deporte_id || (sports.data?.some((d) => d.id === criteria.deporte_id) ?? false);
+	const selectedCategoryExists =
+		!criteria.categoria_id ||
+		(categories.data?.some((c) => c.id === criteria.categoria_id) ?? false);
+
+	const colSpan = tab === 'pagos' ? 8 : 6;
+	const deudaNumerica = list.data ? Number(list.data.deuda_filtrada) : 0;
+
 	return (
 		<Stack spacing={3}>
-			<Box>
-				<Typography variant="h4" component="h1">
-					Pagos y cobranzas
-				</Typography>
-				<Button component={Link} to="/monitoreo-fiscal" sx={{ mt: 1 }}>
-					Monitoreo fiscal
-				</Button>
-				<Typography sx={{ mt: 1 }} color="text.secondary">
-					Consultá cuotas y cobros, con su estado financiero y fiscal por separado.
-				</Typography>
-			</Box>
-			{confirmed && (
-				<Alert
-					severity="success"
-					onClose={() => setConfirmed(null)}
-					action={<Button onClick={() => setPagoId(confirmed.pago.pago_id)}>Ver detalle</Button>}
-				>
-					{confirmed.origen === 'registrado'
-						? 'Cobro registrado.'
-						: confirmed.origen === 'recuperado'
-							? 'Resultado del cobro recuperado.'
-							: 'La cuota ya tiene un cobro confirmado; no se registró otro.'}{' '}
-					El cobro permanece confirmado; su documentación se consulta en el detalle.
-				</Alert>
-			)}
-			{invalidSocio && (
-				<Alert severity="warning">
-					El filtro de socio no es válido. Quitalo para consultar el historial.
-				</Alert>
-			)}
-			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
-				<Stack spacing={2}>
-					<Stack
-						direction={{ xs: 'column', sm: 'row' }}
-						spacing={2}
-						sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
-					>
-						<Typography component="h2" variant="h6">
-							{tab === 'cuotas' ? 'Cuotas de socios' : 'Historial de cobranzas'}
-						</Typography>
+			<PageHeader
+				title="Cobranza y pagos"
+				subtitle="Consultá cuotas pendientes, registrá cobros y seguí el estado fiscal ARCA de cada comprobante."
+				actions={
+					<>
+						<Button
+							component={Link}
+							to="/monitoreo-fiscal"
+							variant="outlined"
+							startIcon={<ReceiptLongOutlinedIcon />}
+						>
+							Monitoreo fiscal
+						</Button>
 						{tab === 'pagos' && (
 							<Button
 								variant="contained"
@@ -271,206 +355,386 @@ function PagosPanel({
 								Registrar cobro
 							</Button>
 						)}
-					</Stack>
-					<Tabs
-						value={tab}
-						onChange={(_, value: 'cuotas' | 'pagos') => {
-							setTab(value);
-							setCriteria((current) => ({
-								...current,
-								pagina: 0,
-								periodo_mes: null,
-								periodo_anio: null,
-								orden: 'fecha',
-								direccion: 'desc',
-								medio: 'todos',
-								estado_recibo: 'todos',
-								comprobante: '',
-								desde: '',
-								hasta: '',
-							}));
-							setReceipt('');
+					</>
+				}
+			/>
+
+			{confirmed && (
+				<Alert
+					severity="success"
+					onClose={() => setConfirmed(null)}
+					action={
+						<Button size="small" color="inherit" onClick={() => setPagoId(confirmed.pago.pago_id)}>
+							Ver detalle
+						</Button>
+					}
+				>
+					{confirmed.origen === 'registrado'
+						? 'Cobro registrado correctamente.'
+						: confirmed.origen === 'recuperado'
+							? 'Cobro confirmado a partir del intento anterior.'
+							: 'Esta cuota ya tenía un cobro confirmado; no se registró uno duplicado.'}{' '}
+					Podés descargar el comprobante y consultar su autorización ARCA desde el detalle.
+				</Alert>
+			)}
+
+			{invalidSocio && (
+				<Alert
+					severity="warning"
+					action={
+						<Button size="small" color="inherit" onClick={clearSocio}>
+							Quitar filtro
+						</Button>
+					}
+				>
+					El filtro de socio en la dirección no es válido. Quitalo para ver el listado completo.
+				</Alert>
+			)}
+
+			{tab === 'cuotas' && (
+				<Box
+					sx={{
+						display: 'grid',
+						gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+						gap: 2,
+					}}
+				>
+					<KpiCard
+						label="Deuda pendiente (consulta actual)"
+						value={list.data ? monedaCobranza(list.data.deuda_filtrada) : '—'}
+						caption="Incluye todas las páginas de las cuotas pendientes que coinciden con estos filtros."
+						tone={list.data ? (deudaNumerica > 0 ? 'warning' : 'success') : 'neutral'}
+					/>
+					<KpiCard
+						label="Cuotas en esta consulta"
+						value={list.data ? String(list.data.total) : '—'}
+						caption={
+							criteria.estado_cuota === 'pendiente'
+								? 'Filtrado por cuotas pendientes de pago.'
+								: criteria.estado_cuota === 'pagada'
+									? 'Filtrado por cuotas ya pagadas.'
+									: 'Mostrando cuotas pendientes y pagadas.'
+						}
+						tone="primary"
+					/>
+				</Box>
+			)}
+
+			<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+				<Stack spacing={2.25}>
+					<Stack
+						direction={{ xs: 'column', md: 'row' }}
+						spacing={1.5}
+						sx={{
+							alignItems: { xs: 'stretch', md: 'center' },
+							justifyContent: 'space-between',
+							borderBottom: 1,
+							borderColor: 'divider',
+							pb: 1,
 						}}
-						aria-label="Consulta de cuotas y cobros"
 					>
-						<Tab value="cuotas" label="Cuotas" />
-						<Tab value="pagos" label="Historial de cobros" />
-					</Tabs>
+						<Tabs
+							value={tab}
+							onChange={(_, value: 'cuotas' | 'pagos') => {
+								setTab(value);
+								setCriteria((current) => ({
+									...current,
+									pagina: 0,
+									periodo_mes: null,
+									periodo_anio: null,
+									orden: 'fecha',
+									direccion: 'desc',
+									medio: 'todos',
+									estado_recibo: 'todos',
+									comprobante: '',
+									desde: '',
+									hasta: '',
+								}));
+								setReceipt('');
+							}}
+							aria-label="Consulta de cuotas y cobros"
+							sx={{ minHeight: 42 }}
+						>
+							<Tab value="cuotas" label="Cuotas" sx={{ minHeight: 42 }} />
+							<Tab value="pagos" label="Historial de cobros" sx={{ minHeight: 42 }} />
+						</Tabs>
+
+						<Stack
+							direction="row"
+							spacing={0.75}
+							useFlexGap
+							sx={{ flexWrap: 'wrap', alignItems: 'center' }}
+						>
+							{tab === 'cuotas'
+								? PILLS_CUOTA.map((pill) => {
+										const active = criteria.estado_cuota === pill.value;
+										return (
+											<Chip
+												key={pill.value}
+												size="small"
+												label={pill.label}
+												clickable
+												color={active ? 'primary' : 'default'}
+												variant={active ? 'filled' : 'outlined'}
+												onClick={() => update('estado_cuota', pill.value)}
+											/>
+										);
+									})
+								: PILLS_RECIBO.map((pill) => {
+										const active = criteria.estado_recibo === pill.value;
+										return (
+											<Chip
+												key={pill.value}
+												size="small"
+												label={pill.label}
+												clickable
+												color={active ? 'primary' : 'default'}
+												variant={active ? 'filled' : 'outlined'}
+												onClick={() => update('estado_recibo', pill.value)}
+											/>
+										);
+									})}
+						</Stack>
+					</Stack>
+
 					{socioId && !invalidSocio && (
-						<Alert severity="info">
-							Consulta filtrada por socio. El estado inactivo no oculta sus cuotas o cobros
-							históricos.
+						<Alert
+							severity="info"
+							action={
+								<Button size="small" color="inherit" onClick={clearSocio}>
+									Ver todos los socios
+								</Button>
+							}
+						>
+							Mostrando únicamente las cuotas y cobros del socio seleccionado. Los socios inactivos
+							conservan todo su historial.
 						</Alert>
 					)}
-					<Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+
+					<Stack
+						direction={{ xs: 'column', sm: 'row' }}
+						spacing={1.5}
+						sx={{ alignItems: { sm: 'center' } }}
+					>
 						<TextField
 							size="small"
-							label="Nombre, apellido, DNI o n.º de socio"
+							label="Buscar socio"
+							placeholder="Apellido, nombre, DNI o n.º de socio…"
 							value={search}
-							slotProps={{ htmlInput: { maxLength: 100 } }}
+							slotProps={{
+								htmlInput: { maxLength: 100 },
+								input: {
+									startAdornment: (
+										<InputAdornment position="start">
+											<SearchOutlinedIcon fontSize="small" color="action" />
+										</InputAdornment>
+									),
+								},
+							}}
 							onChange={(e) => setSearch(e.target.value)}
 							sx={{ flex: 1, minWidth: 230 }}
 						/>
-						<TextField
-							size="small"
-							label="Desde"
-							type="date"
-							value={criteria.desde}
-							slotProps={{ inputLabel: { shrink: true } }}
-							onChange={(e) => update('desde', e.target.value)}
-						/>
-						<TextField
-							size="small"
-							label="Hasta"
-							type="date"
-							value={criteria.hasta}
-							slotProps={{ inputLabel: { shrink: true } }}
-							onChange={(e) => update('hasta', e.target.value)}
-						/>
+						<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+							<Button
+								size="small"
+								variant={filtersOpen || extraFiltersCount > 0 ? 'outlined' : 'text'}
+								startIcon={<FilterListOutlinedIcon />}
+								aria-expanded={filtersOpen}
+								onClick={() => setFiltersOpen((open) => !open)}
+							>
+								{extraFiltersCount > 0 ? `Más filtros (${extraFiltersCount})` : 'Más filtros'}
+							</Button>
+							{hasAnyFilter && (
+								<Button size="small" color="inherit" onClick={clear}>
+									Limpiar filtros
+								</Button>
+							)}
+						</Stack>
 					</Stack>
-					<Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-						<TextField
-							size="small"
-							select
-							label="Estado del socio"
-							value={criteria.estado_socio}
-							onChange={(e) =>
-								update('estado_socio', e.target.value as CriteriosCobranza['estado_socio'])
-							}
-							sx={{ minWidth: 170 }}
+
+					<Collapse in={filtersOpen}>
+						<Box
+							sx={{
+								p: 2,
+								borderRadius: 1.5,
+								bgcolor: 'action.hover',
+								border: 1,
+								borderColor: 'divider',
+							}}
 						>
-							<MenuItem value="todos">Todos los socios</MenuItem>
-							<MenuItem value="activo">Activo</MenuItem>
-							<MenuItem value="inactivo">Inactivo</MenuItem>
-						</TextField>
-						{tab === 'cuotas' ? (
-							<>
-								<TextField
-									size="small"
-									select
-									label="Estado de cuota"
-									value={criteria.estado_cuota}
-									onChange={(e) =>
-										update('estado_cuota', e.target.value as CriteriosCobranza['estado_cuota'])
-									}
-									sx={{ minWidth: 170 }}
+							<Stack spacing={2}>
+								<Stack
+									direction={{ xs: 'column', lg: 'row' }}
+									spacing={1.5}
+									sx={{ alignItems: { lg: 'center' }, justifyContent: 'space-between' }}
 								>
-									<MenuItem value="todos">Todas</MenuItem>
-									<MenuItem value="pendiente">Pendiente</MenuItem>
-									<MenuItem value="pagada">Pagada</MenuItem>
-								</TextField>
-								<TextField
-									size="small"
-									type="number"
-									label="Mes del período"
-									value={criteria.periodo_mes ?? ''}
-									slotProps={{ htmlInput: { min: 1, max: 12, step: 1 } }}
-									onChange={(e) =>
-										update('periodo_mes', e.target.value ? Number(e.target.value) : null)
-									}
-									sx={{ width: 170 }}
-								/>
-								<TextField
-									size="small"
-									type="number"
-									label="Año del período"
-									value={criteria.periodo_anio ?? ''}
-									slotProps={{ htmlInput: { min: 2001, max: 9999, step: 1 } }}
-									onChange={(e) =>
-										update('periodo_anio', e.target.value ? Number(e.target.value) : null)
-									}
-									sx={{ width: 170 }}
-								/>
-							</>
-						) : (
-							<>
-								<TextField
-									size="small"
-									label="Número de comprobante"
-									value={receipt}
-									slotProps={{ htmlInput: { maxLength: 100 } }}
-									onChange={(e) => setReceipt(e.target.value)}
-								/>
-								<TextField
-									size="small"
-									select
-									label="Medio de pago"
-									value={criteria.medio}
-									onChange={(e) => update('medio', e.target.value as CriteriosCobranza['medio'])}
-									sx={{ minWidth: 150 }}
+									<DateRangePresets
+										label={tab === 'cuotas' ? 'Fecha de emisión' : 'Fecha de cobro'}
+										desde={criteria.desde}
+										hasta={criteria.hasta}
+										onSelect={({ desde, hasta }) =>
+											setCriteria((current) => ({ ...current, desde, hasta, pagina: 0 }))
+										}
+									/>
+									<Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+										<TextField
+											size="small"
+											label={tab === 'cuotas' ? 'Emisión desde' : 'Cobro desde'}
+											type="date"
+											value={criteria.desde}
+											slotProps={{ inputLabel: { shrink: true } }}
+											onChange={(e) => update('desde', e.target.value)}
+										/>
+										<TextField
+											size="small"
+											label={tab === 'cuotas' ? 'Emisión hasta' : 'Cobro hasta'}
+											type="date"
+											value={criteria.hasta}
+											slotProps={{ inputLabel: { shrink: true } }}
+											onChange={(e) => update('hasta', e.target.value)}
+										/>
+									</Stack>
+								</Stack>
+
+								<Box
+									sx={{
+										display: 'grid',
+										gridTemplateColumns: {
+											xs: '1fr',
+											sm: 'repeat(2, minmax(0, 1fr))',
+											lg: 'repeat(5, minmax(0, 1fr))',
+										},
+										gap: 1.5,
+									}}
 								>
-									<MenuItem value="todos">Todos</MenuItem>
-									<MenuItem value="efectivo">Efectivo</MenuItem>
-									<MenuItem value="transferencia">Transferencia</MenuItem>
-								</TextField>
-								<TextField
-									size="small"
-									select
-									label="Estado del recibo"
-									value={criteria.estado_recibo}
-									onChange={(e) =>
-										update('estado_recibo', e.target.value as CriteriosCobranza['estado_recibo'])
-									}
-									sx={{ minWidth: 180 }}
-								>
-									<MenuItem value="todos">Todos</MenuItem>
-									<MenuItem value="activo">Autorizado</MenuItem>
-									<MenuItem value="pendiente_cae">Pendiente de CAE</MenuItem>
-									<MenuItem value="fallido">Fiscal fallido</MenuItem>
-									<MenuItem value="anulado">Cobro anulado</MenuItem>
-								</TextField>
-							</>
-						)}
-						<Button onClick={clear}>Limpiar filtros</Button>
-					</Stack>
-					<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-						<TextField
-							size="small"
-							select
-							label="Deporte"
-							value={criteria.deporte_id}
-							sx={{ minWidth: 200 }}
-							disabled={sports.isPending || sports.isError}
-							onChange={(e) =>
-								setCriteria((current) => ({
-									...current,
-									deporte_id: e.target.value,
-									categoria_id: '',
-									pagina: 0,
-								}))
-							}
-						>
-							<MenuItem value="">Todos los deportes</MenuItem>
-							{sports.data?.map((d) => (
-								<MenuItem key={d.id} value={d.id}>
-									{d.nombre}
-									{d.estado === 'inactivo' ? ' (inactivo)' : ''}
-								</MenuItem>
-							))}
-						</TextField>
-						<TextField
-							size="small"
-							select
-							label="Categoría"
-							value={criteria.categoria_id}
-							sx={{ minWidth: 200 }}
-							disabled={!criteria.deporte_id || categories.isPending || categories.isError}
-							onChange={(e) => update('categoria_id', e.target.value)}
-						>
-							<MenuItem value="">Todas las categorías</MenuItem>
-							{categories.data?.map((c) => (
-								<MenuItem key={c.id} value={c.id}>
-									{c.nombre}
-									{c.estado === 'inactivo' ? ' (inactiva)' : ''}
-								</MenuItem>
-							))}
-						</TextField>
-					</Stack>
+									<TextField
+										size="small"
+										select
+										label="Estado del socio"
+										value={criteria.estado_socio}
+										onChange={(e) =>
+											update('estado_socio', e.target.value as CriteriosCobranza['estado_socio'])
+										}
+									>
+										<MenuItem value="todos">Todos los socios</MenuItem>
+										<MenuItem value="activo">Activos</MenuItem>
+										<MenuItem value="inactivo">Inactivos</MenuItem>
+									</TextField>
+
+									<TextField
+										size="small"
+										select
+										label="Deporte"
+										value={criteria.deporte_id}
+										disabled={sports.isPending || sports.isError}
+										onChange={(e) =>
+											setCriteria((current) => ({
+												...current,
+												deporte_id: e.target.value,
+												categoria_id: '',
+												pagina: 0,
+											}))
+										}
+									>
+										<MenuItem value="">Todos los deportes</MenuItem>
+										{!selectedSportExists && (
+											<MenuItem value={criteria.deporte_id}>Deporte seleccionado</MenuItem>
+										)}
+										{sports.data?.map((d) => (
+											<MenuItem key={d.id} value={d.id}>
+												{d.nombre}
+												{d.estado === 'inactivo' ? ' (inactivo)' : ''}
+											</MenuItem>
+										))}
+									</TextField>
+
+									<TextField
+										size="small"
+										select
+										label="Categoría"
+										value={criteria.categoria_id}
+										disabled={!criteria.deporte_id || categories.isPending || categories.isError}
+										onChange={(e) => update('categoria_id', e.target.value)}
+									>
+										<MenuItem value="">Todas las categorías</MenuItem>
+										{!selectedCategoryExists && (
+											<MenuItem value={criteria.categoria_id}>Categoría seleccionada</MenuItem>
+										)}
+										{categories.data?.map((c) => (
+											<MenuItem key={c.id} value={c.id}>
+												{c.nombre}
+												{c.estado === 'inactivo' ? ' (inactiva)' : ''}
+											</MenuItem>
+										))}
+									</TextField>
+
+									{tab === 'cuotas' ? (
+										<>
+											<TextField
+												size="small"
+												select
+												label="Mes del período"
+												value={criteria.periodo_mes === null ? '' : String(criteria.periodo_mes)}
+												onChange={(e) =>
+													update('periodo_mes', e.target.value ? Number(e.target.value) : null)
+												}
+											>
+												<MenuItem value="">Todos los meses</MenuItem>
+												{MESES.map((m) => (
+													<MenuItem key={m.value} value={String(m.value)}>
+														{m.label}
+													</MenuItem>
+												))}
+											</TextField>
+											<TextField
+												size="small"
+												type="number"
+												label="Año del período"
+												placeholder="Ej. 2026"
+												value={criteria.periodo_anio ?? ''}
+												slotProps={{ htmlInput: { min: 2001, max: 9999, step: 1 } }}
+												onChange={(e) =>
+													update('periodo_anio', e.target.value ? Number(e.target.value) : null)
+												}
+											/>
+										</>
+									) : (
+										<>
+											<TextField
+												size="small"
+												label="N.º de comprobante"
+												placeholder="Ej. 0001-00000042"
+												value={receipt}
+												slotProps={{ htmlInput: { maxLength: 100 } }}
+												onChange={(e) => setReceipt(e.target.value)}
+											/>
+											<TextField
+												size="small"
+												select
+												label="Medio de pago"
+												value={criteria.medio}
+												onChange={(e) =>
+													update('medio', e.target.value as CriteriosCobranza['medio'])
+												}
+											>
+												<MenuItem value="todos">Todos los medios</MenuItem>
+												<MenuItem value="efectivo">Efectivo</MenuItem>
+												<MenuItem value="transferencia">Transferencia</MenuItem>
+											</TextField>
+										</>
+									)}
+								</Box>
+							</Stack>
+						</Box>
+					</Collapse>
+
 					{(sports.isError || categories.isError) && (
 						<Alert
 							severity="warning"
 							action={
 								<Button
+									size="small"
+									color="inherit"
 									onClick={() => {
 										void sports.refetch();
 										if (criteria.deporte_id) {
@@ -482,49 +746,60 @@ function PagosPanel({
 								</Button>
 							}
 						>
-							No pudimos cargar los filtros de actividad.
+							No pudimos cargar los filtros de deporte y categoría.
 						</Alert>
 					)}
+
 					{criteria.desde && criteria.hasta && criteria.desde > criteria.hasta && (
 						<Alert severity="warning">La fecha inicial debe ser anterior o igual a la final.</Alert>
 					)}
-					{tab === 'cuotas' && list.data && (
-						<Typography variant="body2" color="text.secondary">
-							Deuda pendiente de las cuotas filtradas:{' '}
-							<strong>{monedaCobranza(list.data.deuda_filtrada)}</strong>. El total incluye todas
-							las páginas de esta consulta.
-						</Typography>
-					)}
+
 					{tab === 'pagos' && (
-						<ExportGridButton<FilaCobranza, CriteriosCobranza>
-							nombreArchivo="pagos"
-							filtroSnapshot={input}
-							orden={{ campo: criteria.orden, direccion: criteria.direccion }}
-							columnas={columnasPagos}
-							claveFila={(p) => p.id}
-							disabled={
-								!enabled ||
-								invalidSocio ||
-								list.isFetching ||
-								list.isError ||
-								search !== criteria.buscar ||
-								receipt !== criteria.comprobante
-							}
-							obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
-								const p = await getPagosReporte(
-									{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
-									actorId,
-									signal,
-									{ revision: version, exportar: true },
-								);
-								return { filas: p.filas, total: p.total, version: p.revision };
-							}}
-						/>
+						<Stack
+							direction={{ xs: 'column', sm: 'row' }}
+							spacing={1.5}
+							sx={{ alignItems: { sm: 'center' }, justifyContent: 'space-between' }}
+						>
+							<Typography variant="body2" color="text.secondary">
+								{list.data
+									? `${list.data.total} ${list.data.total === 1 ? 'cobro encontrado' : 'cobros encontrados'} con los filtros actuales.`
+									: 'Consultando historial de cobros…'}
+							</Typography>
+							<ExportGridButton<FilaCobranza, CriteriosCobranza>
+								nombreArchivo="pagos"
+								filtroSnapshot={input}
+								orden={{ campo: criteria.orden, direccion: criteria.direccion }}
+								columnas={columnasPagos}
+								claveFila={(p) => p.id}
+								disabled={
+									!enabled ||
+									invalidSocio ||
+									list.isFetching ||
+									list.isError ||
+									search !== criteria.buscar ||
+									receipt !== criteria.comprobante
+								}
+								obtenerPagina={async ({ filtro, pagina, tamanoPagina, version, signal }) => {
+									const p = await getPagosReporte(
+										{ ...filtro, pagina: pagina - 1, limite: tamanoPagina },
+										actorId,
+										signal,
+										{ revision: version, exportar: true },
+									);
+									return { filas: p.filas, total: p.total, version: p.revision };
+								}}
+							/>
+						</Stack>
 					)}
+
 					{list.isError ? (
 						<Alert
 							severity="error"
-							action={<Button onClick={() => void list.refetch()}>Reintentar</Button>}
+							action={
+								<Button size="small" color="inherit" onClick={() => void list.refetch()}>
+									Reintentar
+								</Button>
+							}
 						>
 							No pudimos consultar las cobranzas. Revisá los filtros, permisos y conexión.
 						</Alert>
@@ -538,7 +813,7 @@ function PagosPanel({
 									<TableHead>
 										<TableRow>
 											<TableCell>
-												{header(tab === 'cuotas' ? 'Emisión' : 'Fecha / hora', 'fecha')}
+												{header(tab === 'cuotas' ? 'Emisión' : 'Fecha y hora', 'fecha')}
 											</TableCell>
 											<TableCell>{header('Socio', 'socio')}</TableCell>
 											<TableCell>{header('Período / actividad', 'periodo')}</TableCell>
@@ -550,107 +825,193 @@ function PagosPanel({
 												</>
 											)}
 											<TableCell>
-												{tab === 'cuotas' ? 'Cuota' : header('Recibo', 'estado')}
+												<Stack direction="row" spacing={0.25} sx={{ alignItems: 'center' }}>
+													<span>
+														{tab === 'cuotas' ? 'Estado' : header('Estado fiscal', 'estado')}
+													</span>
+													<InfoTooltip
+														label={
+															tab === 'cuotas'
+																? 'Significado del estado de la cuota'
+																: 'Significado del estado fiscal'
+														}
+														title={
+															tab === 'cuotas'
+																? 'En plazo: cuota vigente. Con mora: cuota vencida impaga. Pagada: cobro confirmado.'
+																: 'Autorizado: comprobante con CAE en ARCA. Pendiente ARCA: aguarda autorización. Error ARCA: requiere revisión en Monitoreo fiscal. Cobro anulado: revertido en caja.'
+														}
+													/>
+												</Stack>
 											</TableCell>
-											<TableCell>Acciones</TableCell>
+											<TableCell align="right">Acciones</TableCell>
 										</TableRow>
 									</TableHead>
 									<TableBody>
 										{list.isPending ? (
 											<TableRow>
-												<TableCell colSpan={tab === 'pagos' ? 8 : 6}>Cargando…</TableCell>
+												<TableCell colSpan={colSpan} sx={{ py: 5 }}>
+													<Stack
+														direction="row"
+														spacing={1.5}
+														sx={{ justifyContent: 'center', alignItems: 'center' }}
+													>
+														<CircularProgress size={20} />
+														<Typography variant="body2" color="text.secondary">
+															Cargando registros…
+														</Typography>
+													</Stack>
+												</TableCell>
 											</TableRow>
 										) : !list.data?.filas.length ? (
 											<TableRow>
-												<TableCell colSpan={tab === 'pagos' ? 8 : 6}>
-													No se encontraron registros para esta consulta.
+												<TableCell colSpan={colSpan} sx={{ borderBottom: 0 }}>
+													<EmptyState
+														title={
+															hasAnyFilter
+																? 'No encontramos resultados con estos filtros'
+																: tab === 'cuotas'
+																	? 'No hay cuotas pendientes'
+																	: 'Todavía no hay cobros registrados'
+														}
+														description={
+															hasAnyFilter
+																? 'Probá ajustando el rango de fechas, el estado o el texto de búsqueda.'
+																: tab === 'cuotas'
+																	? 'Cuando se generen cuotas o se inscriba un socio a una actividad, aparecerán acá.'
+																	: 'Los cobros que confirmes desde la pestaña Cuotas quedarán registrados en este historial.'
+														}
+														action={
+															hasAnyFilter ? (
+																<Button variant="outlined" size="small" onClick={clear}>
+																	Limpiar filtros
+																</Button>
+															) : null
+														}
+													/>
 												</TableCell>
 											</TableRow>
 										) : (
-											list.data.filas.map((row) => (
-												<TableRow key={row.id}>
-													<TableCell>{fechaCobranza(row.fecha)}</TableCell>
-													<TableCell>
-														<Typography variant="body2" sx={{ fontWeight: 600 }}>
-															{row.socio_apellido}, {row.socio_nombre}
-														</Typography>
-														<Typography variant="caption" color="text.secondary">
-															DNI {row.socio_dni} · Socio {row.socio_numero}
-														</Typography>
-														{row.socio_estado === 'inactivo' && (
-															<Chip
-																size="small"
-																label="Socio inactivo"
-																variant="outlined"
-																sx={{ display: 'flex', mt: 0.5 }}
-															/>
-														)}
-													</TableCell>
-													<TableCell>
-														{periodoCobranza(row)}
-														<Typography
-															variant="caption"
-															sx={{ display: 'block' }}
-															color="text.secondary"
+											list.data.filas.map((row) => {
+												const chipPago = tab === 'pagos' ? chipEstadoPago(row) : null;
+												return (
+													<TableRow key={row.id}>
+														<TableCell
+															sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
 														>
-															{row.deporte_nombre} · {row.categoria_nombre}
-														</Typography>
-													</TableCell>
-													<TableCell align="right">{monedaCobranza(row.monto)}</TableCell>
-													{tab === 'pagos' && (
-														<>
-															<TableCell>
-																{row.medio === 'transferencia' ? 'Transferencia' : 'Efectivo'}
-															</TableCell>
-															<TableCell>
-																{row.numero_comprobante || 'Sin numeración autorizada'}
-															</TableCell>
-														</>
-													)}
-													<TableCell>
-														<Chip
-															size="small"
-															color={
-																tab === 'cuotas'
-																	? row.estado_cuota === 'pagada'
-																		? 'success'
-																		: row.cuota_en_mora
-																			? 'warning'
-																			: 'default'
-																	: row.estado_pago === 'anulado'
-																		? 'default'
-																		: row.estado_fiscal === 'valido'
-																			? 'success'
-																			: 'warning'
-															}
-															label={
-																tab === 'cuotas'
-																	? row.estado_cuota === 'pagada'
-																		? 'Pagada'
-																		: row.cuota_en_mora
-																			? 'Pendiente con mora'
-																			: 'Pendiente en plazo'
-																	: estadoFiscalCobranza(row)
-															}
-														/>
-													</TableCell>
-													<TableCell>
-														{tab === 'cuotas' && row.estado_cuota === 'pendiente' ? (
-															<Button
-																size="small"
-																onClick={() => setCuotaId(row.cuota_id)}
-																disabled={row.monto <= 0}
+															{fechaCobranza(row.fecha)}
+														</TableCell>
+														<TableCell>
+															<Typography variant="body2" sx={{ fontWeight: 600 }}>
+																{row.socio_apellido}, {row.socio_nombre}
+															</Typography>
+															<Typography
+																variant="caption"
+																color="text.secondary"
+																sx={{ display: 'block', fontVariantNumeric: 'tabular-nums' }}
 															>
-																Registrar cobro
-															</Button>
-														) : row.pago_id ? (
-															<Button size="small" onClick={() => setPagoId(row.pago_id)}>
-																Ver detalle
-															</Button>
-														) : null}
-													</TableCell>
-												</TableRow>
-											))
+																DNI {row.socio_dni} · Socio #{row.socio_numero}
+															</Typography>
+															{row.socio_estado === 'inactivo' && (
+																<Box sx={{ mt: 0.5 }}>
+																	<Chip size="small" label="Socio inactivo" variant="outlined" />
+																</Box>
+															)}
+														</TableCell>
+														<TableCell>
+															<Typography
+																variant="body2"
+																sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+															>
+																{periodoCobranza(row)}
+															</Typography>
+															<Typography
+																variant="caption"
+																sx={{ display: 'block' }}
+																color="text.secondary"
+															>
+																{row.deporte_nombre} · {row.categoria_nombre}
+															</Typography>
+														</TableCell>
+														<TableCell
+															align="right"
+															sx={{
+																fontWeight: 600,
+																whiteSpace: 'nowrap',
+																fontVariantNumeric: 'tabular-nums',
+															}}
+														>
+															{monedaCobranza(row.monto)}
+														</TableCell>
+														{tab === 'pagos' && (
+															<>
+																<TableCell sx={{ whiteSpace: 'nowrap' }}>
+																	{row.medio === 'transferencia' ? 'Transferencia' : 'Efectivo'}
+																</TableCell>
+																<TableCell
+																	sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}
+																>
+																	{row.numero_comprobante ? (
+																		row.numero_comprobante
+																	) : (
+																		<Typography variant="caption" color="text.secondary">
+																			Pendiente de numeración
+																		</Typography>
+																	)}
+																</TableCell>
+															</>
+														)}
+														<TableCell sx={{ whiteSpace: 'nowrap' }}>
+															{tab === 'cuotas' ? (
+																<Chip
+																	size="small"
+																	color={
+																		row.estado_cuota === 'pagada'
+																			? 'success'
+																			: row.cuota_en_mora
+																				? 'error'
+																				: 'warning'
+																	}
+																	label={
+																		row.estado_cuota === 'pagada'
+																			? 'Pagada'
+																			: row.cuota_en_mora
+																				? 'Pendiente con mora'
+																				: 'Pendiente en plazo'
+																	}
+																/>
+															) : (
+																chipPago && (
+																	<Chip
+																		size="small"
+																		color={chipPago.color}
+																		label={chipPago.label}
+																	/>
+																)
+															)}
+														</TableCell>
+														<TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+															{tab === 'cuotas' && row.estado_cuota === 'pendiente' ? (
+																<Button
+																	size="small"
+																	variant="contained"
+																	onClick={() => setCuotaId(row.cuota_id)}
+																	disabled={row.monto <= 0}
+																>
+																	Cobrar
+																</Button>
+															) : row.pago_id ? (
+																<Button
+																	size="small"
+																	variant="outlined"
+																	onClick={() => setPagoId(row.pago_id)}
+																>
+																	Ver detalle
+																</Button>
+															) : null}
+														</TableCell>
+													</TableRow>
+												);
+											})
 										)}
 									</TableBody>
 								</Table>
@@ -675,6 +1036,7 @@ function PagosPanel({
 					)}
 				</Stack>
 			</Paper>
+
 			{cuotaId && (
 				<CobrarCuotaDialog
 					key={`${scope}:${cuotaId}`}
