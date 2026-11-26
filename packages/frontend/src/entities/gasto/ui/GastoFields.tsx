@@ -39,6 +39,9 @@ export function GastoFields({
 					helperText={errores.categoria_id}
 					sx={{ flex: 1 }}
 				>
+					{form.categoria_id && !categorias.some((c) => c.id === form.categoria_id) && (
+						<MenuItem value={form.categoria_id}>Cargando categoría…</MenuItem>
+					)}
 					{categorias.map((c) => (
 						<MenuItem key={c.id} value={c.id}>
 							{c.nombre}

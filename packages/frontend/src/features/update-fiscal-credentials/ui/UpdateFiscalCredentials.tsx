@@ -42,18 +42,26 @@ function FiscalEditor() {
 		if (!enabled || lockRef.current || requiresCheck || !certificado || !clave) {
 			return;
 		}
+		if (certificado.size > 65_536 || clave.size > 32_768 || !certificado.size || !clave.size) {
+			setFeedback({
+				message: 'Certificado: hasta 64 KB; clave: hasta 32 KB.',
+				success: false,
+			});
+			return;
+		}
+		if (!/\.crt$/i.test(certificado.name) || !/\.key$/i.test(clave.name)) {
+			setFeedback({
+				message: 'Los archivos del certificado deben tener extensión .crt y .key.',
+				success: false,
+			});
+			return;
+		}
 		lockRef.current = true;
 		setBusy(true);
 		setFeedback(null);
 		const request = new AbortController();
 		controllerRef.current = request;
 		try {
-			if (certificado.size > 65_536 || clave.size > 32_768 || !certificado.size || !clave.size) {
-				throw new Error('Certificado: hasta 64 KB; clave: hasta 32 KB.');
-			}
-			if (!/\.crt$/i.test(certificado.name) || !/\.key$/i.test(clave.name)) {
-				throw new Error('Los archivos del certificado deben ser .crt y .key');
-			}
 			const result = await guardarCredencialesFiscales({ certificado, clave }, request.signal);
 			if (current()) {
 				queryClient.setQueryData(key, result);
@@ -194,7 +202,12 @@ function FiscalEditor() {
 				{feedback && (
 					<Alert severity={feedback.success ? 'success' : 'warning'}>{feedback.message}</Alert>
 				)}
-				<Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+				<Stack
+					direction="row"
+					spacing={1}
+					useFlexGap
+					sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}
+				>
 					{requiresCheck && (
 						<Button onClick={() => void check()} disabled={busy}>
 							Consultar estado guardado

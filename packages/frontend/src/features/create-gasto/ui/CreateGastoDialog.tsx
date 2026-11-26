@@ -96,7 +96,12 @@ export function CreateGastoDialog({
 						disabled={disabled || categories.isPending}
 						categorias={categories.data ?? []}
 					/>
-					<Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+					<Stack
+						direction="row"
+						spacing={1}
+						useFlexGap
+						sx={{ alignItems: 'center', flexWrap: 'wrap' }}
+					>
 						<Button component="label" variant="outlined" disabled={disabled}>
 							Adjuntar evidencia opcional
 							<input

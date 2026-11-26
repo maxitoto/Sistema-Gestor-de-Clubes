@@ -77,7 +77,10 @@ export function AnularGastoDialog({
 						multiline
 						minRows={3}
 						value={motivo}
-						onChange={(e) => setMotivo(e.target.value)}
+						onChange={(e) => {
+							setMotivo(e.target.value);
+							setError(null);
+						}}
 						disabled={mutation.isPending || mutation.requiresCheck}
 						error={!!error}
 						helperText={error}

@@ -658,7 +658,10 @@ function PagosPanel({
 							<TablePagination
 								component="div"
 								count={list.data?.total ?? 0}
-								page={criteria.pagina}
+								page={Math.min(
+									criteria.pagina,
+									Math.max(0, Math.ceil((list.data?.total ?? 0) / criteria.limite) - 1),
+								)}
 								rowsPerPage={criteria.limite}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, page) => setCriteria((current) => ({ ...current, pagina: page }))}
@@ -679,7 +682,7 @@ function PagosPanel({
 					onClose={() => setCuotaId(null)}
 					onConfirmed={saved}
 				/>
-			)}{' '}
+			)}
 			{pagoId && (
 				<PagoDetalleDialog
 					key={`${scope}:${pagoId}`}

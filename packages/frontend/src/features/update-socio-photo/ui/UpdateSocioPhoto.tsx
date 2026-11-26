@@ -240,7 +240,7 @@ function PhotoEditor({ socioId, onUpdated }: UpdateSocioPhotoProps) {
 					<Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
 						Imagen JPG o PNG de hasta 5 MB y 16 megapíxeles.
 					</Typography>
-					<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+					<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 						<Button
 							component="label"
 							variant="outlined"

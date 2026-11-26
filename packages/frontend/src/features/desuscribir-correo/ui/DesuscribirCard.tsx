@@ -1,5 +1,5 @@
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from '@mui/material';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { confirmarBajaCorreo, verificarEnlaceBaja } from '../api/desuscribir.api';
 import {
@@ -11,39 +11,47 @@ import {
 export function DesuscribirCard() {
 	const [searchParams] = useSearchParams();
 	const params = useMemo(() => leerParametrosBaja(searchParams), [searchParams]);
-	const [estado, setEstado] = useState<EstadoBajaCorreo | 'cargando'>(() =>
+	const [estado, setEstado] = useState<EstadoBajaCorreo | 'cargando' | 'error_verificacion'>(() =>
 		params ? 'cargando' : 'invalido',
 	);
 	const [enviando, setEnviando] = useState(false);
 	const mountedRef = useRef(false);
+	const verifyAbortRef = useRef<AbortController | null>(null);
 
 	useEffect(() => {
 		mountedRef.current = true;
 		return () => {
 			mountedRef.current = false;
+			verifyAbortRef.current?.abort();
 		};
 	}, []);
 
-	useEffect(() => {
+	const verificar = useCallback(() => {
+		verifyAbortRef.current?.abort();
 		if (!params) {
 			setEstado('invalido');
 			return;
 		}
 		const controller = new AbortController();
+		verifyAbortRef.current = controller;
 		setEstado('cargando');
 		void verificarEnlaceBaja(params, controller.signal)
 			.then((resultado) => {
-				if (mountedRef.current) {
+				if (mountedRef.current && !controller.signal.aborted) {
 					setEstado(resultado);
 				}
 			})
 			.catch(() => {
 				if (mountedRef.current && !controller.signal.aborted) {
-					setEstado('error');
+					setEstado('error_verificacion');
 				}
 			});
-		return () => controller.abort();
 	}, [params]);
+
+	useEffect(() => {
+		verificar();
+		return () => verifyAbortRef.current?.abort();
+	}, [verificar]);
 
 	const confirmar = async () => {
 		if (!params || enviando) {
@@ -66,7 +74,18 @@ export function DesuscribirCard() {
 		}
 	};
 
-	const contenido = estado === 'cargando' ? null : MENSAJES_BAJA_CORREO[estado];
+	const contenido =
+		estado === 'cargando'
+			? null
+			: estado === 'error_verificacion'
+				? {
+						titulo: 'No pudimos verificar el enlace',
+						descripcion:
+							'No pudimos comprobar el enlace en este momento. Revisá tu conexión y volvé a intentarlo.',
+						severidad: 'error' as const,
+					}
+				: MENSAJES_BAJA_CORREO[estado];
+	const mostrarPie = estado !== 'invalido' && estado !== 'error' && estado !== 'error_verificacion';
 
 	return (
 		<Paper variant="outlined" sx={{ p: { xs: 3, sm: 4 }, width: '100%', boxSizing: 'border-box' }}>
@@ -100,19 +119,26 @@ export function DesuscribirCard() {
 							) : (
 								<Alert severity={contenido.severidad}>{contenido.descripcion}</Alert>
 							)}
+							{estado === 'error_verificacion' && params && (
+								<Button variant="outlined" onClick={verificar}>
+									Volver a intentar
+								</Button>
+							)}
 							{estado === 'error' && params && (
 								<Button variant="outlined" disabled={enviando} onClick={() => void confirmar()}>
 									Volver a intentar
 								</Button>
 							)}
-							<Typography
-								variant="body2"
-								color="text.secondary"
-								sx={{ pt: 2, borderTop: 1, borderColor: 'divider' }}
-							>
-								Esta preferencia afecta las comunicaciones generales. Para volver a recibirlas,
-								podés solicitarlo al club.
-							</Typography>
+							{mostrarPie && (
+								<Typography
+									variant="body2"
+									color="text.secondary"
+									sx={{ pt: 2, borderTop: 1, borderColor: 'divider' }}
+								>
+									Esta preferencia afecta las comunicaciones generales. Para volver a recibirlas,
+									podés solicitarlo al club.
+								</Typography>
+							)}
 						</>
 					)
 				)}

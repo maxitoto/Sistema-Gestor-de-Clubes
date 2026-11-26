@@ -60,6 +60,14 @@ function Plantillas() {
 		enabled: profileStatus === 'ready' && !isSigningOut,
 		retry: 1,
 	});
+	useEffect(() => {
+		if (q.data) {
+			const ultima = Math.max(1, Math.ceil(q.data.total / size));
+			if (page > ultima) {
+				setPage(ultima);
+			}
+		}
+	}, [q.data, page, size]);
 	const refresh = () => {
 		void client.invalidateQueries({ queryKey: ['plantillas-correo', cacheScope] });
 		void client.invalidateQueries({ queryKey: ['email-templates', cacheScope] });
@@ -211,7 +219,7 @@ function Plantillas() {
 							<TablePagination
 								component="div"
 								count={q.data.total}
-								page={page - 1}
+								page={Math.min(page - 1, Math.max(0, Math.ceil(q.data.total / size) - 1))}
 								rowsPerPage={size}
 								rowsPerPageOptions={[20, 50, 100]}
 								labelRowsPerPage="Filas por página"

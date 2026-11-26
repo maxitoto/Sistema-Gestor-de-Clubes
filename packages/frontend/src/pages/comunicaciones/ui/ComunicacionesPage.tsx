@@ -320,7 +320,7 @@ function Historial() {
 							<TablePagination
 								component="div"
 								count={q.data.total}
-								page={c.page - 1}
+								page={Math.min(c.page - 1, Math.max(0, Math.ceil(q.data.total / c.pageSize) - 1))}
 								rowsPerPage={c.pageSize}
 								rowsPerPageOptions={[20, 50, 100]}
 								labelRowsPerPage="Filas por página"

@@ -201,7 +201,7 @@ function MonitoreoPanel() {
 						</Button>
 					</Stack>
 					{query.data && (
-						<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+						<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 							<Chip variant="outlined" label={`Pendientes: ${query.data.conteos.pendientes}`} />
 							<Chip variant="outlined" label={`Fallidos: ${query.data.conteos.fallidos}`} />
 							<Chip
@@ -319,7 +319,10 @@ function MonitoreoPanel() {
 							<TablePagination
 								component="div"
 								count={query.data?.total ?? 0}
-								page={criteria.page - 1}
+								page={Math.min(
+									criteria.page - 1,
+									Math.max(0, Math.ceil((query.data?.total ?? 0) / criteria.pageSize) - 1),
+								)}
 								rowsPerPage={criteria.pageSize}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, page) => setCriteria((c) => ({ ...c, page: page + 1 }))}
@@ -350,6 +353,7 @@ function MonitoreoPanel() {
 							<FiscalComprobantePanel
 								key={`${cacheScope}:${detail.comprobanteId}`}
 								comprobanteId={detail.comprobanteId}
+								ocultarEnlaceMonitoreo
 								onUpdated={refresh}
 							/>
 							<Button component={Link} to={`/pagos?pagoId=${detail.pagoId}`}>

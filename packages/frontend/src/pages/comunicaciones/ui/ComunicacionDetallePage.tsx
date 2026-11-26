@@ -18,7 +18,7 @@ import {
 	Typography,
 } from '@mui/material';
 import { useQuery } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { type DestinatarioCorreo, getDetalleCorreo } from '#entities/comunicacion';
 import { useAuth } from '#entities/session';
@@ -46,6 +46,14 @@ function Detalle({ id }: { id: string }) {
 				: false,
 		refetchIntervalInBackground: false,
 	});
+	useEffect(() => {
+		if (q.data) {
+			const ultima = Math.max(1, Math.ceil(q.data.total / size));
+			if (page > ultima) {
+				setPage(ultima);
+			}
+		}
+	}, [q.data, page, size]);
 	return (
 		<>
 			<Button component={Link} to="/comunicaciones" sx={{ mb: 2 }}>
@@ -168,7 +176,7 @@ function Detalle({ id }: { id: string }) {
 						<TablePagination
 							component="div"
 							count={q.data.total}
-							page={page - 1}
+							page={Math.min(page - 1, Math.max(0, Math.ceil(q.data.total / size) - 1))}
 							rowsPerPage={size}
 							rowsPerPageOptions={[20, 50, 100]}
 							labelRowsPerPage="Destinatarios por página"

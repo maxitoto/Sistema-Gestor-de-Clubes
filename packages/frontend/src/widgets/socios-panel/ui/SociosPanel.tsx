@@ -281,6 +281,11 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 					onChange={(e) => cambiarFiltro('deporte_id', e.target.value)}
 				>
 					<MenuItem value="">Todos</MenuItem>
+					{filtros.deporte_id && !sports.data?.some((d) => d.id === filtros.deporte_id) && (
+						<MenuItem value={filtros.deporte_id}>
+							{sports.isPending ? 'Cargando…' : 'Deporte seleccionado'}
+						</MenuItem>
+					)}
 					{sports.data?.map((d) => (
 						<MenuItem key={d.id} value={d.id}>
 							{d.nombre}
@@ -297,6 +302,11 @@ function SociosList({ cacheScope, enabled, actions, renderSelectedSocio }: Socio
 					onChange={(e) => cambiarFiltro('categoria_id', e.target.value)}
 				>
 					<MenuItem value="">Todas</MenuItem>
+					{filtros.categoria_id && !categories.data?.some((c) => c.id === filtros.categoria_id) && (
+						<MenuItem value={filtros.categoria_id}>
+							{categories.isPending ? 'Cargando…' : 'Categoría seleccionada'}
+						</MenuItem>
+					)}
 					{categories.data?.map((c) => (
 						<MenuItem key={c.id} value={c.id}>
 							{c.nombre}

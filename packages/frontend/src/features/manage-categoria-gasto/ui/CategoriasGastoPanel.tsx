@@ -31,10 +31,10 @@ function Panel() {
 	const [edit, setEdit] = useState<{ categoria: CategoriaGasto | null } | null>(null);
 	const [baja, setBaja] = useState<CategoriaGasto | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
-	const saved = () => {
+	const saved = (message = 'Categoría guardada.') => {
 		setEdit(null);
 		setBaja(null);
-		setNotice('Categoría guardada.');
+		setNotice(message);
 		void query.refetch();
 	};
 	if (!enabled) {
@@ -140,14 +140,14 @@ function Panel() {
 					<CategoriaGastoDialog
 						categoria={edit.categoria}
 						onClose={() => setEdit(null)}
-						onSaved={saved}
+						onSaved={() => saved('Categoría guardada.')}
 					/>
-				)}{' '}
+				)}
 				{baja && (
 					<BajaCategoriaGastoDialog
 						categoria={baja}
 						onClose={() => setBaja(null)}
-						onSaved={saved}
+						onSaved={() => saved('Categoría dada de baja.')}
 					/>
 				)}
 			</Stack>

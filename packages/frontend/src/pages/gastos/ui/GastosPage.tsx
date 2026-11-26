@@ -19,6 +19,7 @@ function GastosContent() {
 	const setTab = (value: string) => {
 		const next = new URLSearchParams(params);
 		next.set('vista', value);
+		next.delete('tab');
 		next.delete('gastoId');
 		setParams(next);
 	};

@@ -238,7 +238,7 @@ export function GastoEvidencia({
 				)}
 				{(editable || path || file) && (
 					<>
-						<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
+						<Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
 							<Button
 								component="label"
 								variant="outlined"

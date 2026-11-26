@@ -208,7 +208,7 @@ function CajaContent({
 							slotProps={{ htmlInput: { maxLength: 255 } }}
 						/>
 					</Stack>
-					<Stack direction="row" spacing={2} sx={{ flexWrap: 'wrap', rowGap: 2 }}>
+					<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: 'wrap' }}>
 						<TextField
 							size="small"
 							select
@@ -410,7 +410,10 @@ function CajaContent({
 							<TablePagination
 								component="div"
 								count={query.data?.total ?? 0}
-								page={criteria.pagina}
+								page={Math.min(
+									criteria.pagina,
+									Math.max(0, Math.ceil((query.data?.total ?? 0) / criteria.limite) - 1),
+								)}
 								rowsPerPage={criteria.limite}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, pagina) => setCriteria((old) => ({ ...old, pagina }))}

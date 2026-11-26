@@ -59,14 +59,14 @@ function Catalogo() {
 	const [bajaTarget, setBajaTarget] = useState<CatalogoBajaTarget | null>(null);
 	const deportes = useDeportes({ cacheScope, enabled });
 	const selected =
-		enabled && !deportes.isFetching && !deportes.isError
+		enabled && !deportes.isError
 			? deportes.data?.find((deporte) => deporte.id === selectedId)
 			: undefined;
 	const categorias = useCategorias(selected?.id ?? null, {
 		cacheScope,
 		enabled: enabled && Boolean(selected),
 	});
-	const loading = !enabled || deportes.isPending || deportes.isFetching;
+	const loading = !enabled || deportes.isPending;
 	const reloadCatalogo = () => {
 		void deportes.refetch();
 		if (selected) {
@@ -261,12 +261,12 @@ function Catalogo() {
 									Este deporte está inactivo y no ofrece opciones de inscripción.
 								</Alert>
 							)}
-							{(categorias.isPending || categorias.isFetching) && (
+							{categorias.isPending && (
 								<Box role="status" sx={{ p: 3 }}>
 									<CircularProgress size={24} aria-label="Cargando categorías" />
 								</Box>
 							)}
-							{!categorias.isFetching && categorias.isError && (
+							{!categorias.isPending && categorias.isError && (
 								<Alert
 									severity="error"
 									sx={{ m: 2 }}
@@ -275,7 +275,7 @@ function Catalogo() {
 									No pudimos cargar las categorías.
 								</Alert>
 							)}
-							{!categorias.isFetching &&
+							{!categorias.isPending &&
 								!categorias.isError &&
 								categorias.data &&
 								(categorias.data.length === 0 ? (
@@ -432,7 +432,9 @@ function Catalogo() {
 					onClose={() => setBajaTarget(null)}
 					onChanged={() => {
 						setBajaTarget(null);
-						setSuccess(`${bajaTarget.registro.nombre} quedó inactivo. El historial se conserva.`);
+						setSuccess(
+							`${bajaTarget.registro.nombre} quedó ${bajaTarget.tipo === 'categoria' ? 'inactiva' : 'inactivo'}. El historial se conserva.`,
+						);
 						reloadCatalogo();
 					}}
 				/>

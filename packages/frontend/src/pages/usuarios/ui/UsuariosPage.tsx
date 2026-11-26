@@ -99,11 +99,18 @@ function UsuariosPanel({
 			</Box>
 			{result && (
 				<Alert
-					severity={result.resultado === 'completo' ? 'success' : 'warning'}
+					severity={
+						result.resultado === 'completo'
+							? 'success'
+							: result.resultado === 'rechazado'
+								? 'error'
+								: 'warning'
+					}
 					onClose={() => setResult(null)}
 				>
 					{result.mensaje}
 					{result.resultado !== 'completo' &&
+						result.resultado !== 'rechazado' &&
 						' Consultá la cuenta para completar la acción pendiente.'}
 				</Alert>
 			)}
@@ -220,7 +227,12 @@ function UsuariosPanel({
 																Mi cuenta · gestión protegida
 															</Typography>
 														) : (
-															<Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+															<Stack
+																direction="row"
+																spacing={0.5}
+																useFlexGap
+																sx={{ flexWrap: 'wrap' }}
+															>
 																<Button size="small" onClick={() => setStatusUser(u)}>
 																	Enlaces y estado
 																</Button>
@@ -259,7 +271,7 @@ function UsuariosPanel({
 							<TablePagination
 								component="div"
 								count={list.data?.total ?? 0}
-								page={page}
+								page={Math.min(page, Math.max(0, Math.ceil((list.data?.total ?? 0) / size) - 1))}
 								rowsPerPage={size}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, p) => setPage(p)}
@@ -286,7 +298,7 @@ function UsuariosPanel({
 			)}
 			{edit && (
 				<UsuarioDialog usuario={edit.usuario} onClose={() => setEdit(null)} onSaved={saved} />
-			)}{' '}
+			)}
 			{action && (
 				<UsuarioActionDialog
 					usuario={action.usuario}

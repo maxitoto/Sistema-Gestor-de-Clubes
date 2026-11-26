@@ -25,11 +25,13 @@ export function FiscalComprobantePanel({
 	autoEmitir = false,
 	onUpdated,
 	mostrarRelaciones = true,
+	ocultarEnlaceMonitoreo = false,
 }: {
 	comprobanteId: string;
 	autoEmitir?: boolean;
 	onUpdated: () => void;
 	mostrarRelaciones?: boolean;
+	ocultarEnlaceMonitoreo?: boolean;
 }) {
 	const { perfil, cacheScope, profileStatus, isSigningOut } = useAuth(),
 		actorId = perfil?.id ?? '';
@@ -156,8 +158,9 @@ export function FiscalComprobantePanel({
 							)}
 						{data.estadoFiscal === 'fallido' && (
 							<Alert severity="warning">
-								La documentación requiere regularización. Consultá la incidencia en Monitoreo
-								fiscal.
+								{ocultarEnlaceMonitoreo
+									? 'La documentación requiere regularización. Revisá las acciones disponibles en el listado.'
+									: 'La documentación requiere regularización. Consultá la incidencia en Monitoreo fiscal.'}
 							</Alert>
 						)}
 						{data.emisionDisponible && (
@@ -173,9 +176,11 @@ export function FiscalComprobantePanel({
 										: 'Solicitar autorización'}
 							</Button>
 						)}
-						<Button component={Link} to="/monitoreo-fiscal">
-							Monitoreo fiscal
-						</Button>
+						{!ocultarEnlaceMonitoreo && (
+							<Button component={Link} to="/monitoreo-fiscal">
+								Monitoreo fiscal
+							</Button>
+						)}
 						{mostrarRelaciones && data.notaCreditoId && (
 							<Button variant="outlined" onClick={() => setRelatedId(data.notaCreditoId ?? null)}>
 								Ver Nota de Crédito

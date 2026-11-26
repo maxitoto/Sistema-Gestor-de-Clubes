@@ -47,6 +47,11 @@ export function CategoriaGastoDialog({
 		create: (payload, signal) => crearCategoriaGasto(payload, perfil?.id ?? '', signal),
 		lookup: buscarCategoriaGasto,
 		onCreated: onSaved,
+		messages: {
+			duplicate: 'Ya existe una categoría de gasto con ese nombre, incluso si está inactiva.',
+			validation:
+				'El servidor rechazó los datos. Revisá el nombre y la descripción de la categoría.',
+		},
 	});
 	const edit = useVerifiedMutation<CategoriaGastoPayload, CategoriaGasto>({
 		cacheScope,
@@ -104,9 +109,7 @@ export function CategoriaGastoDialog({
 								)
 							: create.feedback && (
 									<Alert severity={requiresCheck ? 'warning' : 'error'}>
-										{create.feedback.kind === 'duplicate'
-											? 'Ya existe una categoría con ese nombre, incluso si está inactiva.'
-											: create.feedback.message}
+										{create.feedback.message}
 									</Alert>
 								)}
 						<TextField

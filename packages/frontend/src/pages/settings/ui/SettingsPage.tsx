@@ -50,7 +50,7 @@ export function SettingsPage() {
 					<SettingsForm key={`${cacheScope}:${query.data.id}`} initialData={query.data} />
 					<UpdateClubLogo clubId={query.data.id} onUpdated={() => void query.refetch()} />
 				</Stack>
-				<Stack spacing={3}>
+				<Stack spacing={3} sx={{ minWidth: 0 }}>
 					<UpdateFiscalCredentials />
 					<DiagnosticoFiscal key={`${cacheScope}|${query.data.cuit}|${query.data.punto_venta}`} />
 				</Stack>

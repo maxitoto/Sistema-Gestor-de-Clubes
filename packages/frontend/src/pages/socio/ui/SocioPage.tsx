@@ -167,9 +167,7 @@ function SocioView({ socioId }: { socioId: string }) {
 					gap: 3,
 				}}
 			>
-				<Paper variant="outlined" sx={{ p: 3 }}>
-					<UpdateSocioPhoto socioId={socio.id} onUpdated={refresh} />
-				</Paper>
+				<UpdateSocioPhoto socioId={socio.id} onUpdated={refresh} />
 				<Paper variant="outlined" sx={{ p: 3 }}>
 					<Typography component="h2" variant="h6" sx={{ mb: 2 }}>
 						Estado de cuotas

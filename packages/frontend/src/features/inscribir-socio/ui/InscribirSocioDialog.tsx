@@ -98,7 +98,12 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 		<Dialog open={open} fullWidth maxWidth="sm" aria-labelledby={titleId} onClose={close}>
 			<DialogTitle id={titleId} sx={{ px: { xs: 2, sm: 3 }, pt: 3, pb: 2 }}>
 				Inscribir a actividad
-				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+				<Typography
+					component="span"
+					variant="body2"
+					color="text.secondary"
+					sx={{ display: 'block', mt: 0.5 }}
+				>
 					Seleccioná un deporte y una categoría para el socio.
 				</Typography>
 			</DialogTitle>
@@ -206,8 +211,10 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						fullWidth
 					>
 						<MenuItem value="">Seleccioná un deporte</MenuItem>
-						{deporteId && !selectedDeporte && blocked && (
-							<MenuItem value={deporteId}>Deporte del intento pendiente</MenuItem>
+						{deporteId && !selectedDeporte && (
+							<MenuItem value={deporteId}>
+								{deportes.isPending ? 'Cargando deporte…' : 'Deporte seleccionado'}
+							</MenuItem>
 						)}
 						{(deportes.data ?? []).map((item) => (
 							<MenuItem key={item.id} value={item.id}>
@@ -227,8 +234,10 @@ function InscribirSocioContent({ open, onClose, socio }: InscribirSocioDialogPro
 						fullWidth
 					>
 						<MenuItem value="">Seleccioná una categoría</MenuItem>
-						{categoriaId && !selectedCategoria && blocked && (
-							<MenuItem value={categoriaId}>Categoría del intento pendiente</MenuItem>
+						{categoriaId && !selectedCategoria && (
+							<MenuItem value={categoriaId}>
+								{categorias.isPending ? 'Cargando categoría…' : 'Categoría seleccionada'}
+							</MenuItem>
 						)}
 						{(categorias.data ?? []).map((item) => (
 							<MenuItem key={item.id} value={item.id}>

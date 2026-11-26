@@ -89,7 +89,12 @@ export function SettingsForm({ initialData }: { initialData: ClubConfig }) {
 						required
 						disabled={disabled}
 					/>
-					<Stack direction="row" spacing={1} sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+					<Stack
+						direction="row"
+						spacing={1}
+						useFlexGap
+						sx={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}
+					>
 						{mutation.requiresCheck && (
 							<Button onClick={() => void mutation.reconcile()} disabled={mutation.isPending}>
 								Verificar resultado

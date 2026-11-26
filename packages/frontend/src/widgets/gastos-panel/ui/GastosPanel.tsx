@@ -412,7 +412,12 @@ function Panel() {
 														/>
 													</TableCell>
 													<TableCell>
-														<Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap' }}>
+														<Stack
+															direction="row"
+															spacing={0.5}
+															useFlexGap
+															sx={{ flexWrap: 'wrap' }}
+														>
 															<Button size="small" onClick={() => open(g.id)}>
 																Ver detalle
 															</Button>
@@ -437,7 +442,10 @@ function Panel() {
 							<TablePagination
 								component="div"
 								count={list.data?.total ?? 0}
-								page={filters.pagina}
+								page={Math.min(
+									filters.pagina,
+									Math.max(0, Math.ceil((list.data?.total ?? 0) / filters.limite) - 1),
+								)}
 								rowsPerPage={filters.limite}
 								rowsPerPageOptions={[20, 50, 100]}
 								onPageChange={(_, pagina) => setFilters((f) => ({ ...f, pagina }))}

@@ -89,7 +89,8 @@ export function FinancialDashboard({
 				<Stack
 					direction="row"
 					spacing={1}
-					sx={{ alignItems: 'flex-start', flexWrap: 'wrap', rowGap: 1 }}
+					useFlexGap
+					sx={{ alignItems: 'flex-start', flexWrap: 'wrap' }}
 				>
 					<TextField
 						size="small"

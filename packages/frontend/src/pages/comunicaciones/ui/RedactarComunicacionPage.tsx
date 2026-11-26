@@ -84,6 +84,14 @@ function Redactar() {
 		retry: 1,
 		refetchOnWindowFocus: false,
 	});
+	useEffect(() => {
+		if (q.data) {
+			const ultima = Math.max(1, Math.ceil(q.data.total / c.pageSize));
+			if (c.page > ultima) {
+				setC((x) => ({ ...x, page: ultima }));
+			}
+		}
+	}, [q.data, c.page, c.pageSize]);
 	const deportes = useDeportes({ cacheScope, enabled, soloActivos: false }),
 		categorias = useCategorias(c.deporteId || null, { cacheScope, enabled, soloActivas: false });
 	const pending = busy || allBusy || q.isFetching || search !== c.busqueda;
@@ -393,7 +401,7 @@ function Redactar() {
 								<TablePagination
 									component="div"
 									count={q.data.total}
-									page={c.page - 1}
+									page={Math.min(c.page - 1, Math.max(0, Math.ceil(q.data.total / c.pageSize) - 1))}
 									rowsPerPage={c.pageSize}
 									rowsPerPageOptions={[20, 50, 100]}
 									labelRowsPerPage="Candidatos por página"
