@@ -2,6 +2,7 @@ import {
 	Alert,
 	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -66,6 +67,7 @@ export function EditDeporteDialog({
 		setErrors({});
 		void mutation.run(result.payload);
 	};
+
 	return (
 		<Dialog
 			open
@@ -80,8 +82,8 @@ export function EditDeporteDialog({
 		>
 			<Box component="form" noValidate onSubmit={submit}>
 				<DialogTitle id={titleId}>Editar deporte</DialogTitle>
-				<DialogContent>
-					<Stack spacing={2.5} sx={{ pt: 1 }}>
+				<DialogContent dividers>
+					<Stack spacing={2.25}>
 						<Typography variant="body2" color="text.secondary">
 							Actualizá el nombre y la descripción del deporte. Sus categorías e historial se
 							conservan.
@@ -92,7 +94,13 @@ export function EditDeporteDialog({
 							</Alert>
 						)}
 						{mutation.requiresCheck && (
-							<Button disabled={mutation.isPending} onClick={() => void mutation.reconcile()}>
+							<Button
+								variant="outlined"
+								size="small"
+								disabled={mutation.isPending}
+								onClick={() => void mutation.reconcile()}
+								sx={{ alignSelf: 'flex-start' }}
+							>
 								Consultar resultado guardado
 							</Button>
 						)}
@@ -123,7 +131,7 @@ export function EditDeporteDialog({
 						/>
 					</Stack>
 				</DialogContent>
-				<DialogActions sx={{ borderTop: 1, borderColor: 'divider' }}>
+				<DialogActions>
 					<Button
 						variant="outlined"
 						color="inherit"
@@ -132,8 +140,15 @@ export function EditDeporteDialog({
 					>
 						Cancelar
 					</Button>
-					<Button type="submit" variant="contained" disabled={disabled || !mutation.enabled}>
-						{mutation.isPending ? 'Verificando…' : 'Guardar cambios'}
+					<Button
+						type="submit"
+						variant="contained"
+						startIcon={
+							mutation.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
+						}
+						disabled={disabled || !mutation.enabled}
+					>
+						{mutation.isPending ? 'Guardando…' : 'Guardar cambios'}
 					</Button>
 				</DialogActions>
 			</Box>

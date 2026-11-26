@@ -5,6 +5,7 @@ import { DiagnosticoFiscal } from '#features/comprobante-fiscal';
 import { UpdateClubLogo } from '#features/update-club-logo';
 import { SettingsForm } from '#features/update-config';
 import { UpdateFiscalCredentials } from '#features/update-fiscal-credentials';
+import { PageHeader } from '#shared/ui';
 
 export function SettingsPage() {
 	const { cacheScope, profileStatus, perfil, isSigningOut } = useAuth();
@@ -14,30 +15,39 @@ export function SettingsPage() {
 	});
 	if (query.isPending) {
 		return (
-			<CircularProgress
-				aria-label="Cargando configuración"
-				sx={{ display: 'block', mx: 'auto', mt: 4 }}
-			/>
+			<Stack
+				direction="row"
+				spacing={1.5}
+				role="status"
+				sx={{ py: 6, justifyContent: 'center', alignItems: 'center' }}
+			>
+				<CircularProgress size={22} aria-label="Cargando configuración" />
+				<Typography variant="body2" color="text.secondary">
+					Cargando configuración del club…
+				</Typography>
+			</Stack>
 		);
 	}
 	if (query.isError || !query.data) {
 		return (
-			<Stack spacing={2}>
-				<Alert severity="error">No pudimos cargar la configuración institucional.</Alert>
-				<Button onClick={() => void query.refetch()}>Volver a intentar</Button>
-			</Stack>
+			<Alert
+				severity="error"
+				action={
+					<Button size="small" color="inherit" onClick={() => void query.refetch()}>
+						Reintentar
+					</Button>
+				}
+			>
+				No pudimos cargar la configuración institucional.
+			</Alert>
 		);
 	}
 	return (
 		<Stack spacing={3} sx={{ maxWidth: 1200, mx: 'auto' }}>
-			<div>
-				<Typography variant="h4" component="h1">
-					Configuración del club
-				</Typography>
-				<Typography color="text.secondary" sx={{ mt: 1 }}>
-					Datos institucionales, identidad visual y credenciales fiscales.
-				</Typography>
-			</div>
+			<PageHeader
+				title="Configuración del club"
+				subtitle="Administrá los datos institucionales, el logo y la configuración de facturación electrónica ARCA."
+			/>
 			<Box
 				sx={{
 					display: 'grid',

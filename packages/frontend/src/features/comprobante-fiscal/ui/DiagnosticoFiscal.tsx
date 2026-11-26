@@ -2,6 +2,7 @@ import {
 	Alert,
 	Button,
 	Chip,
+	CircularProgress,
 	Paper,
 	Stack,
 	Table,
@@ -15,6 +16,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { diagnosticarFiscal, type ResultadoDiagnosticoFiscal } from '#entities/comprobante';
 import { useAuth } from '#entities/session';
+import { formatIsoDateArg } from '#shared/lib/datePresets';
 import { ConsultarSerieFiscal } from './ConsultarSerieFiscal';
 
 export function DiagnosticoFiscal() {
@@ -28,6 +30,7 @@ export function DiagnosticoFiscal() {
 		lockRef = useRef(false),
 		abortRef = useRef<AbortController | null>(null);
 	accessRef.current = enabled;
+
 	useEffect(() => {
 		activeRef.current = true;
 		return () => {
@@ -35,10 +38,13 @@ export function DiagnosticoFiscal() {
 			abortRef.current?.abort();
 		};
 	}, []);
+
 	if (!enabled) {
 		return null;
 	}
+
 	const current = () => activeRef.current && accessRef.current;
+
 	const run = async () => {
 		if (!enabled || lockRef.current) {
 			return;
@@ -56,7 +62,7 @@ export function DiagnosticoFiscal() {
 			}
 		} catch (error) {
 			if (current()) {
-				setError(error instanceof Error ? error.message : 'No se pudo comprobar el acceso.');
+				setError(error instanceof Error ? error.message : 'No se pudo comprobar la conexión.');
 			}
 		} finally {
 			if (current()) {
@@ -65,82 +71,103 @@ export function DiagnosticoFiscal() {
 			}
 		}
 	};
+
 	return (
-		<Stack spacing={1.5}>
-			<Typography component="h3" variant="h6">
-				Listado de puntos de venta de homologación
-			</Typography>
-			<Typography variant="body2">
-				Esta consulta auxiliar muestra los puntos de venta informados por ARCA. Si el listado no
-				devuelve datos en homologación, podés consultar la serie por separado debajo. Ninguna de
-				estas comprobaciones emite comprobantes ni modifica la configuración.
-			</Typography>
-			<Button variant="outlined" disabled={busy} onClick={() => void run()}>
-				{busy ? 'Comprobando…' : 'Consultar listado de puntos de venta'}
-			</Button>
-			{error && <Alert severity="error">{error}</Alert>}
-			{result && (
-				<Stack spacing={1.5}>
-					{result.ausenciaDatos === '602' ? (
-						<Alert severity="info">
-							ARCA respondió al listado con el código 602: no hay puntos de venta para mostrar.
-							Podés consultar la serie debajo para comprobar el punto y tipo elegidos. Este aviso no
-							es un rechazo de factura; esta consulta no solicitó CAE.
-						</Alert>
-					) : (
-						<Alert severity={result.puntoVentaDisponible ? 'success' : 'warning'}>
-							{result.puntoVentaDisponible
-								? `El listado informa que el punto de venta ${String(result.puntoVentaConfigurado).padStart(5, '0')} es de tipo CAE y no tiene bloqueo ni baja.`
-								: `El listado no confirma disponibilidad del punto de venta configurado ${String(result.puntoVentaConfigurado).padStart(5, '0')}; consultá la serie por separado para comprobar esa consulta.`}
-						</Alert>
-					)}
-					{result.puntosVenta.length === 0 ? (
-						!result.ausenciaDatos && (
-							<Alert severity="info">
-								ARCA no informó puntos de venta para la CUIT consultada en homologación.
-							</Alert>
-						)
-					) : (
-						<TableContainer component={Paper} variant="outlined" sx={{ overflowX: 'auto' }}>
-							<Table size="small" aria-label="Puntos de venta de homologación">
-								<TableHead>
-									<TableRow>
-										<TableCell>Punto de venta</TableCell>
-										<TableCell>Emisión</TableCell>
-										<TableCell>Bloqueado</TableCell>
-										<TableCell>Fecha de baja</TableCell>
-										<TableCell>En esta aplicación</TableCell>
-									</TableRow>
-								</TableHead>
-								<TableBody>
-									{result.puntosVenta.map((punto) => (
-										<TableRow key={punto.numero}>
-											<TableCell>{String(punto.numero).padStart(5, '0')}</TableCell>
-											<TableCell>{punto.emisionTipo}</TableCell>
-											<TableCell>{punto.bloqueado ? 'Sí' : 'No'}</TableCell>
-											<TableCell>
-												{punto.bajaFecha ? punto.bajaFecha.split('-').reverse().join('/') : '—'}
-											</TableCell>
-											<TableCell>
-												{punto.numero === result.puntoVentaConfigurado ? (
-													<Chip size="small" label="Configurado" />
-												) : (
-													'—'
-												)}
-											</TableCell>
-										</TableRow>
-									))}
-								</TableBody>
-							</Table>
-						</TableContainer>
-					)}
-					<Typography variant="body2" color="text.secondary">
-						Para cambiar el punto configurado, completá Punto de venta en Datos institucionales y
-						guardá los datos. Esta consulta no selecciona uno automáticamente.
+		<Paper variant="outlined" sx={{ p: { xs: 2, sm: 3 } }}>
+			<Stack spacing={2}>
+				<Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+					<Chip size="small" color="primary" label="Paso 2" />
+					<Typography component="h2" variant="h6">
+						Puntos de venta habilitados
 					</Typography>
 				</Stack>
-			)}
-			<ConsultarSerieFiscal />
-		</Stack>
+
+				<Typography variant="body2" color="text.secondary">
+					Comprobá qué puntos de venta informa ARCA para tu CUIT en homologación. Estas pruebas no
+					emiten facturas ni modifican la configuración del club.
+				</Typography>
+
+				<Button
+					variant="outlined"
+					size="small"
+					startIcon={busy ? <CircularProgress size={14} color="inherit" /> : undefined}
+					disabled={busy}
+					onClick={() => void run()}
+					sx={{ alignSelf: 'flex-start' }}
+				>
+					{busy ? 'Consultando ARCA…' : 'Consultar puntos de venta'}
+				</Button>
+
+				{error && <Alert severity="error">{error}</Alert>}
+
+				{result && (
+					<Stack spacing={1.5}>
+						{result.ausenciaDatos === '602' ? (
+							<Alert severity="info">
+								ARCA no devolvió puntos de venta en este listado (código 602), algo habitual en el
+								ambiente de pruebas. Usá el <strong>Paso 3</strong> debajo para comprobar tu punto
+								de venta configurado.
+							</Alert>
+						) : (
+							<Alert severity={result.puntoVentaDisponible ? 'success' : 'warning'}>
+								{result.puntoVentaDisponible
+									? `El punto de venta ${String(result.puntoVentaConfigurado).padStart(5, '0')} figura habilitado para CAE, sin bloqueos ni baja.`
+									: `El listado no confirma el punto de venta configurado (${String(result.puntoVentaConfigurado).padStart(5, '0')}). Comprobalo en el Paso 3 debajo.`}
+							</Alert>
+						)}
+
+						{result.puntosVenta.length === 0 ? (
+							!result.ausenciaDatos && (
+								<Alert severity="info">
+									ARCA no informó puntos de venta para la CUIT consultada en homologación.
+								</Alert>
+							)
+						) : (
+							<TableContainer sx={{ border: 1, borderColor: 'divider', borderRadius: 1.5 }}>
+								<Table size="small" aria-label="Puntos de venta de homologación">
+									<TableHead>
+										<TableRow>
+											<TableCell>Punto de venta</TableCell>
+											<TableCell>Emisión</TableCell>
+											<TableCell>Bloqueado</TableCell>
+											<TableCell>Fecha de baja</TableCell>
+											<TableCell>Estado local</TableCell>
+										</TableRow>
+									</TableHead>
+									<TableBody>
+										{result.puntosVenta.map((punto) => (
+											<TableRow key={punto.numero}>
+												<TableCell sx={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
+													{String(punto.numero).padStart(5, '0')}
+												</TableCell>
+												<TableCell>{punto.emisionTipo}</TableCell>
+												<TableCell>{punto.bloqueado ? 'Sí' : 'No'}</TableCell>
+												<TableCell sx={{ fontVariantNumeric: 'tabular-nums' }}>
+													{formatIsoDateArg(punto.bajaFecha)}
+												</TableCell>
+												<TableCell>
+													{punto.numero === result.puntoVentaConfigurado ? (
+														<Chip size="small" color="info" label="Configurado" />
+													) : (
+														'—'
+													)}
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							</TableContainer>
+						)}
+
+						<Typography variant="caption" color="text.secondary">
+							Para cambiar el punto de venta usado por el club, modificalo en «Datos
+							institucionales» y guardá los cambios.
+						</Typography>
+					</Stack>
+				)}
+
+				<ConsultarSerieFiscal />
+			</Stack>
+		</Paper>
 	);
 }

@@ -29,8 +29,9 @@ export function validarCategoriaForm(
 	const bothEmpty = min === '' && max === '';
 	const integer = (value: string) => /^\d+$/.test(value) && Number(value) <= 2147483647;
 	if (!bothEmpty && (!integer(min) || !integer(max) || Number(min) > Number(max))) {
-		errors.edad_min = 'Dejá ambas edades vacías o usá enteros: 0 ≤ mínima ≤ máxima.';
-		errors.edad_max = errors.edad_min;
+		errors.edad_min =
+			'Dejá ambas edades vacías o ingresá edades enteras válidas (la mínima no puede superar a la máxima).';
+		errors.edad_max = 'Verificá que la edad máxima sea mayor o igual a la mínima.';
 	}
 	if (Object.keys(errors).length) {
 		return { valid: false, errors };

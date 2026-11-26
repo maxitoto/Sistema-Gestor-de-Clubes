@@ -2,10 +2,12 @@ import {
 	Alert,
 	Box,
 	Button,
+	CircularProgress,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogTitle,
+	InputAdornment,
 	Stack,
 	TextField,
 	Typography,
@@ -24,6 +26,7 @@ import {
 	validarCategoriaForm,
 } from '../model/categoriaForm';
 import { useCreateCategoria } from '../model/useCreateCategoria';
+
 export function CreateCategoriaDialog({
 	deporteId,
 	deporteNombre,
@@ -68,6 +71,7 @@ export function CreateCategoriaDialog({
 		onCreated(created);
 		onClose();
 	});
+
 	useEffect(() => {
 		const scope = cacheScope;
 		return () => {
@@ -78,6 +82,7 @@ export function CreateCategoriaDialog({
 			}
 		};
 	}, [cacheScope]);
+
 	const change = (name: keyof CategoriaForm, value: string) => {
 		versionRef.current++;
 		requestRef.current?.abort();
@@ -88,6 +93,7 @@ export function CreateCategoriaDialog({
 		setOverlap(null);
 		setCheckError(null);
 	};
+
 	const submit = async (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		if (checkingRef.current || mutation.isPending || !accessRef.current || mutation.requiresCheck) {
@@ -130,6 +136,7 @@ export function CreateCategoriaDialog({
 			}
 		}
 	};
+
 	const busy = mutation.isPending || checking;
 	const field = (
 		name: Exclude<keyof CategoriaForm, 'deporte_id'>,
@@ -150,9 +157,17 @@ export function CreateCategoriaDialog({
 					name === 'nombre'
 						? { maxLength: 100 }
 						: { inputMode: name === 'arancel_mensual' ? 'decimal' : 'numeric' },
+				...(name === 'arancel_mensual'
+					? {
+							input: {
+								startAdornment: <InputAdornment position="start">$</InputAdornment>,
+							},
+						}
+					: {}),
 			}}
 		/>
 	);
+
 	return (
 		<Dialog
 			open={open}
@@ -166,11 +181,9 @@ export function CreateCategoriaDialog({
 			}}
 		>
 			<Box component="form" noValidate onSubmit={(event) => void submit(event)}>
-				<DialogTitle id={titleId} sx={{ px: 3, pt: 3, pb: 2 }}>
-					Nueva categoría
-				</DialogTitle>
-				<DialogContent sx={{ px: 3 }}>
-					<Stack spacing={2.5} sx={{ pt: 1 }}>
+				<DialogTitle id={titleId}>Nueva categoría</DialogTitle>
+				<DialogContent dividers>
+					<Stack spacing={2.25}>
 						<Typography variant="body2" color="text.secondary">
 							Definí una categoría para{' '}
 							<Box component="span" sx={{ fontWeight: 700, color: 'text.primary' }}>
@@ -178,7 +191,11 @@ export function CreateCategoriaDialog({
 							</Box>
 							.
 						</Typography>
-						{mutation.feedback && <Alert severity="warning">{mutation.feedback.message}</Alert>}
+						{mutation.feedback && (
+							<Alert severity={mutation.requiresCheck ? 'warning' : 'error'}>
+								{mutation.feedback.message}
+							</Alert>
+						)}
 						{mutation.feedback?.existing && (
 							<Alert severity="info">
 								Ya existe la categoría {mutation.feedback.existing.nombre}. Revisá el registro antes
@@ -186,16 +203,22 @@ export function CreateCategoriaDialog({
 							</Alert>
 						)}
 						{mutation.requiresCheck && (
-							<Button disabled={busy} onClick={() => void mutation.checkExisting()}>
+							<Button
+								variant="outlined"
+								size="small"
+								disabled={busy}
+								onClick={() => void mutation.checkExisting()}
+								sx={{ alignSelf: 'flex-start' }}
+							>
 								Consultar resultado del alta
 							</Button>
 						)}
 						{checkError && <Alert severity="error">{checkError}</Alert>}
 						{field('nombre', 'Nombre de la categoría', true)}
-						{field('arancel_mensual', 'Arancel mensual ($)', true)}
+						{field('arancel_mensual', 'Arancel mensual', true)}
 						<Typography variant="caption" color="text.secondary">
-							Ingresá un importe mayor a cero, con punto decimal. Dejá ambas edades vacías si no hay
-							límite de edad.
+							Ingresá un importe mayor a cero usando punto decimal (ej. 18500.00). Dejá ambas edades
+							vacías si no hay límite de edad.
 						</Typography>
 						<Box
 							sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}
@@ -206,12 +229,13 @@ export function CreateCategoriaDialog({
 						{overlap && (
 							<Alert severity="warning">
 								El rango se superpone con: {overlap.rows.map((row) => row.nombre).join(', ')}. Es
-								una advertencia; podés confirmar el alta si corresponde.
-								<Box sx={{ mt: 1.5, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-									<Button disabled={busy} onClick={() => setOverlap(null)}>
+								una advertencia orientativa; podés confirmar el alta si corresponde.
+								<Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, flexWrap: 'wrap' }}>
+									<Button size="small" disabled={busy} onClick={() => setOverlap(null)}>
 										Revisar rango
 									</Button>
 									<Button
+										size="small"
 										variant="contained"
 										color="warning"
 										disabled={busy || !mutation.enabled || mutation.requiresCheck}
@@ -223,14 +247,12 @@ export function CreateCategoriaDialog({
 									>
 										Confirmar y crear categoría
 									</Button>
-								</Box>
+								</Stack>
 							</Alert>
 						)}
 					</Stack>
 				</DialogContent>
-				<DialogActions
-					sx={{ px: 3, py: 2.5, borderTop: 1, borderColor: 'divider', gap: 1, flexWrap: 'wrap' }}
-				>
+				<DialogActions sx={{ flexWrap: 'wrap' }}>
 					{mutation.feedback?.existing && (
 						<Button
 							disabled={busy}
@@ -256,9 +278,10 @@ export function CreateCategoriaDialog({
 					<Button
 						type="submit"
 						variant="contained"
+						startIcon={busy ? <CircularProgress size={16} color="inherit" /> : undefined}
 						disabled={busy || !mutation.enabled || mutation.requiresCheck || Boolean(overlap)}
 					>
-						{busy ? 'Procesando…' : 'Guardar categoría'}
+						{busy ? 'Guardando…' : 'Guardar categoría'}
 					</Button>
 				</DialogActions>
 			</Box>
